@@ -46,7 +46,7 @@ def _merge(base, over, where=''):
     out = copy.deepcopy(base)
     for k, v in over.items():
         if k not in base:
-            raise ConfigError(f'{CONFIG_NAME}: unknown key {where}{k!r}')
+            raise ConfigError(f"{CONFIG_NAME}: unknown key '{where}{k}'")
         if isinstance(base[k], dict) and base[k] and not isinstance(v, dict):
             raise ConfigError(f'{CONFIG_NAME}: {where}{k} must be a table')
         if isinstance(base[k], dict) and base[k]:

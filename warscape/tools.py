@@ -85,7 +85,10 @@ def add_paths(ctx, reg, paths, rid=None, status=None):
     """Create or refresh rows from headers; returns messages. Raises ValueError on a missing or incomplete header."""
     msgs = []
     for p in paths:
-        full = Path(p.replace('\\', '/')).resolve()
+        cand = Path(p.replace('\\', '/'))
+        if not cand.is_absolute():   # relative to the shell's folder when it exists there, else to the repo root
+            cand = Path.cwd() / cand if (Path.cwd() / cand).exists() else ctx.root / cand
+        full = cand.resolve()
         try:
             p = full.relative_to(ctx.root).as_posix()
         except ValueError:
