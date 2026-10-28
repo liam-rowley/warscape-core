@@ -90,6 +90,15 @@ class Coverage(unittest.TestCase):
         self.assertEqual(errs, [])
         self.assertIn('retire', warns[0])
 
+    def test_a_moved_tool_keeps_its_id(self):
+        self.repo.wsc('reg', 'add', 'tools', '--missing')
+        (self.repo.root / 'adapter/sync.py').rename(self.repo.root / 'adapter/pc_sync.py')
+        rc, out = self.repo.wsc('reg', 'add', 'tools', str(self.repo.root / 'adapter/pc_sync.py'), '--id', 'adapter.sync')
+        self.assertEqual(rc, 0, out)
+        ctx = Ctx.load(self.repo.root)
+        self.assertEqual([(r['id'], r['path']) for r in load_all(ctx)['tools'].rows], [('adapter.sync', 'adapter/pc_sync.py')])
+        self.assertEqual(self.check(), ([], []))
+
     def test_library_and_exempt_globs(self):
         self.repo.write('wsc.toml', self.repo.read('wsc.toml') + '\n[tools]\nlibrary = ["lib/**"]\nexempt = ["runs/**"]\n')
         self.repo.write('lib/deep/helper.py', 'x = 1\n')
