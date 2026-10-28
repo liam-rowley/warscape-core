@@ -86,6 +86,8 @@ class Coverage(unittest.TestCase):
         errs, _ = self.check()
         self.assertTrue(any("superseded by 'nothing'" in e for e in errs), errs)
         self.repo.wsc('reg', 'set', 'tools', 'adapter.sync2', 'status=live', 'last_used=2020-01-01')
+        self.assertEqual(self.check(), ([], []))            # retirement warnings are off by default
+        self.repo.write('wsc.toml', self.repo.read('wsc.toml') + '\n[tools]\nretire_after_days = 90\n')
         errs, warns = self.check()
         self.assertEqual(errs, [])
         self.assertIn('retire', warns[0])

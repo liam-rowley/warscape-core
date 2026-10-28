@@ -23,7 +23,8 @@ DEFAULTS = {
         'include': [],                     # extra globs for extensionless tools (git hooks, launchers)
         'library': [],                     # importable library code: no header or row needed
         'exempt': [],                      # history, generated files, tests
-        'retire_after_days': 90,           # warn for live tools whose last_used is older; 0 disables
+        'retire_after_days': 0,            # warn for live tools whose last_used is older; 0 (default) disables. Off until
+                                           # something stamps last_used automatically (the job queue), or every tool warns at once
     },
     'docs': {
         'max_kb': 30,                      # living-doc size cap in KiB (1024 bytes)

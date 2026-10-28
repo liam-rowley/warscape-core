@@ -19,7 +19,7 @@ engine_facts = "core:engine_facts"
 include = [".githooks/*"]                                   # extensionless git hooks are tools too
 library = ["warscape/*.py", "warscape/verbs/__init__.py"]   # importable library modules: docstrings, no registry row
 exempt = ["tests/**"]                                       # host tests run through the `tests` gate
-retire_after_days = 90
+retire_after_days = 0     # off until the job queue stamps last_used (C9)
 
 [docs]
 max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the file name, or under records/ reports/ runs/) are exempt

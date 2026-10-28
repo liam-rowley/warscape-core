@@ -114,6 +114,18 @@ class Rules(RegistryCase):
         keys.save(); keys.write_view()
         self.assertEqual(self.errors('engine_sites'), [])
 
+    def test_ref_to_an_undeclared_registry_fails_only_when_used(self):
+        self.repo.write('wsc.toml', 'registries_dir = "registries"\n[registries]\ntools = "core:tools"\nassets = "core:assets"\n[tests]\ndirs = []\n')
+        self.assertEqual(self.repo.wsc('reg', 'render')[0], 0)
+        assets = self.regs()['assets']
+        row = {'id': 'ui/a.dds', 'description': 'd', 'pack': 'data.pack', 'path': 'ui/a.dds', 'format': 'dds',
+               'hash': 'sha1:' + '0' * 40, 'role': 'icon'}
+        assets.add(dict(row)); assets.save(); assets.write_view()
+        self.assertEqual(self.errors('assets'), [])        # ui_elements undeclared, used_by unused: fine
+        assets = self.regs()['assets']
+        assets.add(dict(row, used_by=['hud.x']), replace=True); assets.save(); assets.write_view()
+        self.assertIn("points at registry 'ui_elements', which this repo does not declare", '\n'.join(self.errors('assets')))
+
     def test_engine_site_verified_needs_date_and_run(self):
         sites = self.regs()['engine_sites']
         base = {'id': 's', 'description': 'd', 'purpose': 'p', 'rva': '0x10', 'anchor_bytes': 'aa', 'stock_bytes': 'bb', 'kind': 'hook', 'hook': 'detour_x'}

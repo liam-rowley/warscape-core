@@ -186,13 +186,15 @@ class Registry:
             target = ps.get('x-ref') or (ps.get('items') or {}).get('x-ref') if isinstance(ps, dict) else None
             if not target:
                 continue
-            if target not in all_regs:
-                errs.append(f'{self.name}.{field}: x-ref names registry {target!r}, which this repo does not declare')
-                continue
-            ids = set(all_regs[target].by_id())
+            # An undeclared target only matters once a row fills the field: a game may use `assets` without `ui_elements`.
+            ids = set(all_regs[target].by_id()) if target in all_regs else None
             for r in self.rows:
                 v = r.get(field)
                 for x in (v if isinstance(v, list) else [v] if v is not None else []):
+                    if ids is None:
+                        errs.append(f'{self.rel_path}: {r.get("id")}: {field} {x!r} points at registry {target!r}, which this repo '
+                                    f'does not declare (declare it in wsc.toml, or leave the field empty)')
+                        break
                     if x not in ids:
                         errs.append(f'{self.rel_path}: {r.get("id")}: {field} {x!r} is not an id in {target}')
         return errs
