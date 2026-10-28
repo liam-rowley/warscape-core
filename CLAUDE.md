@@ -18,7 +18,8 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
 - **Every tool has a header and a row.** In its first 40 lines: `purpose:`, `usage:`, `when:`, and `verb: <name>` or
   `not-a-verb: <reason>` (comment lines, or a Python docstring; format in `warscape/tools.py`). Then `python3 wsc.py reg add tools <path>`
   and commit the file, `registries/tools.jsonl` and `registries/tools.md` together. Library modules (`warscape/*.py`) and host
-  tests are not tools (`wsc.toml` `[tools]`). Retire a tool with `wsc reg set tools <id> status=superseded:<new id>`.
+  tests are not tools (`wsc.toml` `[tools]`). Retire a tool with `wsc reg set tools <id> status=superseded:<new id>`; after a move,
+  `wsc reg add tools <new path> --id <its id>` keeps its id.
 - **Registries change through `wsc reg`** (or a JSONL edit followed by `wsc reg render`). Never edit a generated view.
 - **"Verified" carries a date and a run id** (e.g. "verified 2026-10-28, run 20261028_a"); in registries use the structured
   fields (`verified: {date, run}`, `state` + `date` + `evidence`). The `verified_dates` gate fails an undated claim in a living doc.
