@@ -43,7 +43,7 @@ A repo declares its registries in `wsc.toml`; the core ships these schemas (`sch
 | `scenarios` | the battle, siege, naval and campaign library with pinned sky and weather, camera poses by id, launch recipe, load time |
 | `assets` | pack, path, format, hash, role, used by, upscale state |
 | `ui_elements` | screen, vanilla source, data contract, interactions, pipeline status |
-| `engine_sites` | RVA, anchor and stock bytes, patch or hook, config key, verified (date, run) |
+| `engine_sites` | RVA, anchor and stock bytes, patch or hook, config key, `verified` (date, run) |
 | `config_keys` | default, release value, owner, what it does |
 | `hotkeys` | binding, action, context, source; clashes fail the gate |
 | `engine_facts` | claim, state (`verified`, `open`, `refuted`), evidence run, date |
