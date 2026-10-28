@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/config_keys.schema.json",
+  "title": "Config keys",
+  "description": "Every configuration key the mod reads: its default, its release value, who owns it and what it does (the description).",
+  "type": "object",
+  "required": [
+    "id",
+    "description",
+    "default",
+    "owner"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "description": {
+      "$ref": "#/$defs/text"
+    },
+    "default": {
+      "description": "any JSON value"
+    },
+    "release_value": {
+      "description": "any JSON value"
+    },
+    "owner": {
+      "$ref": "#/$defs/text"
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "default",
+      "release_value",
+      "owner",
+      "description"
+    ]
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

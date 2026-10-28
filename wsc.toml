@@ -1,0 +1,28 @@
+# wsc.toml: what this repo declares to the warscape-core CLI (`python3 wsc.py ...`). Any key not set here takes its default
+# from `warscape/repo.py` DEFAULTS. A game repo writes the same file at its own root (docs/CONSUMING.md).
+registries_dir = "registries"
+
+[registries]
+# name = "core:<schema>" (a schema the core ships in schemas/) or a repo-relative path to the repo's own schema.
+# The core's real registry is `tools`. The other seven are declared, and stay empty here, so CI exercises every shipped schema
+# end to end (load, check, render); each game repo fills its own.
+tools = "core:tools"
+scenarios = "core:scenarios"
+assets = "core:assets"
+ui_elements = "core:ui_elements"
+engine_sites = "core:engine_sites"
+config_keys = "core:config_keys"
+hotkeys = "core:hotkeys"
+engine_facts = "core:engine_facts"
+
+[tools]
+include = [".githooks/*"]                                   # extensionless git hooks are tools too
+library = ["warscape/*.py", "warscape/verbs/__init__.py"]   # importable library modules: docstrings, no registry row
+exempt = ["tests/**"]                                       # host tests run through the `tests` gate
+retire_after_days = 90
+
+[docs]
+max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the file name, or under records/ reports/ runs/) are exempt
+
+[tests]
+dirs = ["tests"]

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/tools.schema.json",
+  "title": "Tools",
+  "description": "Every tool in the repo: a `wsc` verb, or a standalone script whose header says why it is not one. Rows are copied from file headers by `wsc reg add tools <path>`; the check fails when a row and its header drift.",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "path",
+    "purpose",
+    "usage",
+    "when",
+    "status",
+    "last_used"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "kind": {
+      "enum": [
+        "verb",
+        "script"
+      ]
+    },
+    "path": {
+      "$ref": "#/$defs/text"
+    },
+    "purpose": {
+      "$ref": "#/$defs/text"
+    },
+    "usage": {
+      "$ref": "#/$defs/text"
+    },
+    "when": {
+      "$ref": "#/$defs/text"
+    },
+    "verb": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "not_a_verb": {
+      "$ref": "#/$defs/text"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^(live|superseded:[a-z0-9][a-z0-9_.:/#-]*)$",
+      "description": "live, or superseded:<id of the replacement>"
+    },
+    "last_used": {
+      "$ref": "#/$defs/date"
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "kind",
+      "purpose",
+      "when",
+      "usage",
+      "status",
+      "last_used"
+    ]
+  },
+  "x-source": "tool-headers",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "verb"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "verb"
+        ],
+        "not": {
+          "required": [
+            "not_a_verb"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "not_a_verb"
+        ],
+        "not": {
+          "required": [
+            "verb"
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    }
+  }
+}

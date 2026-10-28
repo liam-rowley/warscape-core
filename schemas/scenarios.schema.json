@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/scenarios.schema.json",
+  "title": "Scenarios",
+  "description": "The ready library of battles, sieges, naval battles and saves agents load quickly; camera poses are stored by id, never as key taps.",
+  "type": "object",
+  "required": [
+    "id",
+    "description",
+    "kind",
+    "map",
+    "launch"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "description": {
+      "$ref": "#/$defs/text"
+    },
+    "kind": {
+      "enum": [
+        "land",
+        "siege",
+        "naval",
+        "campaign",
+        "historical"
+      ]
+    },
+    "map": {
+      "$ref": "#/$defs/text"
+    },
+    "time_of_day": {
+      "$ref": "#/$defs/text"
+    },
+    "weather": {
+      "$ref": "#/$defs/text"
+    },
+    "armies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "side",
+          "faction"
+        ]
+      }
+    },
+    "save": {
+      "$ref": "#/$defs/text"
+    },
+    "camera_poses": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "x",
+          "y",
+          "z",
+          "yaw",
+          "pitch"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "z": {
+            "type": "number"
+          },
+          "yaw": {
+            "type": "number"
+          },
+          "pitch": {
+            "type": "number"
+          },
+          "fov": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "launch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "launch recipe: the generated launcher or the command"
+    },
+    "load_time_s": {
+      "type": "object",
+      "required": [
+        "seconds",
+        "date",
+        "run"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "date": {
+          "$ref": "#/$defs/date"
+        },
+        "run": {
+          "$ref": "#/$defs/run"
+        }
+      }
+    },
+    "good_for": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/text"
+      },
+      "uniqueItems": true
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "kind",
+      "map",
+      "description",
+      "good_for"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "campaign"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "save"
+        ]
+      },
+      "else": {
+        "required": [
+          "time_of_day",
+          "weather"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "run": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/#-]*$",
+      "description": "run or report id: the job id, a runs/ folder or a report path"
+    }
+  }
+}
