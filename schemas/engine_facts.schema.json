@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/engine_facts.schema.json",
+  "title": "Engine facts",
+  "description": "Claims about the engine with their evidence: replaces prose engine learnings and VERIFY lists. A verified or refuted fact carries a date and a run id.",
+  "type": "object",
+  "required": [
+    "id",
+    "claim",
+    "state"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "claim": {
+      "$ref": "#/$defs/text"
+    },
+    "state": {
+      "enum": [
+        "verified",
+        "open",
+        "refuted"
+      ]
+    },
+    "evidence": {
+      "$ref": "#/$defs/run"
+    },
+    "date": {
+      "$ref": "#/$defs/date"
+    },
+    "screens": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    },
+    "notes": {
+      "$ref": "#/$defs/text"
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "state",
+      "claim",
+      "date",
+      "evidence"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "verified",
+              "refuted"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "evidence",
+          "date"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "run": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/#-]*$",
+      "description": "run or report id: the job id, a runs/ folder or a report path"
+    }
+  }
+}

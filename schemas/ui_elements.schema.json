@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/ui_elements.schema.json",
+  "title": "UI elements",
+  "description": "Every UI element of every screen: vanilla source, data contract, interactions and pipeline status (napoleon-remastered docs/plans/UI_PIPELINE.md section 3).",
+  "type": "object",
+  "required": [
+    "id",
+    "description",
+    "screen",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "description": {
+      "$ref": "#/$defs/text"
+    },
+    "screen": {
+      "$ref": "#/$defs/id"
+    },
+    "vanilla_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "$ref": "#/$defs/text"
+        },
+        "script": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "data_fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "source"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/text"
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^(getter|db|loc):.+",
+            "description": "getter:<fn>, db:<table.field> or loc:<key>"
+          }
+        }
+      }
+    },
+    "interactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/text"
+          },
+          "decision": {
+            "enum": [
+              "kept",
+              "changed",
+              "dropped"
+            ]
+          },
+          "reason": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "atlas",
+        "contract",
+        "design",
+        "locked",
+        "built",
+        "verified"
+      ]
+    },
+    "review_link": {
+      "$ref": "#/$defs/text"
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "screen",
+      "status",
+      "description"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "not": {
+              "const": "atlas"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "interactions": {
+            "items": {
+              "required": [
+                "decision",
+                "reason"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

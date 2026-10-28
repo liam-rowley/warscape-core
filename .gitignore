@@ -1,0 +1,11 @@
+# Generated or disposable
+__pycache__/
+*.pyc
+.venv/
+_scratch/
+_to_delete*/
+*.log
+*.bak
+*.orig
+/build/
+/out/

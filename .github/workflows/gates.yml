@@ -1,0 +1,31 @@
+# purpose: CI gates on every push and pull request: the full `wsc gates` set (schemas, registries, tool rows, strict JSON, Windows paths,
+#          doc size, undated "verified", conflict markers, line endings, host tests), on Linux and Windows.
+# usage: runs on GitHub Actions; locally: python3 wsc.py gates
+# when: automatic; require the "gates" checks in branch protection for main.
+# No installs: the core is Python 3.12 standard library only.
+name: gates
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  gates:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: wsc gates (full set)
+        run: python wsc.py gates

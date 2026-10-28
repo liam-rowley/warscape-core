@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/assets.schema.json",
+  "title": "Assets",
+  "description": "Game assets the mod reads or replaces: where they live, what they are for, who uses them, and their upscale state.",
+  "type": "object",
+  "required": [
+    "id",
+    "description",
+    "pack",
+    "path",
+    "format",
+    "hash",
+    "role"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "description": {
+      "$ref": "#/$defs/text"
+    },
+    "pack": {
+      "$ref": "#/$defs/text"
+    },
+    "path": {
+      "$ref": "#/$defs/text"
+    },
+    "format": {
+      "$ref": "#/$defs/text"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "bytes"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^(sha1:[0-9a-f]{40}|sha256:[0-9a-f]{64})$"
+    },
+    "role": {
+      "$ref": "#/$defs/text"
+    },
+    "used_by": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "x-ref": "ui_elements"
+      }
+    },
+    "upscale_method": {
+      "$ref": "#/$defs/text"
+    },
+    "upscale_status": {
+      "enum": [
+        "not_needed",
+        "todo",
+        "done"
+      ]
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "role",
+      "pack",
+      "path",
+      "format",
+      "upscale_status"
+    ]
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

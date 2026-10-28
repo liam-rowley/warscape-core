@@ -1,0 +1,27 @@
+#!/bin/sh
+# purpose: Refuse a push while the fast gates fail (`wsc gates --fast`: schemas, registries, tool rows, strict JSON, Windows paths, doc size, undated "verified", conflict markers).
+# usage: git config core.hooksPath .githooks   (once per clone; in a game repo with the core at core/: git config core.hooksPath core/.githooks). Bypass once with git push --no-verify and say why in the commit.
+# when: automatic on every git push, any branch; under a minute, no network.
+# not-a-verb: git runs hooks by file name; this one only calls `wsc gates --fast`.
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+if [ -f "$top/wsc.py" ]; then cli="$top/wsc.py"
+elif [ -f "$top/core/wsc.py" ]; then cli="$top/core/wsc.py"
+else
+  echo "pre-push: wsc.py not found at the repo root or core/ (core missing? git submodule update --init). Push refused." >&2
+  exit 1
+fi
+py=""
+for c in python3.12 python3 python py; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 12))' >/dev/null 2>&1; then py=$c; break; fi
+done
+if [ -z "$py" ]; then
+  echo "pre-push: no Python 3.12+ on PATH, so the fast gates cannot run. Push refused (install Python 3.12+, or bypass once with --no-verify)." >&2
+  exit 1
+fi
+cd "$top" || exit 1
+"$py" "$cli" gates --fast -q
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "pre-push: push refused, the fast gates failed (above). Fix them, or bypass once with git push --no-verify and say why in the commit." >&2
+fi
+exit "$rc"

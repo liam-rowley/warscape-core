@@ -1,0 +1,25 @@
+# Line endings: text is LF in the index; Windows scripts are CRLF in the working tree; binaries are never converted.
+# (Policy from empire-remastered, settled 2026-10-28 after mixed endings caused phantom diffs; copied to napoleon-remastered.)
+*                       text=auto eol=lf
+*.py                    text eol=lf
+*.sh                    text eol=lf
+.githooks/*             text eol=lf
+*.cmd                   text=auto eol=crlf
+*.bat                   text=auto eol=crlf
+*.ps1                   text=auto eol=crlf
+
+# Registries: one row per line, so concurrent additions merge by union. A union that keeps two versions of one row is caught by
+# `wsc reg check` (duplicate id, non-canonical order); fix with `wsc reg render` and keep the right row. Views are generated.
+registries/*.jsonl      merge=union
+registries/*.md         linguist-generated=true
+
+*.png                   binary
+*.jpg                   binary
+*.dds                   binary
+*.tga                   binary
+*.ttf                   binary
+*.otf                   binary
+*.dll                   binary
+*.exe                   binary
+*.pdb                   binary
+*.zip                   binary

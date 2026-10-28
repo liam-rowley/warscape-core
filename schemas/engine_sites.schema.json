@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/engine_sites.schema.json",
+  "title": "Engine sites",
+  "description": "Every engine address the proxy DLL patches or hooks, with anchor and stock bytes (the exe stays vanilla on disk; rebase every RVA, ASLR is on).",
+  "type": "object",
+  "required": [
+    "id",
+    "description",
+    "purpose",
+    "rva",
+    "anchor_bytes",
+    "stock_bytes",
+    "kind"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "description": {
+      "$ref": "#/$defs/text"
+    },
+    "purpose": {
+      "$ref": "#/$defs/text"
+    },
+    "exe": {
+      "type": "string",
+      "pattern": "^sha1:[0-9a-f]{40}$",
+      "description": "identity of the exe this RVA belongs to"
+    },
+    "rva": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]+$"
+    },
+    "anchor_bytes": {
+      "$ref": "#/$defs/hex"
+    },
+    "stock_bytes": {
+      "$ref": "#/$defs/hex"
+    },
+    "kind": {
+      "enum": [
+        "patch",
+        "hook"
+      ]
+    },
+    "patch_bytes": {
+      "$ref": "#/$defs/hex"
+    },
+    "hook": {
+      "$ref": "#/$defs/text"
+    },
+    "config_key": {
+      "type": "string",
+      "x-ref": "config_keys"
+    },
+    "verified": {
+      "$ref": "#/$defs/verified"
+    }
+  },
+  "x-view": {
+    "columns": [
+      "id",
+      "kind",
+      "rva",
+      "purpose",
+      "config_key",
+      "verified"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "patch"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "patch_bytes"
+        ]
+      },
+      "else": {
+        "required": [
+          "hook"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.:/#-]*$",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "run": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/#-]*$",
+      "description": "run or report id: the job id, a runs/ folder or a report path"
+    },
+    "verified": {
+      "type": "object",
+      "required": [
+        "date",
+        "run"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/date"
+        },
+        "run": {
+          "$ref": "#/$defs/run"
+        }
+      },
+      "description": "verified = a date and a run id"
+    },
+    "hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{2}( [0-9a-f]{2})*$",
+      "description": "bytes as lowercase hex pairs separated by spaces"
+    }
+  }
+}
