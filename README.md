@@ -65,6 +65,7 @@ The schema subset and the registry extensions (`x-view`, `x-unique`, `x-ref`, `x
 | `CLAUDE.md` | rules for every chat and agent working here |
 | `docs/DECISIONS.md` | core decisions, dated, append only |
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
+| `docs/BACKLOG.md` | agreed core changes not yet built |
 | `wsc.py`, `warscape/` | the CLI launcher and the library; verbs in `warscape/verbs/` |
 | `schemas/` | the registry schemas the core ships |
 | `registries/` | the core's own registries (real: `tools`; the rest declared empty so CI exercises every schema) |
