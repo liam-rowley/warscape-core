@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 
-from .repo import matches
+from .repo import git_env, matches
 
 # ------------------------------------------------------------------ Windows-safe paths
 WIN_RESERVED = re.compile(r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$', re.I)
@@ -159,7 +159,7 @@ def eol_problems(root):
     if not (root / '.gitattributes').is_file():
         det.append('.gitattributes is missing (copy the core\'s line-ending policy)')
     try:
-        out = subprocess.run(['git', '-C', str(root), 'ls-files', '--eol'], capture_output=True, text=True, check=True).stdout
+        out = subprocess.run(['git', '-C', str(root), 'ls-files', '--eol'], capture_output=True, text=True, check=True, env=git_env()).stdout
     except (OSError, subprocess.CalledProcessError):
         return det
     for ln in out.splitlines():

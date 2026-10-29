@@ -117,5 +117,52 @@ class VerifiedDates(unittest.TestCase):
             self.assertEqual(flagged(l), [1], l)
 
 
+
+class CorePin(unittest.TestCase):
+    """backlog B5: the pin is checked against the tag, not only VERSION; tags are `vX.Y.Z`, lower-case v."""
+    def test_pin_matches_tag_and_version(self):
+        from warscape.gates import pin_problems
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', ['v0.1.0'], True), [])
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', [], False), [])            # shallow CI checkout: no tags, VERSION only
+
+    def test_bad_pins_fail(self):
+        from warscape.gates import pin_problems
+        self.assertTrue(any('lower-case v' in e for e in pin_problems('V0.1.0', '0.1.0', ['V0.1.0'], True)))
+        self.assertTrue(any('not the pinned tag v0.1.0' in e for e in pin_problems('v0.1.0', '0.1.0', ['V0.1.0'], True)))
+        self.assertTrue(any('untagged commit' in e for e in pin_problems('v0.1.0', '0.1.0', [], True)))
+        self.assertTrue(any('checkout is 0.2.0' in e for e in pin_problems('v0.1.0', '0.2.0', ['v0.1.0'], True)))
+
+    def test_core_tags_match_version(self):
+        from warscape.gates import core_tag_problems
+        self.assertEqual(core_tag_problems('0.1.0', ['v0.1.0']), [])
+        self.assertEqual(core_tag_problems('0.1.0', []), [])
+        self.assertEqual(len(core_tag_problems('0.1.0', ['V0.1.0'])), 1)
+        self.assertEqual(len(core_tag_problems('0.1', [])), 1)
+
+
+
+def third_party_imports(text, local=('warscape', '_util')):
+    """Top-level modules a Python source imports that are neither the standard library nor this repo's own (C2)."""
+    import ast
+    import sys
+    out = set()
+    for n in ast.walk(ast.parse(text)):
+        names = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and not n.level else []
+        out |= {m.split('.')[0] for m in names if m and m.split('.')[0] not in sys.stdlib_module_names and m.split('.')[0] not in local}
+    return sorted(out)
+
+
+class StdlibOnly(unittest.TestCase):
+    """C2 / CLAUDE.md: standard library only. A dependency needs a dated decision first, then an entry in `local` here."""
+    def test_fixture(self):
+        self.assertEqual(third_party_imports('import json, os.path\nfrom warscape import x\nfrom . import y\n'), [])
+        self.assertEqual(third_party_imports('import yaml\nfrom requests.adapters import X\n'), ['requests', 'yaml'])
+
+    def test_core_sources_are_stdlib_only(self):
+        files = [CORE / 'wsc.py', *sorted((CORE / 'warscape').rglob('*.py')), *sorted((CORE / 'tests').glob('*.py'))]
+        bad = {str(f.relative_to(CORE)): m for f in files if (m := third_party_imports(f.read_text(encoding='utf-8')))}
+        self.assertEqual(bad, {})
+
+
 if __name__ == '__main__':
     unittest.main()

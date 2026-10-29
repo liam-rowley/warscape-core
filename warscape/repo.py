@@ -39,6 +39,17 @@ DEFAULTS = {
 }
 
 
+# Variables git exports to hooks (GIT_DIR in a worktree, GIT_INDEX_FILE, ...). Inherited by `git -C <other repo>`, they make it
+# read the wrong repository: a pre-push hook in a worktree saw the game repo's index as "local changes" in core/ (napoleon J5).
+GIT_LOCAL_VARS = ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+                  'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_NAMESPACE')
+
+
+def git_env():
+    """The environment for every git subprocess the core runs: os.environ without the repository-selecting GIT_* variables."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCAL_VARS}
+
+
 class ConfigError(Exception):
     pass
 
@@ -107,7 +118,7 @@ class Ctx:
 def list_files(root):
     root = Path(root)
     try:
-        out = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+        out = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], env=git_env(),
                              capture_output=True, check=True).stdout.decode('utf-8', 'replace')
         names = sorted({p for p in out.split('\0') if p})
     except (OSError, subprocess.CalledProcessError):
