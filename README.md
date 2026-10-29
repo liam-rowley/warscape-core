@@ -4,7 +4,7 @@ The shared core for the Total War remasters (Napoleon first; Empire moves onto i
 game-agnostic machinery; each game repo holds an **adapter** (its registry contents, paths, identity pins, screens) and pins
 a released core version. A game repo never patches the core in place: it files the change here, and picks it up with a new tag.
 
-Private. Python 3.12+, standard library only, so CI and a fresh clone need no installs.
+Public (checked 2026-10-29 with the GitHub API). Python 3.12+, standard library only, so CI and a fresh clone need no installs.
 
 ## Core and adapter
 
@@ -55,7 +55,8 @@ The schema subset and the registry extensions (`x-view`, `x-unique`, `x-ref`, `x
 
 `wsc gates` runs, deterministically and without network: `schemas`, `registries`, `tools` (header and row for every tool), `json`
 (strict JSON and JSONL), `windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
-`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (game repos) and `tests`
+`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the pin is a `vX.Y.Z` tag on
+the core checkout; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.
 
 ## Layout

@@ -4,6 +4,7 @@ Every gate returns a Result. Level `error` fails the run; `warn` never does. `--
 (or the list in `wsc.toml` [gates] fast), and is what the pre-push hook runs: well under a minute, no network.
 """
 import json
+import re
 import subprocess
 import sys
 import time
@@ -133,21 +134,72 @@ def gate_eol(ctx):
     return Result('eol', 'warn' if det else 'ok', f'{len(det)} line-ending problems' if det else '.gitattributes present; no CR in indexed .py/.sh', det)
 
 
+PIN = re.compile(r'v\d+\.\d+\.\d+')
+
+
+def _git(cwd, *args):
+    """stdout lines of a git command, or None when git cannot answer (no git, not a checkout)."""
+    try:
+        p = subprocess.run(['git', '-C', str(cwd), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.split() if p.returncode == 0 else None
+
+
+def pin_problems(want, version, head_tags, any_tags):
+    """Problems with a game repo's core pin. `want`: wsc.toml [core] version; `version`: the core's VERSION file; `head_tags`: tag
+    names on the core checkout's HEAD; `any_tags`: whether the checkout has any tag at all (a shallow CI submodule fetches none,
+    so then only VERSION can be compared). Tags are `vX.Y.Z`, lower-case v, and case matters (backlog B5)."""
+    det = []
+    if not PIN.fullmatch(want):
+        det.append(f'wsc.toml pins core {want!r}: a pin is a release tag `vX.Y.Z` (lower-case v)')
+    if version != want[1:] if want[:1] == 'v' else version != want:
+        det.append(f'wsc.toml pins core {want} but the core checkout is {version}: update the submodule or the pin')
+    if any_tags and want not in head_tags:
+        on = f'tag(s) {", ".join(head_tags)}' if head_tags else 'an untagged commit'
+        det.append(f'the core checkout is at {on}, not the pinned tag {want} (check out the tag; tags are case-sensitive)')
+    return det
+
+
+def core_tag_problems(version, head_tags):
+    """The core itself: VERSION is X.Y.Z and every tag on HEAD is exactly `v` + VERSION (CLAUDE.md: tags are vX.Y.Z)."""
+    det = [] if re.fullmatch(r'\d+\.\d+\.\d+', version) else [f'VERSION {version!r} is not X.Y.Z']
+    det += [f'tag {t!r} on HEAD is not v{version} (tags are `vX.Y.Z` with a lower-case v and match VERSION)'
+            for t in head_tags if t != f'v{version}']
+    return det
+
+
 def gate_core_pin(ctx):
-    want = ctx.config['core']['version']
-    if ctx.is_core or not want:
-        return Result('core_pin', 'ok', 'this is the core' if ctx.is_core else 'no [core] version pinned in wsc.toml (nothing to check)')
-    have, det = core_version(), []
-    if have != want.lstrip('v'):
-        det.append(f'wsc.toml pins core {want} but the core checkout is {have}: update the submodule or the pin')
+    want, have = ctx.config['core']['version'], core_version()
+    if ctx.is_core:
+        det = core_tag_problems(have, _git(ctx.root, 'tag', '--points-at', 'HEAD') or [])
+        return Result('core_pin', 'error' if det else 'ok', 'core VERSION or tag malformed' if det else f'this is the core ({have})', det)
+    if not want:
+        return Result('core_pin', 'ok', 'no [core] version pinned in wsc.toml (nothing to check)')
+    head = _git(ctx.core_root, 'tag', '--points-at', 'HEAD') or []
+    det = pin_problems(want, have, head, bool(_git(ctx.core_root, 'tag', '--list')))
     try:
         dirty = subprocess.run(['git', '-C', str(ctx.core_root), 'status', '--porcelain'], capture_output=True, text=True, timeout=30).stdout.strip()
-        if dirty:
-            det.append('the core checkout has local changes (a game repo never patches the core in place: file the change against warscape-core)')
-            det += ['  ' + l for l in dirty.splitlines()[:10]]
     except (OSError, subprocess.SubprocessError):
-        pass
-    return Result('core_pin', 'error' if det else 'ok', 'core pin broken' if det else f'core {have} as pinned, unmodified', det)
+        dirty = ''
+    if dirty:
+        det.append('the core checkout has local changes (a game repo never patches the core in place: file the change against warscape-core)')
+        det += ['  ' + l for l in dirty.splitlines()[:10]]
+    tagnote = f'tag {want}' if head else 'VERSION only: no tags in this checkout'
+    return Result('core_pin', 'error' if det else 'ok', 'core pin broken' if det else f'core {have} as pinned ({tagnote}), unmodified', det)
+
+
+def gate_hooks(ctx):
+    """The pre-push hook is wired in this clone (`git config core.hooksPath`); warning only, and skipped in CI."""
+    import os
+    if os.environ.get('CI'):
+        return Result('hooks', 'ok', 'CI: no hook needed')
+    want = '.githooks' if ctx.is_core else 'core/.githooks'
+    have = (_git(ctx.root, 'config', '--get', 'core.hooksPath') or [''])[0]
+    if have.replace('\\', '/').rstrip('/') == want:
+        return Result('hooks', 'ok', f'pre-push hook wired ({want})')
+    return Result('hooks', 'warn', f'pre-push hook not wired: run `git config core.hooksPath {want}` once in this clone',
+                  [f'core.hooksPath is {have!r}, want {want!r}'])
 
 
 def gate_tests(ctx):
@@ -174,7 +226,8 @@ def gate_tests(ctx):
 GATES = [
     ('schemas', gate_schemas), ('registries', gate_registries), ('tools', gate_tools), ('json', gate_json),
     ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates),
-    ('conflict_markers', gate_conflict_markers), ('eol', gate_eol), ('core_pin', gate_core_pin), ('tests', gate_tests),
+    ('conflict_markers', gate_conflict_markers), ('eol', gate_eol), ('core_pin', gate_core_pin), ('hooks', gate_hooks),
+    ('tests', gate_tests),
 ]
 NAMES = [n for n, _ in GATES]
 

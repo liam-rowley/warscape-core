@@ -88,10 +88,27 @@ class GameRepo(unittest.TestCase):
         ver = (CORE / 'VERSION').read_text(encoding='utf-8').strip()
         self.repo.write('wsc.toml', self.repo.read('wsc.toml').replace('v9.9.9', 'v' + ver))
         rc, out = self.repo.wsc('gates', '--only', 'core_pin')
-        if subprocess.run(['git', '-C', str(CORE), 'status', '--porcelain'], capture_output=True, text=True).stdout.strip():
-            self.assertIn('local changes', out)   # the core checkout running this test is being edited
-        else:
-            self.assertEqual(rc, 0, out)
+        self.assertNotIn('pins core', out)
+        if rc:   # the core checkout running this test is being edited, or is a branch commit without the release tag
+            self.assertTrue('local changes' in out or 'not the pinned tag' in out, out)
+        self.repo.write('wsc.toml', self.repo.read('wsc.toml').replace('v' + ver, 'V' + ver))
+        rc, out = self.repo.wsc('gates', '--only', 'core_pin')
+        self.assertEqual(rc, 1)
+        self.assertIn('lower-case v', out)
+
+    def test_hooks_gate_warns_until_wired(self):
+        self.ready()
+        env = os.environ.pop('CI', None)
+        try:
+            rc, out = self.repo.wsc('gates', '--only', 'hooks')
+            self.assertEqual(rc, 0, out)                  # a warning never fails the run
+            self.assertIn('git config core.hooksPath core/.githooks', out)
+            subprocess.run(['git', '-C', str(self.repo.root), 'config', 'core.hooksPath', 'core/.githooks'], check=True)
+            rc, out = self.repo.wsc('gates', '--only', 'hooks')
+            self.assertIn('pre-push hook wired', out)
+        finally:
+            if env is not None:
+                os.environ['CI'] = env
 
     def test_repo_verbs_and_bad_config(self):
         self.repo.write('adapter/verbs/hello.py', '"""\nPurpose: say hello.\nUsage: wsc hello\nWhen: tests.\nVerb: hello\n"""\nNAME = "hello"\nHELP = "say hello"\n'

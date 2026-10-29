@@ -117,5 +117,28 @@ class VerifiedDates(unittest.TestCase):
             self.assertEqual(flagged(l), [1], l)
 
 
+
+class CorePin(unittest.TestCase):
+    """backlog B5: the pin is checked against the tag, not only VERSION; tags are `vX.Y.Z`, lower-case v."""
+    def test_pin_matches_tag_and_version(self):
+        from warscape.gates import pin_problems
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', ['v0.1.0'], True), [])
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', [], False), [])            # shallow CI checkout: no tags, VERSION only
+
+    def test_bad_pins_fail(self):
+        from warscape.gates import pin_problems
+        self.assertTrue(any('lower-case v' in e for e in pin_problems('V0.1.0', '0.1.0', ['V0.1.0'], True)))
+        self.assertTrue(any('not the pinned tag v0.1.0' in e for e in pin_problems('v0.1.0', '0.1.0', ['V0.1.0'], True)))
+        self.assertTrue(any('untagged commit' in e for e in pin_problems('v0.1.0', '0.1.0', [], True)))
+        self.assertTrue(any('checkout is 0.2.0' in e for e in pin_problems('v0.1.0', '0.2.0', ['v0.1.0'], True)))
+
+    def test_core_tags_match_version(self):
+        from warscape.gates import core_tag_problems
+        self.assertEqual(core_tag_problems('0.1.0', ['v0.1.0']), [])
+        self.assertEqual(core_tag_problems('0.1.0', []), [])
+        self.assertEqual(len(core_tag_problems('0.1.0', ['V0.1.0'])), 1)
+        self.assertEqual(len(core_tag_problems('0.1', [])), 1)
+
+
 if __name__ == '__main__':
     unittest.main()
