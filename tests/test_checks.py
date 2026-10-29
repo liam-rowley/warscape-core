@@ -140,5 +140,29 @@ class CorePin(unittest.TestCase):
         self.assertEqual(len(core_tag_problems('0.1', [])), 1)
 
 
+
+def third_party_imports(text, local=('warscape', '_util')):
+    """Top-level modules a Python source imports that are neither the standard library nor this repo's own (C2)."""
+    import ast
+    import sys
+    out = set()
+    for n in ast.walk(ast.parse(text)):
+        names = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and not n.level else []
+        out |= {m.split('.')[0] for m in names if m and m.split('.')[0] not in sys.stdlib_module_names and m.split('.')[0] not in local}
+    return sorted(out)
+
+
+class StdlibOnly(unittest.TestCase):
+    """C2 / CLAUDE.md: standard library only. A dependency needs a dated decision first, then an entry in `local` here."""
+    def test_fixture(self):
+        self.assertEqual(third_party_imports('import json, os.path\nfrom warscape import x\nfrom . import y\n'), [])
+        self.assertEqual(third_party_imports('import yaml\nfrom requests.adapters import X\n'), ['requests', 'yaml'])
+
+    def test_core_sources_are_stdlib_only(self):
+        files = [CORE / 'wsc.py', *sorted((CORE / 'warscape').rglob('*.py')), *sorted((CORE / 'tests').glob('*.py'))]
+        bad = {str(f.relative_to(CORE)): m for f in files if (m := third_party_imports(f.read_text(encoding='utf-8')))}
+        self.assertEqual(bad, {})
+
+
 if __name__ == '__main__':
     unittest.main()
