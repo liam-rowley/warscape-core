@@ -70,5 +70,5 @@ the core checkout; in the core, tags match `VERSION`), `hooks` (warning: the pre
 | `wsc.py`, `warscape/` | the CLI launcher and the library; verbs in `warscape/verbs/` |
 | `schemas/` | the registry schemas the core ships |
 | `registries/` | the core's own registries (real: `tools`; the rest declared empty so CI exercises every schema) |
-| `tests/` | host tests (stdlib `unittest`), run by the `tests` gate |
+| `tests/` | host tests (stdlib `unittest`), run by the `tests` gate (a skipped test is a `warn` naming it and its reason) |
 | `wsc.toml` | this repo's declaration to the CLI |
