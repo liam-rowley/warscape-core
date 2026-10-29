@@ -203,15 +203,32 @@ def gate_hooks(ctx):
                   [f'core.hooksPath is {have!r}, want {want!r}'])
 
 
+SKIPPED = re.compile(r"^(.*?) \.\.\. skipped '(.*)'$")
+TEST_ID = re.compile(r'^(\S+) \(([\w.]+?)(?:\.\1)?\)$')   # `test_x (mod.Class.test_x)` (3.11+) or `test_x (mod.Class)`
+
+
+def unittest_skips(lines):
+    """`<Class.test>: <reason>` for each test `unittest -v` reports as skipped (a skip is visible, never a silent pass). A test with a
+    docstring prints its id on the line before `<docstring> ... skipped`."""
+    out = []
+    for i, line in enumerate(lines):
+        m = SKIPPED.match(line)
+        if not m:
+            continue
+        t = TEST_ID.match(m.group(1)) or (TEST_ID.match(lines[i - 1]) if i else None)
+        out.append(f'{t.group(2).rsplit(".", 1)[-1]}.{t.group(1)}: {m.group(2)}' if t else f'{m.group(1)}: {m.group(2)}')
+    return out
+
+
 def gate_tests(ctx):
     tc = ctx.config['tests']
     dirs = [d for d in tc['dirs'] if (ctx.root / d).is_dir()]
     if not dirs:
         return Result('tests', 'ok', 'no test folders')
-    det, total = [], 0
+    det, skips, total = [], [], 0
     for d in dirs:
         try:
-            p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', d, '-t', d, '-p', 'test_*.py'],
+            p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d, '-p', 'test_*.py'],
                                cwd=ctx.root, capture_output=True, text=True, timeout=tc['timeout_s'])
         except subprocess.TimeoutExpired:
             det.append(f'{d}: timed out after {tc["timeout_s"]} s')
@@ -219,9 +236,14 @@ def gate_tests(ctx):
         out = (p.stdout + p.stderr).strip().splitlines()
         ran = next((l for l in out if l.startswith('Ran ')), 'Ran ? tests')
         total += int(ran.split()[1]) if ran.split()[1].isdigit() else 0
+        skips += [f'{d}: skipped {s}' for s in unittest_skips(out)]
         if p.returncode:
             det += [f'{d}: {ran}, FAILED'] + out[-40:]
-    return Result('tests', 'error' if det else 'ok', 'host tests failed' if det else f'{total} host tests passed ({", ".join(dirs)})', det)
+    if det:
+        return Result('tests', 'error', 'host tests failed', det + skips)
+    msg = f'{total} host tests passed ({", ".join(dirs)})'
+    # a skip is a warn, never an error: the run still passes, but what did not run is on screen with its reason
+    return Result('tests', 'warn', f'{msg}; {len(skips)} skipped', skips) if skips else Result('tests', 'ok', msg)
 
 
 GATES = [

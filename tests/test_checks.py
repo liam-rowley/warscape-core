@@ -164,5 +164,27 @@ class StdlibOnly(unittest.TestCase):
         self.assertEqual(bad, {})
 
 
+class TestsGateSkips(unittest.TestCase):
+    """The tests gate shows skips (napoleon J41): a skipped host test is a `warn` with its reason, never a silent pass."""
+    def test_real_unittest_output(self):
+        import subprocess, sys, tempfile
+        from pathlib import Path
+        from warscape import gates
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, 'test_x.py').write_text('\n'.join([
+                'import unittest', 'class A(unittest.TestCase):',
+                '    def test_plain(self):', '        self.skipTest("no toolchain: test_console")',
+                '    def test_doc(self):', '        """Has a docstring."""', '        self.skipTest("docker down")',
+                '    def test_ok(self):', '        pass', '']), encoding='utf-8')
+            p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d], capture_output=True, text=True)
+        skips = gates.unittest_skips((p.stdout + p.stderr).splitlines())
+        self.assertEqual(sorted(skips), ['A.test_doc: docker down', 'A.test_plain: no toolchain: test_console'])
+
+    def test_both_id_formats(self):
+        from warscape import gates
+        self.assertEqual(gates.unittest_skips(["test_a (m.C.test_a) ... skipped 'r1'", "test_b (m.C) ... skipped 'r2'", 'test_c (m.C.test_c) ... ok']),
+                         ['C.test_a: r1', 'C.test_b: r2'])
+
+
 if __name__ == '__main__':
     unittest.main()
