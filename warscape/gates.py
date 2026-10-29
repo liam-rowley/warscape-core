@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from . import checks, core_version, tools
 from .registry import RegistryError, load_all, schema_path
+from .repo import git_env
 from .schema import check_schema
 
 
@@ -140,7 +141,7 @@ PIN = re.compile(r'v\d+\.\d+\.\d+')
 def _git(cwd, *args):
     """stdout lines of a git command, or None when git cannot answer (no git, not a checkout)."""
     try:
-        p = subprocess.run(['git', '-C', str(cwd), *args], capture_output=True, text=True, timeout=30)
+        p = subprocess.run(['git', '-C', str(cwd), *args], capture_output=True, text=True, timeout=30, env=git_env())
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout.split() if p.returncode == 0 else None
@@ -179,7 +180,7 @@ def gate_core_pin(ctx):
     head = _git(ctx.core_root, 'tag', '--points-at', 'HEAD') or []
     det = pin_problems(want, have, head, bool(_git(ctx.core_root, 'tag', '--list')))
     try:
-        dirty = subprocess.run(['git', '-C', str(ctx.core_root), 'status', '--porcelain'], capture_output=True, text=True, timeout=30).stdout.strip()
+        dirty = subprocess.run(['git', '-C', str(ctx.core_root), 'status', '--porcelain'], capture_output=True, text=True, timeout=30, env=git_env()).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         dirty = ''
     if dirty:
