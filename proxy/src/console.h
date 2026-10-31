@@ -66,6 +66,9 @@ inline const char* SlotClaimName(SlotClaim c) { return c == SlotClaim::Claim ? "
 // executor tests the slot and then reads it again for the call, so a 0 written between the two from the control thread would be called.
 enum class SlotWrite { None, Ours };
 inline SlotWrite DecideSlotWrite(bool on, SlotClaim c) { return on && c == SlotClaim::Claim ? SlotWrite::Ours : SlotWrite::None; }
+// The verb attributes the forwarder's latest record to its own line only when the record names the line's command: a CliExecute from
+// game Lua in the same pump leaves a record of its own.
+inline bool RecordIsForLine(bool seen, const std::string& recordName, const std::string& lineName) { return seen && recordName == lineName; }
 
 // What the verb knows before it runs a line. "" = run it.
 struct ConsolePre {

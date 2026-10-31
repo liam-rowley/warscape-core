@@ -1,6 +1,7 @@
 // test_console.cpp - host tests for the campaign console (J15): line parsing, the verb's refusals (key off, file name, no-op), the
 // slot-claim rule, the forwarder's gate, the path label, Lua quoting; the adapter's offsets against the bytes of its engine_sites
-// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; no game named in core).
+// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; the record matched to the
+// line; no game named in core).
 // Built and run by proxy/tools/build.sh tests.
 #include "testkit.h"
 #include "console.h"
@@ -62,6 +63,9 @@ int main(int argc, char** argv) {
         CHECK(DecideSlotWrite(true, SlotClaim::Ours) == SlotWrite::None && DecideSlotWrite(true, SlotClaim::Foreign) == SlotWrite::None);
         CHECK(DecideSlotWrite(false, SlotClaim::Ours) == SlotWrite::None && DecideSlotWrite(false, SlotClaim::Claim) == SlotWrite::None);
         CHECK(DecideSlotWrite(false, SlotClaim::Foreign) == SlotWrite::None);
+        // a forwarder record counts for the line only when it names the line's command
+        CHECK(RecordIsForLine(true, "teleport_to", "teleport_to"));
+        CHECK(!RecordIsForLine(true, "declare_war", "teleport_to") && !RecordIsForLine(false, "teleport_to", "teleport_to"));
     }
     {   // the forwarder's gate
         ConsoleGate g; CHECK(ForwardRefusal(g) == "console off");
@@ -134,6 +138,12 @@ int main(int argc, char** argv) {
         // the dev side starts the console only after its own plan gate
         const std::string dv = tk::ReadFile("core/dev.cpp");
         CHECK(dv.find("if (!rt.plan.engineHooks || !rt.plan.d3dHooks)") < dv.find("ConsoleInit(k.console"));
+        // the verb checks the record's name against the line before any result path
+        {
+            const size_t verb = dv.find("Outcome Console("), run = dv.find("RunLua(id, rel,", verb),
+                         nextRet = dv.find("return o;", run), match = dv.find("RecordIsForLine(", run);
+            CHECK(verb != std::string::npos && run != std::string::npos && match != std::string::npos && match < nextRet);
+        }
         for (const char* f : { "console.cpp", "console.h" }) {
             std::string s = tk::ReadFile(std::string("core/") + f);
             for (size_t k; (k = s.find("empire-remastered")) != std::string::npos;) s.erase(k, 17);
