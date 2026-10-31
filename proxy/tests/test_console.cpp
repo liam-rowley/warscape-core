@@ -1,6 +1,6 @@
 // test_console.cpp - host tests for the campaign console (J15): line parsing, the verb's refusals (key off, file name, no-op), the
 // slot-claim rule, the forwarder's gate, the path label, Lua quoting; the adapter's offsets against the bytes of its engine_sites
-// rows; and source lints (key off = no engine read or write, the slot written only after the claim rule, no game named in core).
+// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; no game named in core).
 // Built and run by proxy/tools/build.sh tests.
 #include "testkit.h"
 #include "console.h"
@@ -57,6 +57,11 @@ int main(int argc, char** argv) {
         CHECK(DecideSlotClaim(0, 0x1000) == SlotClaim::Claim);
         CHECK(DecideSlotClaim(0x1000, 0x1000) == SlotClaim::Ours);
         CHECK(DecideSlotClaim(0x2000, 0x1000) == SlotClaim::Foreign);
+        // only the empty-to-ours claim writes the slot; off never writes it (0 between the executor's test and its call would be called)
+        CHECK(DecideSlotWrite(true, SlotClaim::Claim) == SlotWrite::Ours);
+        CHECK(DecideSlotWrite(true, SlotClaim::Ours) == SlotWrite::None && DecideSlotWrite(true, SlotClaim::Foreign) == SlotWrite::None);
+        CHECK(DecideSlotWrite(false, SlotClaim::Ours) == SlotWrite::None && DecideSlotWrite(false, SlotClaim::Claim) == SlotWrite::None);
+        CHECK(DecideSlotWrite(false, SlotClaim::Foreign) == SlotWrite::None);
     }
     {   // the forwarder's gate
         ConsoleGate g; CHECK(ForwardRefusal(g) == "console off");
@@ -117,7 +122,8 @@ int main(int argc, char** argv) {
                      plan = cc.find("rt.plan.engineHooks", inst), firstSite = cc.find("SiteAddress(", inst);
         CHECK(inst != std::string::npos && keyRet < plan && plan < firstSite);
         size_t writes = 0; for (size_t k = 0; (k = cc.find("*(volatile uintptr_t*)s_slot = ", k)) != std::string::npos; ++k) ++writes;
-        CHECK(writes == 2);
+        CHECK(writes == 1);                                              // the claim only: off leaves the forwarder in place
+        CHECK(cc.find("*(volatile uintptr_t*)s_slot = 0") == std::string::npos);
         const size_t setSlot = cc.find("bool SetSlot("), claim = cc.find("DecideSlotClaim(cur", setSlot), w1 = cc.find("*(volatile uintptr_t*)s_slot = ", setSlot);
         CHECK(setSlot < claim && claim < w1 && cc.find("*(volatile uintptr_t*)s_slot = ") == w1);
         CHECK(cc.find("Foreign) {") != std::string::npos);

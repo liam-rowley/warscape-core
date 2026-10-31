@@ -62,6 +62,10 @@ inline bool ConsoleInList(const char* const* list, const std::string& name) {
 enum class SlotClaim { Claim, Ours, Foreign };
 inline SlotClaim DecideSlotClaim(uintptr_t cur, uintptr_t ours) { return cur == 0 ? SlotClaim::Claim : cur == ours ? SlotClaim::Ours : SlotClaim::Foreign; }
 inline const char* SlotClaimName(SlotClaim c) { return c == SlotClaim::Claim ? "empty" : c == SlotClaim::Ours ? "ours" : "FOREIGN"; }
+// What `on`/`off` write into the slot: only the empty-to-ours claim. `off` leaves the forwarder in place and sets the refuse state: the
+// executor tests the slot and then reads it again for the call, so a 0 written between the two from the control thread would be called.
+enum class SlotWrite { None, Ours };
+inline SlotWrite DecideSlotWrite(bool on, SlotClaim c) { return on && c == SlotClaim::Claim ? SlotWrite::Ours : SlotWrite::None; }
 
 // What the verb knows before it runs a line. "" = run it.
 struct ConsolePre {
