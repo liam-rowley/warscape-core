@@ -1,0 +1,5 @@
+{
+  "description": "proxy on stock DXVK with the dev control channel (timeline, state.json, Lua bridge, ctl, intros skipped): the profile agents launch under; headless keys come from the launch itself",
+  "requires": [],
+  "warn_missing": ["game:d3d9.dll"]
+}

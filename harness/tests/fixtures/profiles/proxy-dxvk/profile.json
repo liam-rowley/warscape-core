@@ -1,0 +1,5 @@
+{
+  "description": "proxy on stock DXVK: proxy.backend=dxvk in testmod.ini, a minimal dxvk.conf (log level only)",
+  "requires": [],
+  "warn_missing": ["game:d3d9.dll"]
+}

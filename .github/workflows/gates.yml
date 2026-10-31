@@ -29,3 +29,59 @@ jobs:
           python-version: '3.12'
       - name: wsc gates (full set)
         run: python wsc.py gates
+
+  # proxy (napoleon J12): the proxy core moved here. Build the DLL with the null game (proxy/tests/null_game), run every C++ host test,
+  # prove the DLL does not depend on the checkout path, and smoke it under wine. WSP_BUILD_ID: build_id.py hashes a game repo's inputs,
+  # and the null game is a folder inside this repo (backlog B16).
+  proxy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      WSP_GAME_ROOT: ${{ github.workspace }}/proxy/tests/null_game
+      WSP_BUILD_ID: nullgame-ci
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - run: sudo apt-get update -q && sudo apt-get install -y -q g++-mingw-w64-i686
+      - run: proxy/tools/build.sh all
+      - name: the DLL is byte-identical when built from another checkout path
+        run: proxy/tools/build.sh repro
+      - name: smoke test the DLL under wine (a stand-in exe loads it; guard verdicts, config, log, clean detach)
+        run: |
+          sudo dpkg --add-architecture i386 && sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends wine wine32:i386
+          proxy/tools/build.sh smoke
+
+  # harness-windows (napoleon J12): the watcher kit moved here. Its unit and integration host tests under Windows PowerShell 5.1 with
+  # compiled fake games; the installer case builds a real harness kit from the null game's adapter.
+  harness-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CI: 'true'
+      WSP_GAME_ROOT: ${{ github.workspace }}/proxy/tests/null_game
+ull_game
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: python3 for job.sh (setup-python gives python only)
+        shell: powershell
+        run: |
+          $py = (Get-Command python).Source
+          $py3 = Join-Path (Split-Path $py) 'python3.exe'
+          if (-not (Test-Path $py3)) { Copy-Item $py $py3 }
+      - name: moved tools host tests that run bash (Git Bash found explicitly)
+        timeout-minutes: 3
+        shell: powershell
+        run: |
+          python -m unittest tests.test_moved_tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: harness host tests (unit and integration)
+        timeout-minutes: 18
+        shell: powershell
+        run: ./harness/tests/Run-HostTests.ps1 -Suite all

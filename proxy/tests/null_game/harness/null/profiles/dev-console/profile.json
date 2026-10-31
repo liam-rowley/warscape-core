@@ -1,0 +1,5 @@
+{
+  "description": "dev-dxvk plus the campaign console (dev.console=1, J15) and the file survey (dev.log_files=1): the console's file-name stage shows in logs\files.log; an older proxy logs dev.console as an unknown key and ignores it",
+  "requires": [],
+  "warn_missing": ["game:d3d9.dll"]
+}

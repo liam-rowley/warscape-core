@@ -9,3 +9,6 @@ _to_delete*/
 *.orig
 /build/
 /out/
+
+# the null game fixture builds here (proxy/tools/build.sh with WSP_GAME_ROOT=proxy/tests/null_game)
+proxy/tests/null_game/build/

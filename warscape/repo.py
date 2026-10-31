@@ -36,6 +36,10 @@ DEFAULTS = {
     'gates': {'fast': [], 'skip': []},     # fast: empty = every gate except `tests`
     'cli': {'verb_dirs': []},              # repo-relative folders of extra verb modules
     'core': {'version': ''},               # the core version this repo pins (checked by the core_pin gate)
+    # where a game's adapters are, for the proxy and harness tools (proxy/tools/layout.py, napoleon J12); empty = the one
+    # proxy/*/adapter.cpp folder / the one harness/*/adapter.json in the repo
+    'proxy': {'adapter': ''},              # repo-relative folder: adapter.cpp, identity.json, generated/, the config file, lua/
+    'harness': {'adapter': ''},            # repo-relative file: the watcher's adapter.json (its profiles/ beside it)
 }
 
 

@@ -1,0 +1,96 @@
+{
+  "game": "nullgame",
+  "title": "Null Game",
+  "state_dir": "C:\\nullgame_pc",
+  "watcher_subdir": "watcher",
+  "task_name": "nullgame watcher",
+  "game_dir": "C:\\nullgame",
+  "appdata_dir": "%APPDATA%\\nullgame",
+  "game_image": "Game.exe",
+  "other_images": [
+    "Other.exe"
+  ],
+  "launch": {
+    "route": "exe",
+    "exe": "Game.exe",
+    "args": "",
+    "steam_uri": "",
+    "steam_wait_s": 30
+  },
+  "heartbeat_files": [
+    "nullgame\\logs\\proxy.log",
+    "nullgame\\headless_status.json"
+  ],
+  "archive": {
+    "dirs_log": [
+      "nullgame\\logs"
+    ],
+    "dirs_dump": [
+      "nullgame\\dumps"
+    ],
+    "files": [
+      "nullgame.ini",
+      "dxvk.conf"
+    ]
+  },
+  "headless": {
+    "display_name": "Virtual Display Driver",
+    "default_size": "3840x2160",
+    "status_file": "nullgame\\headless_status.json",
+    "marker_file": "d3d9.dll",
+    "marker": "headless_status.json",
+    "exit_code": 2160,
+    "prefs": {
+      "x_res": "{W}",
+      "y_res": "{H}",
+      "gfx_fullscreen": "false",
+      "sound_master_enabled": "false",
+      "sound_master_volume": "0"
+    },
+    "mod_ini": {
+      "headless.enabled": "1",
+      "headless.size": "{W}x{H}"
+    }
+  },
+  "virtualstore_guard": [
+    "nullgame"
+  ],
+  "foreign_locks": [],
+  "config_files": [
+    {
+      "id": "prefs",
+      "anchor": "appdata",
+      "path": "scripts\\preferences.script.txt",
+      "style": "prefs",
+      "note": "the game's own preferences: UTF-16LE with BOM, `key value; # ... #` lines (fact the game.config.preferences_format); overlay style prefs replaces a key's value in place and keeps every other byte"
+    },
+    {
+      "id": "keys",
+      "anchor": "appdata",
+      "path": "custom_keys.keys.xml",
+      "style": "none",
+      "note": "key bindings (XML); full copy only"
+    },
+    {
+      "id": "battle_prefs",
+      "anchor": "appdata",
+      "path": "battle_preferences\\.sp_default.battle_preferences",
+      "style": "none",
+      "note": "the custom-battle screens' remembered settings: rewritten by every custom battle the front end sets up (sp_battle2 OnExit SaveBattleSetup; the J3 autostart creates it on a PC that never ran one, run 20261029_j3pc); absent is a recorded state"
+    },
+    {
+      "id": "mod_ini",
+      "anchor": "game",
+      "path": "nullgame.ini",
+      "style": "ini",
+      "note": "the proxy's config; present only while the proxy is installed (absent is a recorded state)"
+    },
+    {
+      "id": "dxvk_conf",
+      "anchor": "game",
+      "path": "dxvk.conf",
+      "style": "conf",
+      "note": "DXVK options; present only when a profile or the proxy installs it (absent is a recorded state)"
+    }
+  ]
+}
