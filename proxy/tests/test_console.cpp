@@ -1,7 +1,7 @@
 // test_console.cpp - host tests for the campaign console (J15): line parsing, the verb's refusals (key off, file name, no-op), the
 // slot-claim rule, the forwarder's gate, the path label, Lua quoting; the adapter's offsets against the bytes of its engine_sites
-// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; the record matched to the
-// line; no game named in core).
+// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; the chunk deleted after its run;
+// the record matched to the line; no game named in core).
 // Built and run by proxy/tools/build.sh tests.
 #include "testkit.h"
 #include "console.h"
@@ -138,11 +138,12 @@ int main(int argc, char** argv) {
         // the dev side starts the console only after its own plan gate
         const std::string dv = tk::ReadFile("core/dev.cpp");
         CHECK(dv.find("if (!rt.plan.engineHooks || !rt.plan.d3dHooks)") < dv.find("ConsoleInit(k.console"));
-        // the verb checks the record's name against the line before any result path
+        // the verb deletes its chunk as soon as the run returns, before any result path, and checks the record's name against the line
         {
-            const size_t verb = dv.find("Outcome Console("), run = dv.find("RunLua(id, rel,", verb),
+            const size_t verb = dv.find("Outcome Console("), run = dv.find("RunLua(id, rel,", verb), del = dv.find("DeleteFileW(", run),
                          nextRet = dv.find("return o;", run), match = dv.find("RecordIsForLine(", run);
-            CHECK(verb != std::string::npos && run != std::string::npos && match != std::string::npos && match < nextRet);
+            CHECK(verb != std::string::npos && run != std::string::npos && del != std::string::npos && del < nextRet && del - run < 200);
+            CHECK(match != std::string::npos && match < nextRet);
         }
         for (const char* f : { "console.cpp", "console.h" }) {
             std::string s = tk::ReadFile(std::string("core/") + f);
