@@ -23,3 +23,4 @@ registries/*.md         linguist-generated=true
 *.exe                   binary
 *.pdb                   binary
 *.zip                   binary
+*.ini                   text=auto eol=crlf

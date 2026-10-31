@@ -102,3 +102,14 @@ jobs:
 - **Game upgrade:** `git -C core fetch --tags && git -C core checkout vX.Y.Z`, set `[core] version` to the same tag, run
   `python3 core/wsc.py gates`, commit `core` and `wsc.toml` together on a branch.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
+
+## The proxy, the harness and the save tools (0.4.0)
+From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
+watcher kit (`harness/`) and the ESF save tools (`saves/`). A game keeps its adapters: `proxy/<game>/` (adapter.cpp, identity.json,
+the generated tables and config file, lua/) and `harness/<game>/` (adapter.json, profiles/), plus its registries. The tools find
+them through `proxy/tools/layout.py`: the game root is the superproject that pins the core (or `$WSP_GAME_ROOT`), and the adapters
+are `wsc.toml` `[proxy] adapter` / `[harness] adapter` when set, else the one `proxy/*/adapter.cpp` / `harness/*/adapter.json`.
+Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh` and so on; `python3 core/proxy/tools/layout.py`
+prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
+the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
+(`proxy/tests/null_game/README.md`).

@@ -1,0 +1,11 @@
+{
+  "game": "Null Game",
+  "exe_name": "Game.exe",
+  "sha1": "1111111111111111111111111111111111111111",
+  "time_date_stamp": "0x00000000",
+  "size_of_image": "0x00010000",
+  "config_file": "nullgame.ini",
+  "mod_dir": "nullgame",
+  "instance_mutex": "nullgame_proxy_instance",
+  "evidence": "none: the core's null adapter (J12), a fixture for CI, never a real game"
+}

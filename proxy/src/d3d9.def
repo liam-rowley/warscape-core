@@ -1,0 +1,16 @@
+; d3d9.def - the proxy's exports (the game loads this DLL as d3d9.dll): the D3D9 entry points and the D3DPERF markers. Which ones a
+; game imports is checked per game (proxy/tools/exe_info.py --def; engine_facts); build.sh fails when an export comes out decorated.
+LIBRARY d3d9
+EXPORTS
+    Direct3DCreate9
+    Direct3DCreate9Ex
+    D3DPERF_BeginEvent
+    D3DPERF_EndEvent
+    D3DPERF_SetMarker
+    D3DPERF_SetRegion
+    D3DPERF_QueryRepeatFrame
+    D3DPERF_SetOptions
+    D3DPERF_GetStatus
+    ; the dev Lua bridge (luabridge.cpp): the engine's Lua loads these with package.loadlib (dev.lua_bridge only)
+    wsp_sentinel
+    luaopen_wsp

@@ -1,0 +1,6 @@
+proxy.backend=dxvk
+dev.timeline=1
+dev.state_json=1
+dev.lua_bridge=1
+dev.ctl=1
+dev.skip_intro=1
