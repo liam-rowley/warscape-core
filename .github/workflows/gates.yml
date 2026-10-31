@@ -61,7 +61,6 @@ jobs:
     env:
       CI: 'true'
       WSP_GAME_ROOT: proxy/tests/null_game   # relative to the checkout: layout.py resolves it
-ull_game
     steps:
       - uses: actions/checkout@v5
         with:
