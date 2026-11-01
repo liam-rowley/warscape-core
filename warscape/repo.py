@@ -18,6 +18,11 @@ CONFIG_NAME = 'wsc.toml'
 DEFAULTS = {
     'registries_dir': 'registries',
     'registries': {},                      # name = "core:<schema>" or a repo-relative schema path
+    # how rows are stored (napoleon J55): names listed in `dir` keep one file per row in <registries_dir>/<name>/; the rest one JSONL
+    'storage': {'dir': []},
+    # generated Markdown views (napoleon J55): commit = true keeps <registries_dir>/<name>.md committed and checked for staleness;
+    # false writes them to the git-ignored `dir` and only checks that they render (a committed copy is then an error)
+    'views': {'commit': True, 'dir': '_scratch/registries'},
     'tools': {
         'extensions': ['py', 'sh', 'ps1', 'cmd', 'bat', 'lua', 'js', 'vbs'],
         'include': [],                     # extra globs for extensionless tools (git hooks, launchers)
@@ -93,6 +98,11 @@ def load_config(root):
             raise ConfigError(f'{CONFIG_NAME}: registry name {name!r} must match [a-z][a-z0-9_]*')
         if not isinstance(spec, str):
             raise ConfigError(f'{CONFIG_NAME}: registries.{name} must be a string ("core:<name>" or a schema path)')
+    bad = [n for n in cfg['storage']['dir'] if n not in cfg['registries']]
+    if not isinstance(cfg['storage']['dir'], list) or bad:
+        raise ConfigError(f'{CONFIG_NAME}: storage.dir must list declared registries; not declared: {", ".join(map(str, bad))}')
+    if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
+        raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     return cfg
 
 
