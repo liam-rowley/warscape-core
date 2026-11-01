@@ -47,6 +47,7 @@ std::map<void*, uint64_t> s_shaderHash;   // this capture's shader objects (poin
 std::set<void*> s_described;              // surfaces, textures and declarations already described in this capture
 std::set<uint64_t> s_written;             // shader files written by this process
 int s_shadersNew = 0, s_walkBad = 0, s_sizeMismatch = 0;
+size_t s_capShaders = 0;                  // distinct shaders bound in the last capture
 double s_t0 = 0;
 
 void Flush() {
@@ -382,6 +383,7 @@ void CapturePresent(void* dev) {
         Line("PRESENT");
         if (++s_frame < s_frames) { Line("FRAME " + std::to_string(s_frame + 1)); return; }
         s_rec = false;
+        { std::set<uint64_t> u; for (auto& kv : s_shaderHash) if (kv.second) u.insert(kv.second); s_capShaders = u.size(); }
         Close();
         InterlockedExchange(&s_state, kDone);
         SetEvent(s_doneEv);
@@ -427,7 +429,7 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
     snprintf(b, sizeof b, "\"dir\": %s, \"file\": %s, \"shader_dir\": %s, \"frames\": %d, \"bytes\": %llu, \"lines\": %llu, \"draws\": %llu, "
              "\"shaders\": %zu, \"shaders_new\": %d, \"shaders_unwalked\": %d, \"shaders_size_differs\": %d, \"record_s\": %.3f, \"wait_s\": %.3f",
              JStr(Narrow(s_dir)).c_str(), JStr(Narrow(s_dir) + "frame.txt").c_str(), JStr(Narrow(s_root) + "shaders\\").c_str(), s_frame, (unsigned long long)s_bytes,
-             (unsigned long long)s_lines, (unsigned long long)s_draws, s_written.size(), s_shadersNew, s_walkBad, s_sizeMismatch, recS, MonoS() - t0);
+             (unsigned long long)s_lines, (unsigned long long)s_draws, s_capShaders, s_shadersNew, s_walkBad, s_sizeMismatch, recS, MonoS() - t0);
     result = b;
     const bool ok = s_err.empty();
     if (!ok) why = s_err;
