@@ -103,6 +103,22 @@ jobs:
   `python3 core/wsc.py gates`, commit `core` and `wsc.toml` together on a branch.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 
+## Registry storage and views (0.6.0, opt-in)
+Two `wsc.toml` tables, both off by default (a repo that sets neither keeps one JSONL per registry and committed views):
+```toml
+[storage]
+dir = ["jobs", "tools"]     # these keep one file per row: registries/<name>/<id_to_file(id)>.json
+[views]
+commit = false              # views go to the git-ignored dir (default "_scratch/registries"); a committed registries/<name>.md fails
+```
+- **Why:** two branches in flight that each add a row to one JSONL, or re-render one committed view, conflict on GitHub (it ignores
+  `merge=union` on pull-request merges), so auto-merge stalls until someone merges `main` by hand. One file per row and uncommitted
+  views remove both causes (napoleon J55).
+- **Switching:** `python3 core/wsc.py reg migrate <name> --to dir` moves the rows and rewrites `[storage] dir`; `--to jsonl` goes back.
+  With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
+  registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
+  either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
+
 ## The proxy, the harness and the save tools (0.4.0)
 From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
 watcher kit (`harness/`) and the ESF save tools (`saves/`). A game keeps its adapters: `proxy/<game>/` (adapter.cpp, identity.json,
