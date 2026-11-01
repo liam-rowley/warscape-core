@@ -50,6 +50,9 @@ void GuardRun();               // sets Rt().engineOk and writes or removes the n
 void PatchesRun();             // only when Rt().plan.patches
 uintptr_t SiteAddress(const char* id);   // a checked site's address (hooks: the entry or instruction), 0 = not accepted
 
+// capture.cpp (J8): the D3DPERF exports report the engine's named events to a running frame capture (a flag test otherwise)
+void CaptureEvent(int kind, const wchar_t* name);   // 0 BeginEvent, 1 EndEvent, 2 SetMarker
+
 // backend.cpp
 bool BackendEnsure();          // loads the configured backend once (never from DllMain); false = no d3d9 at all
 const char* BackendName();

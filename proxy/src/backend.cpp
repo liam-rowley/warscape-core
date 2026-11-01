@@ -142,9 +142,9 @@ HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, void** out) {
     return hr;
 }
 
-int   WINAPI D3DPERF_BeginEvent(DWORD c, LPCWSTR n) { return BackendEnsure() && p_Begin ? p_Begin(c, n) : 0; }
-int   WINAPI D3DPERF_EndEvent(void)                 { return BackendEnsure() && p_End ? p_End() : 0; }
-void  WINAPI D3DPERF_SetMarker(DWORD c, LPCWSTR n)  { if (BackendEnsure() && p_SetMarker) p_SetMarker(c, n); }
+int   WINAPI D3DPERF_BeginEvent(DWORD c, LPCWSTR n) { CaptureEvent(0, n); return BackendEnsure() && p_Begin ? p_Begin(c, n) : 0; }
+int   WINAPI D3DPERF_EndEvent(void)                 { CaptureEvent(1, nullptr); return BackendEnsure() && p_End ? p_End() : 0; }
+void  WINAPI D3DPERF_SetMarker(DWORD c, LPCWSTR n)  { CaptureEvent(2, n); if (BackendEnsure() && p_SetMarker) p_SetMarker(c, n); }
 void  WINAPI D3DPERF_SetRegion(DWORD c, LPCWSTR n)  { if (BackendEnsure() && p_SetRegion) p_SetRegion(c, n); }
 BOOL  WINAPI D3DPERF_QueryRepeatFrame(void)         { return BackendEnsure() && p_Query ? p_Query() : FALSE; }
 void  WINAPI D3DPERF_SetOptions(DWORD o)            { if (BackendEnsure() && p_Options) p_Options(o); }
