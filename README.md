@@ -8,17 +8,19 @@ Public (checked 2026-10-29 with the GitHub API). Python 3.12+, standard library 
 
 ## Core and adapter
 
-What the core will hold, split as in `napoleon-remastered` `docs/plans/PLAN.md` section 4. **v0.1 is the first row only.**
+What the core holds, split as in `napoleon-remastered` `docs/plans/PLAN.md` section 4 (state as of 0.7.0, 2026-11-01).
 
 | Core (here) | Adapter (game repo) | State |
 |---|---|---|
 | Registry framework, CLI (`wsc`), gates, CI workflow, pre-push hook | registry contents, extra verbs, own schemas | **v0.1** |
-| Watcher, game lock, config profiles, headless display kit, sha-checked PC sync | paths, launch arguments | later |
-| Proxy DLL skeleton: backend loading, log, crash capture, exe-identity guard, runtime patch engine, dev control channel | identity pin, engine sites, scene detection | later |
-| Control API (scene, camera, shot, order, pause, speed) and contact sheets | scenario list, camera poses, openers | later |
-| Pack reader, asset indexer, contact-sheet builder, texture upscaling pipeline | pack quirks, roles | later |
-| RmlUi host, component library machinery, design tokens to RCSS, review viewer, fixture capture | design language, screens, data contracts | later |
-| Frame-time and memory capture, A/B and regression diff | budgets, scenes | later |
+| Watcher, game lock, config profiles, headless display kit, sha-checked PC sync (`harness/`, `proxy/tools/pc_deploy.py`) | paths, launch arguments | **v0.4** (C14) |
+| Proxy DLL skeleton: backend loading, log, crash capture, exe-identity guard, runtime patch engine, dev control channel, campaign console, battle camera (`proxy/src`) | identity pin, engine sites, scene detection, console and camera adapters | **v0.4** (C14) |
+| Control API (`harness/ctl.py`: scene, cam, shot, perf, state, reset, pause, speed; `order` with napoleon J28) and contact sheets | scenario list, camera poses, openers | ctl **v0.4**; contact sheets later |
+| Pack reader (`proxy/src/pack.h`, `proxy/tools/pack_list.py`), asset indexer, contact-sheet builder, texture upscaling pipeline | pack quirks, roles | pack reader **v0.4**; the rest later (napoleon J63, J64) |
+| Job pipeline: the `jobs` verbs, pull-request policy, CI notifier and workflow templates | rows, branch kinds, decision numbering | later (B35, napoleon J62) |
+| RmlUi host, component library machinery, design tokens to RCSS, review viewer, fixture capture | design language, screens, data contracts | later (napoleon J30, J35, J63) |
+| Frame-time and memory capture (`ctl perf`, `dev.capture`), A/B and regression diff | budgets, scenes | perf **v0.4**, capture **v0.7**; A/B diff later |
+| ESF save tools (`saves/`) | record paths, recipes | **v0.4** (C14) |
 
 ## Use it
 
