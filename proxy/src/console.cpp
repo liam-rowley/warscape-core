@@ -130,9 +130,8 @@ bool SetSlot(bool on, std::string& why) {   // s_cs held
     if (!ReadPtr(s_slot, cur)) { why = "slot unreadable"; return false; }
     const SlotClaim c = DecideSlotClaim(cur, (uintptr_t)&s_fwd);
     if (c == SlotClaim::Foreign) { why = "the slot holds a handler that is not ours: left alone"; LOGE("console: slot %p holds %p (not ours): never taken", (void*)s_slot, (void*)cur); return false; }
-    if (on && c == SlotClaim::Claim) *(volatile uintptr_t*)s_slot = (uintptr_t)&s_fwd;
-    if (!on && c == SlotClaim::Ours) *(volatile uintptr_t*)s_slot = 0;
-    s_on = on;
+    if (DecideSlotWrite(on, c) == SlotWrite::Ours) *(volatile uintptr_t*)s_slot = (uintptr_t)&s_fwd;
+    s_on = on;   // off: the forwarder stays in the slot and refuses (gate.on false), so the executor never sees the slot change under it
     LOGI("console: %s (slot %p: %s -> %p)", on ? "on" : "off", (void*)s_slot, SlotClaimName(c), (void*)*(volatile uintptr_t*)s_slot);
     return true;
 }

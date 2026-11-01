@@ -321,8 +321,11 @@ Outcome Console(const std::string& id, const CtlRequest& r, double timeout) {
     LOGI("console: run '%s' (request %s)", l.line.c_str(), id.c_str());
     std::string text; bool to = false;
     const bool ok = RunLua(id, rel, timeout, text, to);
+    DeleteFileW((Rt().gameDir + WidenUtf8(rel)).c_str());   // one chunk per request: gone once the run returns, on every path
     FwdResult fr = FwdResult::None; std::string fname, fwhy; int hits = 0;
-    const bool seen = ConsoleLastSince(seq, fr, fname, fwhy, hits);
+    const bool any = ConsoleLastSince(seq, fr, fname, fwhy, hits);
+    const bool seen = RecordIsForLine(any, fname, l.name);
+    if (any && !seen) { fr = FwdResult::None; hits = 0; fwhy = "no record for this line (the latest is for '" + fname + "')"; }
     const char* path = ConsolePath(ad && ConsoleInList(ad->systemNames, l.name), fr);
     snprintf(b, sizeof b, "\"path\": \"%s\", %s, \"forwarded\": %s, \"hits\": %d, \"chunk\": ", path, common.c_str(),
              seen && fr != FwdResult::Refused ? "true" : "false", hits);

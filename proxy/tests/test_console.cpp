@@ -1,6 +1,7 @@
 // test_console.cpp - host tests for the campaign console (J15): line parsing, the verb's refusals (key off, file name, no-op), the
 // slot-claim rule, the forwarder's gate, the path label, Lua quoting; the adapter's offsets against the bytes of its engine_sites
-// rows; and source lints (key off = no engine read or write, the slot written only after the claim rule, no game named in core).
+// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; the chunk deleted after its run;
+// the record matched to the line; no game named in core).
 // Built and run by proxy/tools/build.sh tests.
 #include "testkit.h"
 #include "console.h"
@@ -57,6 +58,14 @@ int main(int argc, char** argv) {
         CHECK(DecideSlotClaim(0, 0x1000) == SlotClaim::Claim);
         CHECK(DecideSlotClaim(0x1000, 0x1000) == SlotClaim::Ours);
         CHECK(DecideSlotClaim(0x2000, 0x1000) == SlotClaim::Foreign);
+        // only the empty-to-ours claim writes the slot; off never writes it (0 between the executor's test and its call would be called)
+        CHECK(DecideSlotWrite(true, SlotClaim::Claim) == SlotWrite::Ours);
+        CHECK(DecideSlotWrite(true, SlotClaim::Ours) == SlotWrite::None && DecideSlotWrite(true, SlotClaim::Foreign) == SlotWrite::None);
+        CHECK(DecideSlotWrite(false, SlotClaim::Ours) == SlotWrite::None && DecideSlotWrite(false, SlotClaim::Claim) == SlotWrite::None);
+        CHECK(DecideSlotWrite(false, SlotClaim::Foreign) == SlotWrite::None);
+        // a forwarder record counts for the line only when it names the line's command
+        CHECK(RecordIsForLine(true, "teleport_to", "teleport_to"));
+        CHECK(!RecordIsForLine(true, "declare_war", "teleport_to") && !RecordIsForLine(false, "teleport_to", "teleport_to"));
     }
     {   // the forwarder's gate
         ConsoleGate g; CHECK(ForwardRefusal(g) == "console off");
@@ -117,7 +126,8 @@ int main(int argc, char** argv) {
                      plan = cc.find("rt.plan.engineHooks", inst), firstSite = cc.find("SiteAddress(", inst);
         CHECK(inst != std::string::npos && keyRet < plan && plan < firstSite);
         size_t writes = 0; for (size_t k = 0; (k = cc.find("*(volatile uintptr_t*)s_slot = ", k)) != std::string::npos; ++k) ++writes;
-        CHECK(writes == 2);
+        CHECK(writes == 1);                                              // the claim only: off leaves the forwarder in place
+        CHECK(cc.find("*(volatile uintptr_t*)s_slot = 0") == std::string::npos);
         const size_t setSlot = cc.find("bool SetSlot("), claim = cc.find("DecideSlotClaim(cur", setSlot), w1 = cc.find("*(volatile uintptr_t*)s_slot = ", setSlot);
         CHECK(setSlot < claim && claim < w1 && cc.find("*(volatile uintptr_t*)s_slot = ") == w1);
         CHECK(cc.find("Foreign) {") != std::string::npos);
@@ -128,6 +138,13 @@ int main(int argc, char** argv) {
         // the dev side starts the console only after its own plan gate
         const std::string dv = tk::ReadFile("core/dev.cpp");
         CHECK(dv.find("if (!rt.plan.engineHooks || !rt.plan.d3dHooks)") < dv.find("ConsoleInit(k.console"));
+        // the verb deletes its chunk as soon as the run returns, before any result path, and checks the record's name against the line
+        {
+            const size_t verb = dv.find("Outcome Console("), run = dv.find("RunLua(id, rel,", verb), del = dv.find("DeleteFileW(", run),
+                         nextRet = dv.find("return o;", run), match = dv.find("RecordIsForLine(", run);
+            CHECK(verb != std::string::npos && run != std::string::npos && del != std::string::npos && del < nextRet && del - run < 200);
+            CHECK(match != std::string::npos && match < nextRet);
+        }
         for (const char* f : { "console.cpp", "console.h" }) {
             std::string s = tk::ReadFile(std::string("core/") + f);
             for (size_t k; (k = s.find("empire-remastered")) != std::string::npos;) s.erase(k, 17);
