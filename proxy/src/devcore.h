@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include "capture.h"
 
 namespace wsp {
 
@@ -243,9 +244,9 @@ struct CtlRequest {
     std::vector<std::string> scenes;   // waitfor
     std::string luaArgs;       // lua: the text after " -- ", read by the chunk as wsp.dev_config("lua_args") (J4)
 };
-inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, exit"; }
+inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], exit"; }
 inline double CtlDefaultTimeout(const std::string& verb) {
-    return verb == "lua" || verb == "console" ? 30 : verb == "perf" ? 70 : verb == "waitfor" ? 180 : (verb == "autostart" || verb == "reset") ? 240 : 10;
+    return verb == "lua" || verb == "console" ? 30 : verb == "perf" ? 70 : verb == "capture" ? 60 : verb == "waitfor" ? 180 : (verb == "autostart" || verb == "reset") ? 240 : 10;
 }
 
 inline bool ParseTrailingTimeout(std::string& rest, double& t) {   // "x y 30" -> rest "x y", t 30; false when no number at the end
@@ -306,6 +307,12 @@ inline CtlRequest ParseCtl(const std::string& lineIn) {
     }
     if (v == "console") {   // the line itself is checked by ParseConsoleLine (console.h); no trailing timeout: numbers are arguments
         if (r.arg.empty()) r.error = "console needs a command line or status|on|off";
+        return r;
+    }
+    if (v == "capture") {   // capture <name> [frames] (J8): the name and count rules are capture.h ParseCaptureArgs; no trailing timeout
+        const CaptureArgs a = ParseCaptureArgs(r.arg);
+        if (!a.error.empty()) r.error = a.error;
+        else r.timeoutS = 30 + 5.0 * a.frames;
         return r;
     }
     r.error = "unknown verb '" + v + "' (verbs: " + std::string(CtlVerbs()) + ")";
