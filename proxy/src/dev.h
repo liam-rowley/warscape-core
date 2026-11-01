@@ -10,11 +10,11 @@
 namespace wsp {
 
 struct DevKeys {
-    bool timeline = false, logFiles = false, skipIntro = false, stateJson = false, luaBridge = false, ctl = false, console = false, perf = false, camera = false;
-    std::wstring fileRules, ctlDir;
+    bool timeline = false, logFiles = false, skipIntro = false, stateJson = false, luaBridge = false, ctl = false, console = false, perf = false, camera = false, capture = false;
+    std::wstring fileRules, ctlDir, captureDir;
     std::string autostart;
     int autostartDelayMs = 1500;
-    bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || !fileRules.empty() || !autostart.empty(); }
+    bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || capture || !fileRules.empty() || !autostart.empty(); }
 };
 DevKeys& Dk();
 bool DevActive();
@@ -44,6 +44,12 @@ std::string ConsoleStatusJson();                      // result members of ctl c
 void CameraInit(bool key, const CameraAdapter* ad);   // DevInit
 void CameraInstall();                                 // first Direct3DCreate9: verify the sites, read the chain's offsets
 bool CameraSet(const CamPose& p, std::string& why);   // the engine thread (wsp.cam_set): the active mode's SetTargetAndPosition
+
+// capture.cpp (J8): the frame capture behind dev.capture; decisions in its header
+void CaptureInit();                                   // DevInit: the capture folder
+void CaptureInstall(void* device);                    // every CreateDevice: hooks the device's vtable slots (no-op with dev.capture=0)
+void CapturePresent(void* device);                    // the render thread, every Present, before the real one
+bool CaptureRun(const std::string& name, int frames, double timeoutS, std::string& result, std::string& why);   // ctl capture
 
 // files.cpp
 void FilesInit(std::vector<FileRule> rules);          // installs the exe's IAT hooks the rules and keys need
