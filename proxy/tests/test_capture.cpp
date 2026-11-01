@@ -10,7 +10,7 @@ using namespace wsp;
 
 int main(int argc, char** argv) {
     tk::Args(argc, argv);
-    {   // canonical FNV-1a-64 (offset basis 14695981039346656037, not empire's dropped-digit 1469598103934665603)
+    {   // canonical FNV-1a-64 (offset basis 14695981039346656037, not the dropped-digit 1469598103934665603)
         CHECK_EQ(Hex64(Fnv1a64("", 0)), std::string("cbf29ce484222325"));
         CHECK_EQ(Hex64(Fnv1a64("a", 1)), std::string("af63dc4c8601ec8c"));
     }
@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
         size_t len = 0; bool ok = false;
         CHECK_EQ(Hex64(ShaderHash(t, sizeof t, len, ok)), std::string("76b2746673a2c8ef"));
         CHECK(ok && len == 36);
-        CHECK(Hex64(ShaderHash(t, 16, len, ok)) != "76b2746673a2c8ef" && !ok);   // empire's cut at the first 0x0000FFFF (16 bytes) is not the shader
+        CHECK(Hex64(ShaderHash(t, 16, len, ok)) != "76b2746673a2c8ef" && !ok);   // a cut at the first 0x0000FFFF (16 bytes) is not the shader
     }
     {   // vs_1_1: no length field; operands have bit 31 set; def's literals (1.0 = 0x3F800000 has bit 31 clear) are skipped by count
         const uint32_t t[] = { 0xFFFE0101, 0x00000051, 0xA00F0000, 0x3F800000, 0xBF800000, 0x00000000, 0x40000000, 0x00000001, 0x800F0000, 0x90E40000, 0x0000FFFF };
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
             ++hooks; pos = name1;
         }
         CHECK(hooks >= 30);
-        CHECK(cap.find("napoleon_") == std::string::npos && cap.find("Napoleon.exe") == std::string::npos);
+        CHECK(cap.find("Adapter()") == std::string::npos);   // nothing game-specific: the capture reads no adapter field
     }
     return tk::Done("test_capture");
 }

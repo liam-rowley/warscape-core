@@ -3,7 +3,7 @@
 // Game-agnostic, in the device layer. Decisions (the game repo's jobs/J8/brief.md):
 //   - With dev.capture=0 nothing is hooked. With it on, the device's vtable slots below are hooked at CreateDevice; while no capture
 //     runs each hook is one load and a branch before the real call, so the idle frame must match the baseline (checked on the PC).
-//   - Every call of the captured frames is recorded, not the first draw per shader pair (empire-remastered's shader_dump): draws,
+//   - Every call of the captured frames is recorded, not the first draw per shader pair (an older capture's rule): draws,
 //     render and depth targets, clears, StretchRect, shader binds, constant uploads with their values, textures per stage with their
 //     desc, sampler, render and texture-stage states, viewport, scissor, streams, declarations. At arm time the state left by the
 //     previous frame is read back (Get*) and written as a STATE block, so the frame reads complete from its first line.
