@@ -327,6 +327,13 @@ void Close() {
 
 bool CaptureHooked() { return s_hooked; }
 
+void CaptureEvent(int kind, const wchar_t* name) {   // the engine's D3DPERF events: pass names when the engine emits them
+    if (!s_rec || s_depth) return;
+    std::string l = kind == 0 ? "EVENT " : kind == 1 ? "EVENTEND" : "MARKER ";
+    if (kind != 1) l += name ? Narrow(name) : std::string("?");
+    Line(l);
+}
+
 void CaptureInstall(void* dev) {
     if (!Dk().capture || !dev) return;
     void** vt = *(void***)dev;
