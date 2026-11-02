@@ -666,8 +666,11 @@ class Ctl:
             check = {'compared': 'every unit of the player army read (in its army list, on land)', 'expected': 'units > 0, none refused', 'got': len(units), 'ok': good}
             return make_result('order', 'ok' if good else 'failed', '' if good else f'step list: {text[:300]}', start, kind=rt.get('kind'), units=units,
                                check=check, evidence={'list': r})
+        if unit is not None and action in rt.get('commands', {}) and action != 'note':
+            return self.order_command(start, rt, unit.split(','), action, rt['commands'][action])
         if action != 'move' or unit is None:
-            raise Refused('order takes: list | <unit>[,<unit>...] move <x> <z> [facing] [width] [run]')
+            raise Refused('order takes: list | <unit>[,<unit>...] move <x> <z> [facing] [width] [run] | <unit>[,...] '
+                          + ' | '.join(k for k in rt.get('commands', {}) if k != 'note'))
         names = unit.split(',')
 
         def per_unit(i, default):
@@ -741,6 +744,46 @@ class Ctl:
         reason = '' if not bad else 'units ' + ','.join(r['unit'] for r in bad) + ': ' + '; '.join(sorted({r['reason'] for r in bad}))
         return make_result('order', 'ok' if not bad else 'failed', reason, start, unit=unit, kind=rt.get('kind'), action='move', run=run, units=results,
                            settle=settle, check=check, evidence=evid)
+
+    def order_command(self, start, rt, names, action, spec):
+        """`order <unit>[,...] <command>`: one of the route's commands (halt, a formation toggle) through the owner's own dispatcher with a
+        one-unit selection, then wait for rest and check: `stops` = the unit is not moving at rest (a halt during a move ends short of the
+        destination); `shape` = the formation's shape changed (its frontage, or the centre's distance behind the front, by > shape_m)."""
+        try:
+            befores = self.unit_reads(rt, names)
+        except RuntimeError as e:
+            raise Refused(str(e).replace('step read ', 'unit ', 1))
+        ptrs, pushes, evid = [b['ptr'] for b in befores], [], {}
+        for i, ptr in enumerate(ptrs):
+            ok, text, r = self.lua(rt['chunk'], f"command {ptr} {int(spec['cmd'])} {float(spec.get('arg', 0))!r}")
+            evid[f'push_{names[i]}'] = r
+            if not ok or not text.startswith('pushed '):
+                reason = text.replace('orders refused: ', '') if ok else text
+                if not i and any(w in reason for w in REFUSALS):
+                    raise Refused(f'unit {names[i]}: {reason}')
+                return make_result('order', 'failed', f'step push: unit {names[i]}: {reason}', start, unit=','.join(names), before=befores, evidence=evid)
+            pushes.append(text)
+        settles, gots = self.order_settle(rt, ptrs, rt.get('settle', {}).get('base_s', 60))
+        tol, results = rt.get('tolerance', {}), []
+        for i in range(len(ptrs)):
+            b, g = befores[i], gots[i]
+            if spec.get('check') == 'stops':
+                fields = {'moving': {'expected': 0, 'got': g.get('moving'), 'within': g.get('moving') == 0}}
+            else:
+                da = abs((centre_ahead(g) or 0) - (centre_ahead(b) or 0))
+                dw = abs(g.get('width', 0) - b.get('width', 0))
+                fields = {'shape_change_m': {'expected': f">= {tol.get('shape_m', 0.3)}", 'got': round(max(da, dw), 4), 'depth_change_m': round(da, 4),
+                                             'width_change_m': round(dw, 4), 'within': max(da, dw) >= tol.get('shape_m', 0.3)}}
+            ok = settles[i]['settled'] and all(f['within'] for f in fields.values())
+            reason = '' if ok else ('not at rest before the timeout' if not settles[i]['settled'] else f"{action}: no effect read back")
+            results.append({'unit': names[i], 'ptr': ptrs[i], 'status': 'ok' if ok else 'failed', 'reason': reason, 'before': b, 'got': g, 'pushed': pushes[i],
+                             'settle': settles[i], 'check': {'compared': f"{action} ({spec.get('check')})", 'fields': fields, 'ok': ok}})
+        bad = [r for r in results if r['status'] != 'ok']
+        check = {'compared': f'{action} on {len(results)} unit(s), each read back at rest', 'expected': 'every unit ok', 'got': f'{len(results) - len(bad)} ok', 'ok': not bad}
+        reason = '' if not bad else 'units ' + ','.join(r['unit'] for r in bad) + ': ' + '; '.join(sorted({r['reason'] for r in bad}))
+        return make_result('order', 'ok' if not bad else 'failed', reason, start, unit=','.join(names), kind=rt.get('kind'), action=action, units=results, check=check,
+                           settle={'waited_for': 'every unit at rest', 'waited_s': max(x['waited_s'] for x in settles), 'settled': all(x['settled'] for x in settles)},
+                           evidence=evid)
 
     def order_speed(self, rt, dist):
         """The battle speed for the wait: the route's settle.wait_speed (a speed route name, e.g. ffwd) when the move is at least
