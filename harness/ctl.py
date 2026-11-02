@@ -688,8 +688,10 @@ class Ctl:
             raise Refused('order <unit> move <x> <z>: x and z are required')
         try:
             befores = self.unit_reads(rt, names)
-        except RuntimeError as e:   # torn down, not a UNIT, on a ship, dev.orders off: nothing pushed
-            raise Refused(str(e).replace('step read ', 'unit ', 1))
+        except RuntimeError as e:   # torn down, not a UNIT, on a ship, dev.orders off: refused, nothing pushed; anything else (the chunk) failed
+            if any(w in str(e) for w in REFUSALS + ('army is not readable', 'no army known', 'not in the army')):
+                raise Refused(str(e).replace('step read ', 'unit ', 1))
+            raise
         ptrs = [b['ptr'] for b in befores]   # a number is the army list position now: a lost unit renumbers the rest (run 20261102_j28pc c6)
         if len(set(ptrs)) != len(ptrs):
             raise Refused('a unit is named twice')
@@ -752,7 +754,9 @@ class Ctl:
         try:
             befores = self.unit_reads(rt, names)
         except RuntimeError as e:
-            raise Refused(str(e).replace('step read ', 'unit ', 1))
+            if any(w in str(e) for w in REFUSALS + ('army is not readable', 'no army known', 'not in the army')):
+                raise Refused(str(e).replace('step read ', 'unit ', 1))
+            raise
         ptrs, pushes, evid = [b['ptr'] for b in befores], [], {}
         for i, ptr in enumerate(ptrs):
             ok, text, r = self.lua(rt['chunk'], f"command {ptr} {int(spec['cmd'])} {float(spec.get('arg', 0))!r}")
