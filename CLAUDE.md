@@ -5,7 +5,8 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
 
 ## Before you start
 1. `git pull`. Read `README.md`, `docs/DECISIONS.md` and, for consumers, `docs/CONSUMING.md`.
-2. Look it up before you write it: `python3 wsc.py find <words>` searches every registry; the tools view is `registries/tools.md`.
+2. Look it up before you write it: `python3 wsc.py find <words>` searches every registry; the tools view is `_scratch/registries/tools.md`
+   (`python3 wsc.py reg render` writes it: views are not committed, C19).
 3. Set the hook once per clone: `git config core.hooksPath .githooks` (the `hooks` gate warns until you do).
 
 ## Jobs (C18): the core runs the same queue a game does
@@ -26,10 +27,12 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
   `wsc` verb (`warscape/verbs/<name>.py`: `NAME`, `HELP`, `add_arguments`, `run`) unless there is a reason it cannot be.
 - **Every tool has a header and a row.** In its first 40 lines: `purpose:`, `usage:`, `when:`, and `verb: <name>` or
   `not-a-verb: <reason>` (comment lines, or a Python docstring; format in `warscape/tools.py`). Then `python3 wsc.py reg add tools <path>`
-  and commit the file, `registries/tools.jsonl` and `registries/tools.md` together. Library modules (`warscape/*.py`) and host
+  and commit the file and `registries/tools.jsonl` together. Library modules (`warscape/*.py`) and host
   tests are not tools (`wsc.toml` `[tools]`). Retire a tool with `wsc reg set tools <id> status=superseded:<new id>`; after a move,
   `wsc reg add tools <new path> --id <its id>` keeps its id.
-- **Registries change through `wsc reg`** (or a JSONL edit followed by `wsc reg render`). Never edit a generated view.
+- **Registries change through `wsc reg`** (or a JSONL edit followed by `wsc reg render`). Views are generated into the git-ignored
+  `_scratch/registries/` and never committed (C19, `wsc.toml` `[views] commit = false`; the `registries` gate refuses a committed one): a `brief/` branch may change
+  only its brief and its row, so a committed view of the jobs registry could never be current on it.
 - **"Verified" carries a date and a run id** (e.g. "verified 2026-10-28, run 20261028_a"); in registries use the structured
   fields (`verified: {date, run}`, `state` + `date` + `evidence`). The `verified_dates` gate fails an undated claim in a living doc.
 - **Standard library only, Python 3.12.** A dependency needs a dated decision in `docs/DECISIONS.md` first (C3 names the fallback).

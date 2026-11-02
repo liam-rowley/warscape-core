@@ -130,6 +130,8 @@ reaches a game only with a core release). Procedure for a reviewer: `docs/REVIEW
 jobs = "core:jobs"                 # the schema; ids are one capital letter and a number
 [storage]
 dir = ["jobs"]                     # one file per row: two job branches never conflict on the registry
+[views]
+commit = false                     # the queue and committed views do not mix (below)
 [jobs]
 id_prefix = "J"                    # job ids J<n>, branches job/J<n> and brief/J<n>
 dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
@@ -148,6 +150,10 @@ plan = [...]                       # globs a plan/* branch may touch; meta = [..
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
 workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
 ```
+- **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
+  `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
+  branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
+  plan`/`meta`. Nothing refuses the combination yet (B49), so a repo would find out at its first brief.
 - **Hook points** (`warscape/hooks.py`, listed in `[jobs] hooks`; all optional): `brief_problems(ctx, jid, row, text)`, `queue_problems(ctx, rows, files)`,
   `policy_problems(ctx, facts)`, `view_panel(ctx)` and `summary(ctx, rows, read)`. Five names and no more; general game gates are B1 (B46).
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
