@@ -150,12 +150,13 @@ bool UnitRef(lua_State* L, int i, uint32_t& unit, std::string& why) {
         if (!unit || !end || *end) { why = "a unit ref string is a hex pointer (0x...)"; return false; }
         return true;
     }
-    if (lua_type(L, i) == LUA_TLIGHTUSERDATA) { unit = (uint32_t)(uintptr_t)lua_touserdata(L, i); if (unit) return true; why = "null unit"; return false; }
+    if (lua_type(L, i) == LUA_TLIGHTUSERDATA) { unit = (uint32_t)(uintptr_t)lua_touserdata(L, i); if (!unit) { why = "null unit"; return false; } return true; }
     if (lua_type(L, i) == LUA_TUSERDATA) {   // the engine's Pointer<T> userdata (BattleUI.UnitListForBattleIds): the pointer is its first dword
         const void* b = lua_touserdata(L, i);
         if (!b || lua_objlen(L, i) < 4) { why = "a userdata unit ref is smaller than a pointer"; return false; }
         memcpy(&unit, b, 4);
-        if (unit) return true; why = "null unit"; return false;
+        if (!unit) { why = "null unit"; return false; }
+        return true;
     }
     if (lua_type(L, i) == LUA_TNUMBER) {
         const int n = (int)lua_tonumber(L, i);
