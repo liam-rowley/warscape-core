@@ -38,6 +38,7 @@ In a game repo the core sits at `core/` and the commands are `python3 core/wsc.p
 
 Each registry is its rows (one JSONL file, or one file per row: `[storage] dir`), a JSON Schema, a generated Markdown view
 (committed, or written to a git-ignored folder: `[views] commit`) and a check, all behind `wsc reg` (`docs/CONSUMING.md`).
+The core's own views are not committed (C19): `python3 wsc.py reg render` writes them to `_scratch/registries/`.
 A repo declares its registries in `wsc.toml`; the core ships these schemas (`schemas/`):
 
 | Registry | Holds |
