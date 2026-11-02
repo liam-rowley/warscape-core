@@ -27,6 +27,8 @@
 //   wsp.unit_list([ref]) -> { {state}, ... } | nil, err    the army of ref (none: the cached player army)
 //   wsp.selection() -> {units = {ptr, ...}, groups = n} | nil, err   the UI's own selection (loose land units)
 //   wsp.order_move(ref, x, z, [facing], [width], [run], [queue]) -> true, info | nil, err   one unit, the engine's own command path
+//   wsp.order_command(ref, cmd, [arg]) -> true, info | nil, err   the owner's "current selection" dispatcher with a one-unit selection
+//                                                          (the codes are the game's: halt, formation toggles, run/walk ...)
 //   wsp.peek(addr, n) -> hex | nil, err                     probe: n <= 512 bytes read (never a write)
 //   wsp.orders_info() -> text                              install state, owner path, thread ids
 #include "dev.h"
@@ -221,6 +223,15 @@ int l_order_move(lua_State* L) {
     lua_pushboolean(L, 1); lua_pushstring(L, info.c_str());
     return 2;
 }
+int l_order_command(lua_State* L) {
+    uint32_t unit = 0; std::string why, info;
+    if (!UnitRef(L, 1, unit, why)) return Fail(L, why.c_str());
+    if (lua_type(L, 2) != LUA_TNUMBER) return Fail(L, "expected (unit, cmd, [arg])");
+    const float arg = lua_type(L, 3) == LUA_TNUMBER ? (float)lua_tonumber(L, 3) : 0.0f;
+    if (!OrdersCommand(unit, (int)lua_tonumber(L, 2), arg, info, why)) return Fail(L, why.c_str());
+    lua_pushboolean(L, 1); lua_pushstring(L, info.c_str());
+    return 2;
+}
 int l_peek(lua_State* L) {
     uint32_t a = 0; std::string why, hex;
     if (!UnitRef(L, 1, a, why)) return Fail(L, why.c_str());
@@ -234,7 +245,7 @@ int l_orders_info(lua_State* L) { lua_pushstring(L, OrdersInfo().c_str()); retur
 const luaL_Reg s_funcs[] = {
     { "log", l_log }, { "version", l_version }, { "poll", l_poll }, { "result", l_result }, { "dev_config", l_dev_config },
     { "dev_state", l_dev_state }, { "report", l_report }, { "vanilla", l_vanilla }, { "cam_set", l_cam_set },
-    { "unit_state", l_unit_state }, { "unit_list", l_unit_list }, { "selection", l_selection }, { "order_move", l_order_move },
+    { "unit_state", l_unit_state }, { "unit_list", l_unit_list }, { "selection", l_selection }, { "order_move", l_order_move }, { "order_command", l_order_command },
     { "peek", l_peek }, { "orders_info", l_orders_info }, { nullptr, nullptr }
 };
 } // namespace

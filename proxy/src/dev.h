@@ -55,6 +55,7 @@ bool OrdersUnit(uint32_t unit, UnitState& s, std::string& why);                 
 bool OrdersArmy(uint32_t unit, std::vector<uint32_t>& units, std::string& why);      // unit's army (0 = the cached player army)
 bool OrdersSelection(std::vector<uint32_t>& loose, int& groups, std::string& why);   // the UI's own selection S
 bool OrdersMove(uint32_t unit, const MoveArgs& a, std::string& info, std::string& why);   // the engine thread only (refuses others)
+bool OrdersCommand(uint32_t unit, int cmd, float arg, std::string& info, std::string& why);   // the engine thread: the owner's dispatcher
 long OrdersPost(uint32_t unit, const MoveArgs& a);    // any thread: queued for the next pump; 0 = dev.orders off
 bool OrdersPostResult(long id, bool& ok, std::string& text);   // a posted order's outcome, once
 bool OrdersPeek(uint32_t a, size_t n, std::string& hex, std::string& why);         // probe: n bytes as hex (reads only)

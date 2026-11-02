@@ -51,6 +51,10 @@ struct OrdersAdapter {
     // the ground projection the script path uses: terrain = [[battle + <imm8 a>] + b]; terrain->Project(loc out, xz in, 0, 1, 0)
     const char* groundChainSite; int groundAOperand8, groundBOperand;
     const char* groundFnSite;
+    // the owner's "current selection" command dispatcher (halt, formation toggles, run/walk ...: the codes are the game's, in its Lua):
+    // cell = owner + <cellOperand> (holds the battle; the dispatcher's this), dispatcher(sel*, int cmd, float arg, bool flag)
+    const char* cmdCellSite; int cmdCellOperand;
+    const char* cmdSite;
 };
 
 // ---- angles ------------------------------------------------------------------------------------------------------------------------

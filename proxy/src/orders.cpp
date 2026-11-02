@@ -1,6 +1,7 @@
 // orders.cpp - the battle unit control route (J28): live unit state read from engine memory, the UI's own selection, and move/face
 // orders built and pushed through the engine's own command path (Selection ctor, AddUnit, the move command ctor, the queue push, the
-// command dtor), as the engine's script binding and its ground-order handler do. Nothing is patched or detoured: the functions are
+// command dtor), as the engine's script binding and its ground-order handler do; other unit commands (halt, formation toggles, ...)
+// through the owner's own "current selection" dispatcher with the same one-unit selection (OrdersCommand). Nothing is patched or detoured: the functions are
 // called, every address and offset comes from a checked engine_sites row (OrdersAdapter), every pointer is checked with VirtualQuery
 // before it is read or called through (the mingw build has no SEH), and all preconditions are checked before the first engine call.
 // dev.orders off: nothing here reads engine memory and every entry refuses. Decisions are pure (orders.h, host-tested).
@@ -25,8 +26,8 @@ std::string s_sitesWhy = "not installed yet";
 const OrdersAdapter* s_ad = nullptr;
 UnitLayout s_L;
 uintptr_t s_global = 0;
-uint32_t s_battleOff = 0, s_queueOff = 0, s_holderOff = 0, s_selOff = 0, s_selVec = 0, s_groundA = 0, s_groundB = 0;
-uintptr_t s_moving = 0, s_selCtor = 0, s_selAdd = 0, s_moveCtor = 0, s_movePush = 0, s_cmdDtor = 0, s_free = 0, s_groundFn = 0;
+uint32_t s_cellOff = 0, s_battleOff = 0, s_queueOff = 0, s_holderOff = 0, s_selOff = 0, s_selVec = 0, s_groundA = 0, s_groundB = 0;
+uintptr_t s_cmd = 0, s_moving = 0, s_selCtor = 0, s_selAdd = 0, s_moveCtor = 0, s_movePush = 0, s_cmdDtor = 0, s_free = 0, s_groundFn = 0;
 DWORD s_engineTid = 0, s_presentTid = 0, s_wndTid = 0;
 uint32_t s_army = 0;          // the player's army, cached from the UI selection or the last unit a caller named
 int s_orders = 0;
@@ -70,6 +71,7 @@ using PushFn = uint32_t(__thiscall*)(void* queue, void* cmd);
 using DtorFn = void(__thiscall*)(void* self);
 using FreeFn = void(__cdecl*)(void* p);
 using MovingFn = uint32_t(__thiscall*)(void* unit);
+using DispatchFn = void(__thiscall*)(void* cell, void* sel, int cmd, float arg, int flag);
 using GroundFn = void*(__thiscall*)(void* terrain, uint32_t* locOut, const float* xz, int a, int b, int c);
 
 bool UnitLocked(uint32_t unit, UnitState& s, std::string& why) {
@@ -129,6 +131,37 @@ bool MoveLocked(uint32_t unit, MoveArgs a, std::string& info, std::string& why) 
     return true;
 }
 
+// One unit through the owner's own "current selection" dispatcher (as every BattleUI.Current_Selection_* call does with the UI's
+// selection), with a one-unit selection of our own: the engine builds and pushes the command for `cmd` (and drops it when it would).
+bool CommandLocked(uint32_t unit, int cmd, float arg, std::string& info, std::string& why) {
+    if (!s_key) { why = "dev.orders=0"; return false; }
+    if (!s_installed) { why = "orders not installed: " + s_sitesWhy; return false; }
+    if (GetCurrentThreadId() != s_engineTid) { why = "not the engine thread"; return false; }
+    if (cmd < 0 || cmd > 0xff || !std::isfinite(arg)) { why = "a command code is 0..255 and its argument a finite number"; return false; }
+    UnitState s;
+    if (!UnitLocked(unit, s, why)) return false;
+    if (s.men <= 0) { why = "the unit has no men alive"; return false; }
+    uint32_t battle = 0, queue = 0, owner = 0, cellBattle = 0;
+    if (!Battle(battle, queue, why)) return false;
+    if (!ReadPtr(s_global, owner) || !ReadPtr(owner + s_cellOff, cellBattle) || cellBattle != battle) { why = "the owner's command cell does not hold the battle"; return false; }
+    for (uintptr_t f : { s_selCtor, s_selAdd, s_free, s_cmd })
+        if (!Executable(f)) { why = "an order function is not executable code in the exe"; return false; }
+    alignas(16) uint8_t sel[kSelBuf] = {};
+    ((CtorFn)s_selCtor)(sel);
+    ((AddFn)s_selAdd)(sel, unit);
+    uint32_t taken = 0; memcpy(&taken, sel + s_selVec + s_ad->vecCountOff, 4);
+    if (taken == 1) ((DispatchFn)s_cmd)((void*)(uintptr_t)(owner + s_cellOff), sel, cmd, arg, 0);
+    for (int off : s_ad->selDataOffs) { uint32_t p = 0; memcpy(&p, sel + off, 4); if (p) ((FreeFn)s_free)((void*)(uintptr_t)p); }
+    if (taken != 1) { char b[96]; snprintf(b, sizeof b, "the engine refused the unit (AddUnit took %u: routing, dead or withdrawing)", taken); why = b; return false; }
+    ++s_orders;
+    char b[200];
+    snprintf(b, sizeof b, "command #%d unit %s cmd %d (0x%x) arg %.3f dispatched (was at %.3f, %.3f facing %.3f, moving %d)", s_orders, Hex(unit).c_str(), cmd, cmd, arg,
+             s.x, s.z, s.facing, s.moving);
+    info = b;
+    LOGI("orders: %s", b);
+    return true;
+}
+
 BOOL CALLBACK FindWnd(HWND h, LPARAM p) {
     DWORD pid = 0; const DWORD tid = GetWindowThreadProcessId(h, &pid);
     if (pid == GetCurrentProcessId() && IsWindowVisible(h) && !GetWindow(h, GW_OWNER)) { *(DWORD*)p = tid; return FALSE; }
@@ -150,7 +183,7 @@ void OrdersInstall() {
     const OrdersAdapter& a = *s_ad;
     for (const char* s : { a.queueSite, a.uiSelectionSite, a.selAddSite, a.entitySite, a.entityOrdersSite, a.positionSite, a.positionXyzSite,
                            a.frameSite, a.bearingSite, a.menSite, a.armySite, a.selCtorSite, a.moveCtorSite, a.movePushSite, a.cmdDtorSite,
-                           a.freeSite, a.groundChainSite, a.groundFnSite })
+                           a.freeSite, a.groundChainSite, a.groundFnSite, a.cmdCellSite, a.cmdSite })
         if (!SiteAddress(s)) { s_sitesWhy = std::string("site ") + s + " not accepted by the patch engine" + (rt.sitesWhy.empty() ? "" : ": " + rt.sitesWhy); LOGE("orders: not installed: %s", s_sitesWhy.c_str()); return; }
     if (a.selBytes <= 0 || (size_t)a.selBytes > kSelBuf || a.cmdBytes <= 0 || (size_t)a.cmdBytes > kCmdBuf) { s_sitesWhy = "the adapter's object sizes exceed the driver's buffers"; LOGE("orders: not installed: %s", s_sitesWhy.c_str()); return; }
     s_global = Operand(a.queueSite, a.globalOperand);
@@ -173,6 +206,8 @@ void OrdersInstall() {
     s_L.frontOff = a.frontOff; s_L.widthOff = a.widthOff;
     const uint32_t posEntity = Operand(a.positionSite, a.posEntityOperand);
     if (posEntity != s_L.entities) { s_sitesWhy = "the position getter's entity offset differs from the entity table's"; LOGE("orders: not installed: %s", s_sitesWhy.c_str()); return; }
+    s_cellOff = Operand(a.cmdCellSite, a.cmdCellOperand);
+    s_cmd = SiteAddress(a.cmdSite);
     s_groundA = Operand8(a.groundChainSite, a.groundAOperand8);
     s_groundB = Operand(a.groundChainSite, a.groundBOperand);
     s_moving = SiteAddress(a.entitySite);
@@ -215,6 +250,7 @@ void OrdersPresent() {
 }
 
 bool OrdersMove(uint32_t unit, const MoveArgs& a, std::string& info, std::string& why) { Lock l; return MoveLocked(unit, a, info, why); }
+bool OrdersCommand(uint32_t unit, int cmd, float arg, std::string& info, std::string& why) { Lock l; return CommandLocked(unit, cmd, arg, info, why); }
 
 long OrdersPost(uint32_t unit, const MoveArgs& a) {
     Lock l;
