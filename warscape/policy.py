@@ -25,7 +25,7 @@ def settings(config):
     """The policy settings from a loaded wsc.toml: `[policy]` plus the pieces of `[jobs]` and `registries_dir` the rules need."""
     p, j = config['policy'], config['jobs']
     return {'decisions': p['decisions'], 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
-            'meta': list(p['meta']), 'job_prefix': j['id_prefix'], 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
+            'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl", 'text': dict(j['text'])}
 
 
@@ -119,6 +119,8 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
     kind = m.group(1) if m else branch.split('/', 1)[0] if '/' in branch else ''
     if hook:
         errs += hook({'branch': branch, 'kind': kind, 'jid': m.group(2) if m else None, 'changed': changed})
+    if branch in cfg.get('bootstrap', ()):   # [policy] bootstrap: the pull request that introduces the pipeline (see repo.py DEFAULTS)
+        return errs
     other_rows_changed = lambda jid: sorted(k for k in set(base_rows) | set(head_rows)
                                              if k != jid and base_rows.get(k) != head_rows.get(k))
     review_ref = f" ({T['review_doc']})" if T.get('review_doc') else ''

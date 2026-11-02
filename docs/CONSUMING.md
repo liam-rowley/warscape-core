@@ -141,6 +141,7 @@ ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows nam
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
 decision_prefix = "D"
+bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
 plan = [...]                       # globs a plan/* branch may touch; meta = [...] for a meta/* branch
 [ci]

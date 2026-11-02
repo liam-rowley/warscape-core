@@ -71,6 +71,10 @@ DEFAULTS = {
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
         'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
                  'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
+        # Exact branch names exempt from the branch-kind rules (the decisions check and the repo's policy hooks still run). Only for the one pull
+        # request that introduces the pipeline into a repo: it cannot be a job (no brief on the base, no independent review yet) and its files are
+        # wider than any meta/ list. Remove the entry in the next change; an exemption that outlives its branch is inert but is a smell.
+        'bootstrap': [],
     },
     # CI helpers (`wsc ci`; warscape/ci.py)
     'ci': {

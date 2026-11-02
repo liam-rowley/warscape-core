@@ -53,6 +53,10 @@ plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries
 meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/jobs.md", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
         "tests/**", "wsc.toml", ".gitattributes", ".gitignore", "schemas/*", "registries/*"]
 
+# The pull request that introduces this pipeline cannot be a job (no brief on the base, no independent review yet) and touches more than any meta/
+# list allows, so its branch is named here, exactly, and skips the branch-kind rules only (C18; docs/BACKLOG.md B48 removes the entry in the next change).
+bootstrap = ["napoleon-j62"]
+
 [ci]
 workflows = ["gates.yml", "policy.yml"]
 core = ""

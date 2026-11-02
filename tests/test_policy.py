@@ -46,6 +46,20 @@ class Policy(unittest.TestCase):
         return check(branch, changed, base_rows or {'J1': ROW, 'J2': OTHER}, head_rows or {'J1': ROW, 'J2': OTHER},
                         base or files(), head or files())
 
+    def test_a_bootstrap_branch_skips_the_kind_rules_but_not_the_decisions_or_the_hooks(self):
+        boot = {**CFG, 'bootstrap': ['pipeline-0.9.0']}
+        files_changed = ['warscape/jobq.py', 'docs/DECISIONS.md', 'proxy/x.cpp']
+        # an ordinary branch of that name is refused, the listed one is not
+        self.assertTrue(pp.check('pipeline-0.9.0', files_changed[:1], {}, {}, files(), files(), cfg=CFG))
+        self.assertEqual(pp.check('pipeline-0.9.0', files_changed[:1], {}, {}, files(), files(), cfg=boot), [])
+        self.assertTrue(pp.check('pipeline-0.9.1', files_changed[:1], {}, {}, files(), files(), cfg=boot))   # exact names only
+        base = '| D1 | 2026-10-28 | Liam | A. | yes |\n'
+        e = pp.check('pipeline-0.9.0', ['docs/DECISIONS.md'], {}, {}, files(**{'docs/DECISIONS.md': base}),
+                     files(**{'docs/DECISIONS.md': base.replace('A.', 'Changed.')}), cfg=boot)
+        self.assertTrue(any('append only' in x for x in e), e)
+        e = pp.check('pipeline-0.9.0', ['x'], {}, {}, files(), files(), cfg=boot, hook=lambda f: ['hook says no'])
+        self.assertEqual(e, ['hook says no'])
+
     def test_verdict_parsing(self):
         self.assertEqual(pp.verdict('# R\n\n**Verdict: merge after fixes.** The skeleton is fine.'), 'merge after fixes')
         self.assertEqual(pp.verdict('**Verdict: merge.** Looks good.'), 'merge')
