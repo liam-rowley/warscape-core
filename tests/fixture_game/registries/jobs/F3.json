@@ -1,0 +1,12 @@
+{
+  "id": "F3",
+  "description": "The third fixture job, with no brief yet.",
+  "title": "Fixture third job",
+  "phase": 2,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "F2"
+  ]
+}

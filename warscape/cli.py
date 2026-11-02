@@ -10,7 +10,7 @@ from . import core_version
 from .registry import RegistryError
 from .repo import ConfigError, Ctx
 
-CORE_VERBS = ('reg', 'find', 'gates')
+CORE_VERBS = ('reg', 'find', 'gates', 'jobs', 'policy', 'ci')
 
 
 def _load_verbs(ctx):

@@ -8,9 +8,18 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
 2. Look it up before you write it: `python3 wsc.py find <words>` searches every registry; the tools view is `registries/tools.md`.
 3. Set the hook once per clone: `git config core.hooksPath .githooks` (the `hooks` gate warns until you do).
 
+## Jobs (C18): the core runs the same queue a game does
+- The queue is the `jobs` registry (`registries/jobs/W<n>.json`, one file per job) with a folder `jobs/<id>/` per job (`brief.md`, `report.md`,
+  `review.md`); a job in progress is a remote branch `job/<id>`. `python3 wsc.py jobs next` names the next job (or the brief to write, on `brief/<id>`);
+  `jobs review` and `jobs fix` name the branch to review or fix; `jobs view` shows the queue; `jobs check` runs in the `jobs` gate.
+- The branch name decides what a pull request may change (`python3 wsc.py policy --branch <branch>`; the kinds are the docstring of `warscape/policy.py`).
+  Work Liam asks for that is not in the queue becomes a `needs_brief` row on a `plan/` branch first. A job is reviewed by a fresh session (`docs/REVIEW.md`);
+  never mark your own job `done`, never review a job you built. Everything a game can configure is in `docs/CONSUMING.md`, "The job pipeline".
+
 ## While you work
-- Work on a branch; commit and push after every meaningful step. `main` changes only by a merge Liam approves. Tags (`vX.Y.Z`)
-  are cut only after that merge, and `VERSION` says the same number (`core_pin` gate).
+- Work on a branch; commit and push after every meaningful step. `main` changes only through the job queue (below, C18): a `job/W<n>`
+  branch is merged by its independent reviewer on green CI. Tags (`vX.Y.Z`) are cut by Liam only, after the merge, and `VERSION` says the
+  same number (`core_pin` gate). Every commit carries a `Claude-Session: <session id>` trailer (the `policy` check reads it).
 - **A learning becomes code first.** When something bites (a timing, a trap, a wrong default), fix it in the tool, its default,
   a schema rule, a guard or a gate so the next agent cannot hit it. Prose is the last resort, in the doc that owns the topic.
 - **Reuse before you write.** Extend an existing verb or library module rather than adding a near-duplicate. A new capability is a

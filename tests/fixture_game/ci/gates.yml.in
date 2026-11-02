@@ -1,0 +1,19 @@
+name: gates
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+{{wsc changes}}
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python core/wsc.py gates
+  lib:
+    needs: changes
+{{wsc if lib}}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build the lib
+{{wsc pass_marker lib}}
+{{wsc notify gates needs=changes,gates,lib}}

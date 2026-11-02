@@ -1,0 +1,20 @@
+# purpose: CI's `policy` check on every pull request: the branch kind decides what it may change (`wsc policy`, docs/CONSUMING.md "The job pipeline");
+#          a failure comments on the pull request.
+# usage: runs on GitHub Actions; locally: python3 wsc.py policy --branch <branch> --base origin/main
+# when: automatic on pull requests; require the "policy" check in branch protection for main.
+# Draft pull requests skip it: a job's builder opens its pull request as a draft when the job reaches review, so the review sees the branch's CI
+# without a `policy` that must fail until the review says merge. The reviewer marks the pull request ready BEFORE pushing the review commit
+# (a skipped policy counts as passed, and `gh pr merge --auto` merges at once when the checks have passed), so the pushed head gets a real
+# `policy` run; the ready_for_review run on the old head has no merge verdict and is red by design: the push cancels it, and `notify` stays silent.
+name: policy
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+{{wsc policy}}
+{{wsc notify policy}}
