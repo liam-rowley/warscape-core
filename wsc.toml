@@ -32,6 +32,11 @@ dirs = ["tests"]
 [storage]
 dir = ["jobs"]
 
+# Views are not committed (C19): a brief/ branch may change only its brief and its row, and a committed registries/jobs.md would have to change with the row.
+# `python3 wsc.py reg render` writes them to the git-ignored _scratch/registries/.
+[views]
+commit = false
+
 [jobs]
 id_prefix = "W"
 
@@ -49,13 +54,9 @@ ref_brief_merge = "C18"
 [policy]
 decisions = "docs/DECISIONS.md"
 decision_prefix = "C"
-plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/jobs.md", "README.md", "CLAUDE.md"]
-meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/jobs.md", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
+plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md", "CLAUDE.md"]
+meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
         "tests/**", "wsc.toml", ".gitattributes", ".gitignore", "schemas/*", "registries/*"]
-
-# The pull request that introduces this pipeline cannot be a job (no brief on the base, no independent review yet) and touches more than any meta/
-# list allows, so its branch is named here, exactly, and skips the branch-kind rules only (C18; docs/BACKLOG.md B48 removes the entry in the next change).
-bootstrap = ["napoleon-j62"]
 
 [ci]
 workflows = ["gates.yml", "policy.yml"]

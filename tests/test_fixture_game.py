@@ -198,6 +198,43 @@ class Policy(Fixture):
         self.assertNotIn('Claude-Session', err)   # the fixture's trailer is Agent-Session
 
 
+BRIEF = ('# F3: Fixture third job\n\nModel: Sonnet. Budget about 40 tool calls; at the cap, stop. Fixture rule: this brief says so.\n\n'
+         '## Kill criteria\n- It breaks twice: stop.\n\n## Finish\nWrite `jobs/F3/report.md`. Then `wsc reg set jobs F3 status=review report=jobs/F3/report.md`.\n')
+
+
+class BriefBranch(Fixture):
+    def test_a_brief_branch_passes_policy_and_gates(self):
+        """C19: the brief writer's own commands (the brief file, then `reg set jobs F3 status=queued brief=...`) change the brief and the row and
+        nothing else, and the branch passes `policy` (brief and row only) and the gates (queue, registries, rendered workflows). The fixture does not
+        commit views (`[views] commit = false`). With `commit = true` the same `reg set` also writes registries/jobs.md, a third file that `policy`
+        refuses on a brief branch while the `registries` gate refuses the branch without it: flipping the fixture's wsc.toml makes this test fail at
+        the first assertion (checked 2026-11-02; the core's own deadlock, reproduced on a throwaway brief/W1 before C19)."""
+        status = lambda: git(self.d, 'status', '--porcelain', '--untracked-files=all').stdout.splitlines()
+        git(self.d, 'checkout', '-q', '-B', 'brief/F3', 'main')
+
+        def back():
+            git(self.d, 'checkout', '-q', '-f', 'main')
+            git(self.d, 'clean', '-fdq')
+            git(self.d, 'branch', '-q', '-D', 'brief/F3')
+        self.addCleanup(back)
+        (self.d / 'jobs' / 'F3').mkdir(parents=True)
+        (self.d / 'jobs' / 'F3' / 'brief.md').write_text(BRIEF, encoding='utf-8', newline='\n')
+        rc, out, err = self.wsc('reg', 'set', 'jobs', 'F3', 'status=queued', 'brief=jobs/F3/brief.md')
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sorted(l[3:] for l in status()), ['jobs/F3/brief.md', 'registries/jobs/F3.json'])
+        git(self.d, 'add', '-A')
+        git(self.d, 'commit', '-q', '-m', 'F3 brief', '--trailer', 'Agent-Session: brief-writer')
+        self.assertEqual(git(self.d, 'diff', '--name-only', 'main...HEAD').stdout.split(), ['jobs/F3/brief.md', 'registries/jobs/F3.json'])
+        rc, out, err = self.wsc('policy', '--branch', 'brief/F3', '--base', 'main')
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn('brief/F3: ok (2 files changed)', out)
+        rc, out, err = self.wsc('gates', '--only', 'registries,json,conflict_markers,jobs,ci_render')
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn('queue ok', out)
+        self.assertEqual(status(), [])   # neither command left a changed file behind: the view went to the ignored _scratch/registries/
+        self.assertTrue((self.d / '_scratch' / 'registries' / 'jobs.md').is_file())
+
+
 class Ci(Fixture):
     def test_inputs_and_render(self):
         rc, out, err = self.wsc('ci', 'inputs', '--base', '')

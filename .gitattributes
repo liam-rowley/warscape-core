@@ -9,9 +9,8 @@
 *.ps1                   text=auto eol=crlf
 
 # Registries: one row per line, so concurrent additions merge by union. A union that keeps two versions of one row is caught by
-# `wsc reg check` (duplicate id, non-canonical order); fix with `wsc reg render` and keep the right row. Views are generated.
+# `wsc reg check` (duplicate id, non-canonical order); fix with `wsc reg render` and keep the right row. Views are generated and not committed ([views] commit = false, C19).
 registries/*.jsonl      merge=union
-registries/*.md         linguist-generated=true
 
 *.png                   binary
 *.jpg                   binary

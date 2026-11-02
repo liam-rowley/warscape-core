@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WSC = ROOT / 'wsc.py'
 sys.path.insert(0, str(ROOT))
 from warscape import policy as pp  # noqa: E402
-from warscape.repo import DEFAULTS  # noqa: E402
+from warscape.repo import DEFAULTS, Ctx  # noqa: E402
 
 CFG = pp.settings({**DEFAULTS, 'policy': {**DEFAULTS['policy'], 'decisions': 'docs/DECISIONS.md'}})
 
@@ -157,6 +157,39 @@ class Policy(unittest.TestCase):
         for s in (lambda p: [set()], lambda p: [{'S1'}] if p.endswith('report.md') else [{'S2'}, set()]):
             e = check('job/J1', ['x'], {'J1': ROW, 'J2': OTHER}, {'J1': done, 'J2': OTHER}, base, head, s)
             self.assertTrue(any('no `Claude-Session:` trailer' in x for x in e), e)
+
+
+class CoreOwnConfig(unittest.TestCase):
+    """The core's real wsc.toml (C19): no registry view is committed, so a `brief/W<n>` branch (its brief and its row, nothing else) can pass `policy`
+    and the `registries` gate together; before C19 the committed registries/jobs.md made that impossible."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ctx = Ctx.load(ROOT)
+        cls.cfg = pp.settings(cls.ctx.config)
+
+    def test_no_view_is_committed(self):
+        self.assertIs(self.ctx.config['views']['commit'], False)
+        try:
+            tracked = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '--', 'registries/*.md'], capture_output=True, text=True, check=True).stdout.split()
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest('not a git checkout')
+        self.assertEqual(tracked, [], 'views are rendered to the git-ignored _scratch/registries/, never committed (C19)')
+
+    def test_the_bootstrap_list_is_empty(self):
+        self.assertEqual(self.cfg['bootstrap'], [], 'a standing exemption list stays empty until a repo introduces the pipeline (C18, B48)')
+
+    def test_no_glob_names_a_view_and_a_brief_cannot_touch_one(self):
+        reg_dir = self.ctx.config['registries_dir']
+        for kind in ('plan', 'meta'):
+            views = [g for g in self.cfg[kind] if g.startswith(f'{reg_dir}/') and g.endswith('.md')]
+            self.assertEqual(views, [], f'[policy] {kind} names a registry view')
+        base = {'W1': {'id': 'W1', 'status': 'done'}, 'W2': {'id': 'W2', 'status': 'needs_brief'}}
+        head = {'W1': base['W1'], 'W2': {'id': 'W2', 'status': 'queued', 'brief': 'jobs/W2/brief.md'}}
+        brief_and_row = ['jobs/W2/brief.md', 'registries/jobs/W2.json']
+        self.assertEqual(pp.check('brief/W2', brief_and_row, base, head, files(), files(), cfg=self.cfg), [])
+        errs = pp.check('brief/W2', brief_and_row + ['registries/jobs.md'], base, head, files(), files(), cfg=self.cfg)
+        self.assertTrue(any('a brief branch may only add' in e and 'registries/jobs.md' in e for e in errs), errs)
 
 
 class PolicyOnGit(unittest.TestCase):
