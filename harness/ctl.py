@@ -683,7 +683,10 @@ class Ctl:
             raise Refused('order <unit> move <x> <z> [facing|-] [width|-] [run]: numbers')
         if None in xs or None in zs:
             raise Refused('order <unit> move <x> <z>: x and z are required')
-        befores = self.unit_reads(rt, names)
+        try:
+            befores = self.unit_reads(rt, names)
+        except RuntimeError as e:   # torn down, not a UNIT, on a ship, dev.orders off: nothing pushed
+            raise Refused(str(e).replace('step read ', 'unit ', 1))
         ptrs = [b['ptr'] for b in befores]   # a number is the army list position now: a lost unit renumbers the rest (run 20261102_j28pc c6)
         if len(set(ptrs)) != len(ptrs):
             raise Refused('a unit is named twice')
@@ -695,7 +698,7 @@ class Ctl:
             if not ok or not text.startswith('pushed '):
                 reason = text.replace('orders refused: ', '') if ok else text
                 step = f'unit {names[i]}: {reason}' + (f' ({i} of {len(ptrs)} already pushed)' if i else '')
-                if not i and any(w in reason for w in ('refused the unit', 'no men alive', 'not in its army', 'moving frame', 'dev.orders=0')):
+                if not i and any(w in reason for w in REFUSALS):
                     raise Refused(step)
                 return make_result('order', 'failed', f'step push: {step}', start, unit=unit, before=befores, evidence=evid)
             pushes.append(text.splitlines()[0])
@@ -707,6 +710,8 @@ class Ctl:
         speed = self.order_speed(rt, dist)
         try:
             settles, gots = self.order_settle(rt, ptrs, limit / speed['rate'])
+        except RuntimeError as e:   # a unit left its army during the wait (killed, routed off, walked off the map: run 20261102_j28pc f1)
+            return make_result('order', 'failed', f'step settle: {e}', start, unit=unit, ordered=wants, before=befores, pushed=pushes, evidence=evid)
         finally:
             if speed['set']:   # the request lands on a later frame: read it back after the route's lead_s
                 self.battle_clock(speed['rt'], speed['was'])
@@ -854,6 +859,10 @@ class Ctl:
         return make_result('perf', 'ok' if sane else 'failed', '' if sane else 'no usable frames or no VRAM reading', start, check=check,
                            frame_ms=r.get('frame_ms'), frames=r.get('frames'), mem=r.get('mem'), vram=vram, **(self.pc.build_info() if self.pc else {}),
                            evidence={'ctl': r})
+
+
+# the proxy's answers that mean "this order is not possible", as opposed to a failure of the route (the push text, orders.cpp/orders.h)
+REFUSALS = ('refused the unit', 'no men alive', 'not in its army', 'moving frame', 'dev.orders=0', 'must be', 'is outside', 'no width given')
 
 
 def parse_unit(line):
