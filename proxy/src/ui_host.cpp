@@ -13,6 +13,7 @@
 #include "ui_host.h"
 #include "ui_lua.h"
 #include "ui_render_d3d9.h"
+#include "ui_rml.h"
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/Factory.h>
 #pragma GCC diagnostic push
@@ -55,7 +56,6 @@ std::string s_luaWhy;
 
 struct Doc { Rml::ElementDocument* doc = nullptr; bool visible = false; };
 std::map<std::string, Doc> s_docs;       // by the path under the UI folder
-std::map<std::string, int> s_counters;   // data-host-counter clicks, by element id
 
 UiRouteState s_route; bool s_rmlOwner = false;
 volatile LONG64 s_cnt[6][2];             // per UiEv: [0] delivered to RmlUi, [1] to the engine
@@ -91,21 +91,7 @@ public:
     double t0 = MonoS();
 } s_sys;
 
-// C++-registered events: a click on an element (or inside one) carrying data-host-counter="<id>" counts it and writes the count into the
-// element with that id. Static RML is enough: the host's test document works with no Lua at all (the front end pumps no screen Lua).
-class Clicks : public Rml::EventListener {
-public:
-    void ProcessEvent(Rml::Event& ev) override {
-        for (Rml::Element* e = ev.GetTargetElement(); e; e = e->GetParentNode()) {
-            const Rml::String target = e->GetAttribute<Rml::String>("data-host-counter", "");
-            if (target.empty()) continue;
-            const int n = ++s_counters[e->GetId()];
-            if (Rml::ElementDocument* d = e->GetOwnerDocument()) if (Rml::Element* t = d->GetElementById(target)) t->SetInnerRML(std::to_string(n));
-            LOGI("ui: click on #%s: count %d", e->GetId().c_str(), n);
-            return;
-        }
-    }
-} s_clicks;
+UiClicks s_clicks;   // data-host-counter (ui_rml.h)
 
 std::wstring UiPath(const std::string& rel) {
     std::wstring p = Rt().gameDir + K.dir; if (!p.empty() && p.back() != L'\\') p += L'\\';
@@ -371,14 +357,8 @@ void ToBackbuffer(int& x, int& y) {   // client pixels -> back-buffer pixels (a 
 // After RmlUi saw the pointer: is it over an interactive element, and can anything under it scroll?
 void Sense() {
     s_route.hoverInteractive = s_ctx->IsMouseInteracting();
-    bool scroll = false;
-    for (Rml::Element* e = s_ctx->GetHoverElement(); e && !scroll; e = e->GetParentNode()) {
-        const auto o = e->GetComputedValues().overflow_y();
-        if ((o == Rml::Style::Overflow::Auto || o == Rml::Style::Overflow::Scroll) && e->GetScrollHeight() > e->GetClientHeight() + 0.5f) scroll = true;
-    }
-    s_route.overScrollable = scroll;
-    Rml::Element* f = s_ctx->GetFocusElement();
-    s_route.textFocus = f && (f->GetTagName() == "textarea" || (f->GetTagName() == "input" && (f->GetAttribute<Rml::String>("type", "text") == "text" || f->GetAttribute<Rml::String>("type", "") == "password")));
+    s_route.overScrollable = UiOverScrollable(s_ctx);
+    s_route.textFocus = UiTextFocus(s_ctx);
 }
 void Count(UiEv ev, uint8_t to) {
     if (to & kToRml) InterlockedIncrement64(&s_cnt[(int)ev][0]);
@@ -428,7 +408,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         if (live && (r.to & kToRml)) {
             switch (ev) {
             case UiEv::Down: s_ctx->ProcessMouseButtonDown(button, Mods()); break;
-            case UiEv::Up: s_ctx->ProcessMouseButtonUp(button, Mods()); break;
+            case UiEv::Up: { const std::string before = s_clicks.last; s_ctx->ProcessMouseButtonUp(button, Mods()); if (s_clicks.last != before) LOGI("ui: counted click: %s", s_clicks.last.c_str()); } break;
             case UiEv::Wheel: s_ctx->ProcessMouseWheel(Rml::Vector2f(0.f, -(float)GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA), Mods()); break;
             case UiEv::Key: if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) s_ctx->ProcessKeyDown(Key(wp), Mods()); else s_ctx->ProcessKeyUp(Key(wp), Mods()); break;
             case UiEv::Char: if (wp >= 32) s_ctx->ProcessTextInput((Rml::Character)wp); break;
@@ -536,7 +516,7 @@ std::string StateJson(double windowS, double since) {
     bool first = true;
     for (auto& kv : s_docs) { j += std::string(first ? "" : ", ") + "{\"name\": \"" + JEsc(kv.first) + "\", \"visible\": " + (kv.second.visible ? "true" : "false") + "}"; first = false; }
     j += "], \"counters\": {"; first = true;
-    for (auto& kv : s_counters) { j += std::string(first ? "" : ", ") + "\"" + JEsc(kv.first) + "\": " + std::to_string(kv.second); first = false; }
+    for (auto& kv : s_clicks.counts) { j += std::string(first ? "" : ", ") + "\"" + JEsc(kv.first) + "\": " + std::to_string(kv.second); first = false; }
     j += "}";
     std::string hov = "";
     if (s_ctx) if (Rml::Element* e = s_ctx->GetHoverElement()) hov = e->GetTagName() + (e->GetId().empty() ? "" : "#" + e->GetId());

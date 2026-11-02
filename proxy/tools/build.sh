@@ -157,9 +157,16 @@ if [[ "$WHAT" == tests || "$WHAT" == all ]]; then
   # the tests include core headers, the adapter's generated tables and testkit.h by name, and read files through --src/--adapter/--tests
   for t in "$OWN"/proxy/tests/test_*.cpp; do
     n="$(basename "$t" .cpp)"
-    g++ -std=c++17 -O1 -Wall -Wextra -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" -o "$OUT/tests/$n" "$t"
-    if "$OUT/tests/$n" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $n FAILED"; fail=1; fi
+    MORE=()
+    if grep -q '^// link: ui' "$t"; then   # the RmlUi host's document tests (J30): host RmlUi + FreeType + the localised ui_lua object
+      HU="$(ui_objs g++ gcc host "$SRC")"; [[ -f "$HU/STAMP" ]] || exit 3
+      [[ -f "$OUT/tests/ui_lua.o" ]] || ui_lua_obj "$SRC" "$HU" "$OUT/tests/ui_lua.o" g++ ""
+      MORE=("${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" "$OUT/tests/ui_lua.o" $(LC_ALL=C ls "$HU"/rml/*.o "$HU"/ft/*.o))
+    fi
+    g++ -std=c++17 -O1 -Wall -Wextra -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" -o "$OUT/tests/$n" "$t" "${MORE[@]}"
+    if WSP_UI_SRC="$UI_SRC" "$OUT/tests/$n" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $n FAILED"; fail=1; fi
   done
+  rm -f "$OUT/tests/ui_lua.o"
   [[ $fail == 0 ]] && echo "build.sh: host tests passed" || exit 1
 fi
 

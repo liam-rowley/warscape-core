@@ -216,6 +216,24 @@ def kit_packs(had, mod):
     return files, packs
 
 
+UI_SUFFIXES = ('.rml', '.rcss', '.lua', '.png', '.jpg', '.jpeg', '.tga', '.ttf', '.otf', '.txt')
+
+
+def kit_ui(had):
+    """The RmlUi host's loose files (napoleon J30): the harness adapter's `kit_ui` list of {from (repo folder), to (path under the game
+    folder)}; every file with a UI suffix is copied, sub-folders kept. Inert unless ui.enabled; install and uninstall treat them as any
+    other kit file (sha-checked copy, byte-exact uninstall). -> [(path, kit path, role 'ui')]"""
+    files = []
+    for e in had.get('kit_ui', []):
+        src = ROOT / e['from']
+        if not src.is_dir():
+            raise SystemExit(f"pc_deploy kit: kit_ui folder {e['from']} missing")
+        for p in sorted(src.rglob('*')):
+            if p.is_file() and p.suffix.lower() in UI_SUFFIXES:
+                files.append((p, e['to'].rstrip('/') + '/' + p.relative_to(src).as_posix(), 'ui'))
+    return files
+
+
 def build_kit(out, adapter=None, dll=None, dxvk_dir=None, build_id=None, identity=None):
     """Kit folder: manifest.json + payload files stored FLAT under unique names (<sha12>__<name>): a resend of a stale cached copy
     (empire-remastered LEARNINGS lesson 18) can never pass for the new file, because install checks every staged file's sha256."""
@@ -249,6 +267,7 @@ def build_kit(out, adapter=None, dll=None, dxvk_dir=None, build_id=None, identit
         for p in sorted(ldir.rglob('*')):
             if p.is_file() and p.suffix in ('.lua', '.txt') and p.name != 'wrappers.txt':
                 files.append((p, f'{mod}/lua/' + p.relative_to(ldir).as_posix(), 'dev'))
+    files += kit_ui(had)
     if build_id is None:
         try:
             build_id = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--short=12', 'HEAD'], capture_output=True, text=True).stdout.strip() or 'nogit'
