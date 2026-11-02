@@ -6,7 +6,7 @@
     "tag": "6.3",
     "commit": "ba95ffe8bfb6370efb2cdcca927eaad4710c5413",
     "licence": "MIT",
-    "why": "Empire's shipped version (empire-remastered rml_mod/src/CMakeLists.txt, LEGAL_NOTES A1)"
+    "why": "empire-remastered's shipped version (empire-remastered rml_mod/src/CMakeLists.txt, LEGAL_NOTES A1)"
   },
   "freetype": {
     "version": "2.13.3",
@@ -14,7 +14,7 @@
     "tag": "VER-2-13-3",
     "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
     "licence": "FTL",
-    "why": "Empire's FreeType (same CMakeLists), TTF only, no optional dependencies"
+    "why": "empire-remastered's FreeType (same CMakeLists), TTF only, no optional dependencies"
   },
   "lua": {
     "version": "5.1.1",
@@ -35,7 +35,7 @@
     "commit": "f0569113c93ad095470c54bf34a17b36646bbbb5",
     "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3",
     "licence": "MIT or public domain",
-    "why": "PNG and JPEG decoding for art (the review artifact serves web image types only, not .tga); the same commit as Empire's rml_mod"
+    "why": "PNG and JPEG decoding for art (the review artifact serves web image types only, not .tga); the same commit as empire-remastered's rml_mod"
   },
   "stb_image_write": {
     "version": "1.16",
