@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The control API: one call per verb, blocks until a checked result, always one JSON object (J4).
 
-purpose: (every verb but order ran on the PC: scene, shot, reset, perf, state and cam read in J44 harness/runs/20261030_j44pc, cam, pause and speed in J43; order is refused until J28) name a scenario and a camera pose and get a settled, checked answer back (scene, cam, shot, order, pause, speed, reset, perf, state), over the proxy's ctl channel (job.sh ctl) and the watcher's shot job; game-agnostic, everything game-specific comes from the adapter's `ctl` block and the scenarios registry
-usage: ctl.py [--owner O] [--adapter A] [--registry R] [--out DIR] [--no-pc] <verb> [args]   verbs: scene <id> [--deploy end] | cam <scenario:pose | x y z yaw pitch [fov] | read> | shot <name> | order <unit> move x z [facing] | halt | formation <f> | pause on|off | speed <x> | reset [<id>] | perf <seconds> | state | key|click|wait (probe only)
+purpose: (scene, shot, reset, perf, state and cam read ran on the PC in J44, cam, pause and speed in J43, order in J28) name a scenario and a camera pose and get a settled, checked answer back (scene, cam, shot, order, pause, speed, reset, perf, state), over the proxy's ctl channel (job.sh ctl) and the watcher's shot job; game-agnostic, everything game-specific comes from the adapter's `ctl` block and the scenarios registry
+usage: ctl.py [--owner O] [--adapter A] [--registry R] [--out DIR] [--no-pc] <verb> [args]   verbs: scene <id> [--deploy end] | cam <scenario:pose | x y z yaw pitch [fov] | read> | shot <name> | order list | <unit> move x z [facing] [width] [run] | pause on|off | speed <x> | reset [<id>] | perf <seconds> | state | key|click|wait (probe only)
 when: every time an agent needs a known game state or a frame (never type key taps or sleeps for it); the acceptance runner (acceptance.py) calls the same functions
 not-a-verb: a host-side client over harness/core/job.sh and the proxy's ctl verbs, not a registry operation; a J12 core candidate
 
@@ -639,9 +639,79 @@ class Ctl:
         return make_result('cam', 'ok' if fit_ok else 'failed', '' if fit_ok else 'readback fit too loose', start, kind=rt.get('kind'),
                            got={k: round(v, 4) if isinstance(v, float) else v for k, v in got.items()}, check=check, evidence={'read': r})
 
-    def v_order(self, start, *args):
-        self.route('orders')
-        raise Refused('order route is reachable but not implemented (J28)')
+    def unit_read(self, rt, unit):
+        """One unit through the route's chunk: a dict of its fields (floats where numeric)."""
+        ok, text, r = self.lua(rt['chunk'], f'state {unit}')
+        if not ok or not text.startswith('unit '):
+            raise RuntimeError(f'step read {unit}: {text}')
+        return parse_unit(text)
+
+    def v_order(self, start, unit=None, action=None, *rest):
+        """`order list`, or `order <unit> move <x> <z> [facing] [width] [run]`: push one move/face order through the engine's own command
+        path (the route's chunk), wait until the unit is at rest (order_settle), read it back and compare the front centre, the facing and
+        the width with the order within the route's tolerance (arrival_check). Refused: a unit the engine or the proxy will not order."""
+        rt = self.route('orders')
+        if unit == 'list':
+            ok, text, r = self.lua(rt['chunk'], 'list')
+            units = [parse_unit(ln) for ln in text.splitlines() if ln.startswith('unit ')] if ok else []
+            good = bool(ok and units and all('why' not in u for u in units))
+            check = {'compared': 'every unit of the player army read (in its army list, on land)', 'expected': 'units > 0, none refused', 'got': len(units), 'ok': good}
+            return make_result('order', 'ok' if good else 'failed', '' if good else f'step list: {text[:300]}', start, kind=rt.get('kind'), units=units,
+                               check=check, evidence={'list': r})
+        if action != 'move':
+            raise Refused('order takes: list | <unit> move <x> <z> [facing] [width] [run]')
+        try:
+            x, z = float(rest[0]), float(rest[1])
+            facing = float(rest[2]) if len(rest) > 2 and rest[2] != '-' else None
+            width = float(rest[3]) if len(rest) > 3 and rest[3] != '-' else None
+            run = len(rest) > 4 and rest[4] in ('1', 'run', 'true')
+        except (IndexError, ValueError):
+            raise Refused('order <unit> move <x> <z> [facing|-] [width|-] [run]: numbers')
+        before = self.unit_read(rt, unit)
+        arg = f"move {unit} {x!r} {z!r} {'-' if facing is None else repr(facing)} {'-' if width is None else repr(width)} {1 if run else 0}"
+        ok, text, r = self.lua(rt['chunk'], arg)
+        if not ok or not text.startswith('pushed '):
+            reason = text.replace('orders refused: ', '') if ok else text
+            if any(w in reason for w in ('refused the unit', 'no men alive', 'not in its army', 'moving frame', 'dev.orders=0')):
+                raise Refused(reason)
+            return make_result('order', 'failed', f'step push: {reason}', start, unit=unit, before=before, evidence={'push': r})
+        pushed = text.splitlines()[0]
+        want = {'x': x, 'z': z, 'facing': before['facing'] if facing is None else facing % 360.0, 'width': before.get('width') if width is None else width}
+        st = rt.get('settle', {})
+        dist = ((before.get('fx', before['x']) - x) ** 2 + (before.get('fz', before['z']) - z) ** 2) ** 0.5
+        limit = min(st.get('base_s', 10) + dist / st.get('min_speed_mps', 0.8), st.get('max_s', 240))
+        settle, got = self.order_settle(rt, unit, limit)
+        check = arrival_check(want, got, rt.get('tolerance', {}))
+        ok = check['ok'] and settle['settled']
+        reason = '' if ok else ('not at rest before the timeout' if not settle['settled'] else 'readback outside tolerance')
+        return make_result('order', 'ok' if ok else 'failed', reason, start, unit=unit, kind=rt.get('kind'), action='move', ordered=want, run=run,
+                           before=before, got=got, pushed=pushed, settle=settle, check=check, evidence={'push': r})
+
+    def order_settle(self, rt, unit, limit):
+        """Read the unit every poll_s until its centre and facing are still for rest_reads reads in a row (once it has moved, or after
+        min_wait_s), or until `limit` seconds: (settle, last state). The route's settle block holds the numbers and their run."""
+        st = rt.get('settle', {})
+        poll, need, eps, eps_deg = st.get('poll_s', 1.0), st.get('rest_reads', 3), st.get('eps_m', 0.02), st.get('eps_deg', 0.05)
+        t0 = self.clock()
+        prev, still, reads, moved = self.unit_read(rt, unit), 0, 1, False
+        while True:
+            self.sleep(poll)
+            cur = self.unit_read(rt, unit)
+            reads += 1
+            d = ((cur['x'] - prev['x']) ** 2 + (cur['z'] - prev['z']) ** 2) ** 0.5
+            df = abs((cur['facing'] - prev['facing'] + 180) % 360 - 180)
+            if d >= eps or df >= eps_deg:
+                moved, still = True, 0
+            else:
+                still += 1
+            el = self.clock() - t0
+            if still >= need and (moved or el >= st.get('min_wait_s', 3)):
+                return {'waited_for': f'centre still for {need} reads ({eps} m, {eps_deg} deg) every {poll} s', 'waited_s': round(el, 2), 'reads': reads,
+                        'moved': moved, 'settled': True}, cur
+            if el >= limit:
+                return {'waited_for': f'centre still for {need} reads, timeout {round(limit, 1)} s', 'waited_s': round(el, 2), 'reads': reads,
+                        'moved': moved, 'settled': False}, cur
+            prev = cur
 
     def v_pause(self, start, mode):
         if mode not in ('on', 'off'):
@@ -716,6 +786,40 @@ class Ctl:
         return make_result('perf', 'ok' if sane else 'failed', '' if sane else 'no usable frames or no VRAM reading', start, check=check,
                            frame_ms=r.get('frame_ms'), frames=r.get('frames'), mem=r.get('mem'), vram=vram, **(self.pc.build_info() if self.pc else {}),
                            evidence={'ctl': r})
+
+
+def parse_unit(line):
+    """'unit id=4 ptr=0x.. x=1.0 ...' (the route's chunk) -> dict; numbers as floats (id, raw, men, queued as ints), nan fields dropped."""
+    u = {}
+    for tok in line.split()[1:]:
+        if '=' not in tok:
+            continue
+        k, v = tok.split('=', 1)
+        try:
+            f = float(v)
+        except ValueError:
+            u[k] = v
+            continue
+        if f == f:
+            u[k] = int(f) if k in ('id', 'raw', 'men', 'queued') else f
+    return u
+
+
+def arrival_check(want, got, tol):
+    """The order against the unit at rest: the front centre (the point an order names; the centre when the layout has none), the facing
+    (wrapped) and the width, each within the route's tolerance (pos_m, facing_deg, width_m)."""
+    px, pz = got.get('fx', got.get('x')), got.get('fz', got.get('z'))
+    pos = ((px - want['x']) ** 2 + (pz - want['z']) ** 2) ** 0.5
+    fac = abs((got['facing'] - want['facing'] + 180) % 360 - 180)
+    fields = {'position_m': {'expected': [want['x'], want['z']], 'got': [round(px, 4), round(pz, 4)], 'err': round(pos, 4), 'tol': tol.get('pos_m', 1.0)},
+              'facing_deg': {'expected': round(want['facing'], 4), 'got': round(got['facing'], 4), 'err': round(fac, 4), 'tol': tol.get('facing_deg', 1.0)}}
+    if want.get('width') is not None and 'width' in got:
+        fields['width_m'] = {'expected': want['width'], 'got': round(got['width'], 4), 'err': round(abs(got['width'] - want['width']), 4),
+                             'tol': tol.get('width_m', 0.5)}
+    for f in fields.values():
+        f['within'] = f['err'] <= f['tol']
+    return {'compared': 'the order against the unit read back at rest (front centre, facing, width)', 'fields': fields,
+            'ok': all(f['within'] for f in fields.values())}
 
 
 def main(argv=None):

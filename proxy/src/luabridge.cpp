@@ -21,8 +21,8 @@
 //   wsp.vanilla(entry) -> bytes | nil, err the newest real pack's copy of a pack entry (a wrapper loads the vanilla script with it)
 //   wsp.version() -> "wsp 1", build id
 //   wsp.cam_set(x, y, z, yaw, pitch) -> true | nil, err   the battle camera (dev.camera, camera.cpp; J43)
-//   battle unit orders (dev.orders, orders.cpp; J28). A unit ref is a "0x..." pointer string, a light userdata, or a number n = the
-//   n-th unit (1-based) of the player's army as the last read saw it (lua numbers are floats here: never a pointer as a number):
+//   battle unit orders (dev.orders, orders.cpp; J28). A unit ref is a "0x..." pointer string, a light userdata, a
+//   full userdata (the engine's Pointer<UNIT>: its first dword), or a number n = the n-th unit (1-based) of the player's army as the last read saw it (lua numbers are floats here: never a pointer as a number):
 //   wsp.unit_state(ref) -> {id, ptr, x, y, z, facing, facing_raw, men, queued, army_index, army_count, front_x/y/z, width} | nil, err
 //   wsp.unit_list([ref]) -> { {state}, ... } | nil, err    the army of ref (none: the cached player army)
 //   wsp.selection() -> {units = {ptr, ...}, groups = n} | nil, err   the UI's own selection (loose land units)
@@ -151,6 +151,12 @@ bool UnitRef(lua_State* L, int i, uint32_t& unit, std::string& why) {
         return true;
     }
     if (lua_type(L, i) == LUA_TLIGHTUSERDATA) { unit = (uint32_t)(uintptr_t)lua_touserdata(L, i); if (unit) return true; why = "null unit"; return false; }
+    if (lua_type(L, i) == LUA_TUSERDATA) {   // the engine's Pointer<T> userdata (BattleUI.UnitListForBattleIds): the pointer is its first dword
+        const void* b = lua_touserdata(L, i);
+        if (!b || lua_objlen(L, i) < 4) { why = "a userdata unit ref is smaller than a pointer"; return false; }
+        memcpy(&unit, b, 4);
+        if (unit) return true; why = "null unit"; return false;
+    }
     if (lua_type(L, i) == LUA_TNUMBER) {
         const int n = (int)lua_tonumber(L, i);
         std::vector<uint32_t> units;
