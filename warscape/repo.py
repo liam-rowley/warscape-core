@@ -45,6 +45,47 @@ DEFAULTS = {
     # proxy/*/adapter.cpp folder / the one harness/*/adapter.json in the repo
     'proxy': {'adapter': ''},              # repo-relative folder: adapter.cpp, identity.json, generated/, the config file, lua/
     'harness': {'adapter': ''},            # repo-relative file: the watcher's adapter.json (its profiles/ beside it)
+    # the job queue (napoleon J62; library: warscape/jobq.py, hooks: warscape/hooks.py). The defaults are a plain queue: ids J<n>,
+    # sonnet|opus, no game rules, no references in the step texts.
+    'jobs': {
+        'id_prefix': 'J',                  # job ids are <prefix><n>; branches job/<id>, brief/<id>
+        'dir': 'jobs',                     # jobs/<id>/brief.md, report.md, review.md
+        'models': ['sonnet', 'opus'],      # the Model line of a brief; the first is the default, the others need a stated reason
+        'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
+        'hooks': [],                       # repo-relative Python files defining hook names (warscape/hooks.py)
+        'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
+        'text': {                          # every repo-specific string in the step texts and messages
+            'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
+            'policy': '{wsc} policy',      # the policy command, before ` --branch B --base REF`
+            'plan_doc': 'docs/PLAN.md', 'review_doc': 'docs/REVIEW.md', 'ci_failures_doc': '', 'owner': 'the owner',
+            'rules_ref': '', 'trailer_hint': '', 'plan_summary': '',
+            'ref_models': '', 'ref_rounds': '', 'ref_merge': '', 'ref_brief_merge': '', 'ref_ready': '',
+            'brief_model': '', 'brief_notes': '',
+        },
+    },
+    # the pull-request policy (`wsc policy`; warscape/policy.py)
+    'policy': {
+        'decisions': '',                   # repo-relative append-only decisions file ('' = not checked)
+        'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
+        'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
+        'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
+        'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
+                 'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
+    },
+    # CI helpers (`wsc ci`; warscape/ci.py)
+    'ci': {
+        'inputs': {},                      # set name -> regex of the paths that make that slow job run (`wsc ci inputs`)
+        'salt': '1',                       # bump to invalidate every CI pass marker
+        'hints': {},                       # failed job name (or "job~step substring|substring") -> what `wsc ci notify` tells
+        'artifacts': {},                   # set name -> workflow artifact of its build, named when its job is skipped
+        'notice': 'A failed check leaves this pull request open; fix it on the branch and push.',
+        'footer': '',                      # last line of the failure comment
+        'core': 'core',                    # the core's submodule folder in this repo ('' inside the core itself)
+        'token_secret': '',                # secret passed to checkout steps as `token:` ('' = none)
+        'workflows': [],                   # workflow file names rendered from <template_dir>/<name>.in (`wsc ci render`, gate `ci_render`)
+        'template_dir': 'ci',
+        'policy_extra_steps': '',          # YAML steps inserted before the policy command in the rendered `policy` job
+    },
 }
 
 

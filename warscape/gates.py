@@ -203,6 +203,34 @@ def gate_hooks(ctx):
                   [f'core.hooksPath is {have!r}, want {want!r}'])
 
 
+def gate_jobs(ctx):
+    """The job queue (`wsc jobs check`): rows against jobs/, brief shape, review rounds and the repo's own queue hooks. Skipped when the repo declares no jobs registry."""
+    if 'jobs' not in ctx.config['registries']:
+        return Result('jobs', 'ok', 'no jobs registry declared')
+    from . import jobq
+    jobq.configure(ctx)
+    rows = jobq.main_rows(ctx)
+
+    def read(p):
+        f = ctx.root / p
+        return f.read_text(encoding='utf-8') if f.is_file() else None
+
+    jd = ctx.root / jobq.S.jobs_dir
+    folders = [d.name for d in jd.iterdir() if d.is_dir()] if jd.is_dir() else []
+    errs = jobq.problems(rows, read, folders, ctx) + jobq.call_hooks('queue_problems', ctx, rows, ctx.files())
+    return Result('jobs', 'error' if errs else 'ok', f'{len(errs)} queue problems' if errs else f'{len(rows)} jobs rows, queue ok', errs)
+
+
+def gate_ci_render(ctx):
+    """Every workflow listed in `[ci] workflows` equals its render from `<template_dir>/<name>.in` (`wsc ci render`). Skipped when none are listed."""
+    if not ctx.config['ci']['workflows']:
+        return Result('ci_render', 'ok', 'no rendered workflows')
+    from . import ci_render
+    errs = ci_render.problems(ctx)
+    return Result('ci_render', 'error' if errs else 'ok', f'{len(errs)} workflows differ from their render' if errs else
+                  f"{len(ctx.config['ci']['workflows'])} workflows match their render", errs)
+
+
 SKIPPED = re.compile(r"^(.*?) \.\.\. skipped '(.*)'$")
 TEST_ID = re.compile(r'^(\S+) \(([\w.]+?)(?:\.\1)?\)$')   # `test_x (mod.Class.test_x)` (3.11+) or `test_x (mod.Class)`
 
@@ -250,7 +278,7 @@ GATES = [
     ('schemas', gate_schemas), ('registries', gate_registries), ('tools', gate_tools), ('json', gate_json),
     ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates),
     ('conflict_markers', gate_conflict_markers), ('eol', gate_eol), ('core_pin', gate_core_pin), ('hooks', gate_hooks),
-    ('tests', gate_tests),
+    ('jobs', gate_jobs), ('ci_render', gate_ci_render), ('tests', gate_tests),
 ]
 NAMES = [n for n, _ in GATES]
 

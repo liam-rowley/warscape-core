@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/jobs.schema.json",
+  "title": "Jobs",
+  "description": "The job queue. One row per job; the brief, report and review live in jobs/<id>/. A job in progress is a remote branch job/<id>; `done` on main means reviewed and merged. Ids are one capital letter and a number (J, W, ...: `[jobs] id_prefix` in wsc.toml names the repo's letter). Rules for picking up and reviewing: `wsc jobs`, docs/CONSUMING.md 'The job pipeline'.",
+  "type": "object",
+  "required": ["id", "description", "title", "phase", "status", "model", "needs_pc", "depends_on"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^[A-Z][1-9][0-9]*$"},
+    "description": {"type": "string", "minLength": 1, "description": "the scope in one or two lines (what a brief must cover)"},
+    "title": {"type": "string", "minLength": 1},
+    "phase": {"type": "integer", "minimum": 0},
+    "status": {"enum": ["needs_brief", "queued", "review", "fix", "done", "blocked"], "description": "fix: a review round asked for changes; only a reviewer sets it"},
+    "model": {"enum": ["sonnet", "opus"], "description": "opus only with the reason in the brief"},
+    "needs_pc": {"type": "boolean"},
+    "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string", "x-ref": "jobs"}},
+    "brief": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/brief\\.md$"},
+    "report": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/report\\.md$"},
+    "review": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/review\\.md$"},
+    "blocked_by": {"type": "string", "minLength": 1, "description": "why, when status is blocked"}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"enum": ["queued", "review", "fix", "done"]}}}, "then": {"required": ["brief"]}},
+    {"if": {"properties": {"status": {"enum": ["review", "fix", "done"]}}}, "then": {"required": ["report"]}},
+    {"if": {"properties": {"status": {"enum": ["fix", "done"]}}}, "then": {"required": ["review"]}},
+    {"if": {"properties": {"status": {"const": "blocked"}}}, "then": {"required": ["blocked_by"]}}
+  ],
+  "x-view": {"title": "Jobs", "columns": ["id", "status", "title", "phase", "model", "needs_pc", "depends_on", "brief", "report", "review"]}
+}

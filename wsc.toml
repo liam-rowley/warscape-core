@@ -9,6 +9,7 @@ registries_dir = "registries"
 tools = "core:tools"
 scenarios = "core:scenarios"
 assets = "core:assets"
+jobs = "core:jobs"                      # the core's own job queue (napoleon J62)
 ui_elements = "core:ui_elements"
 engine_sites = "core:engine_sites"
 config_keys = "core:config_keys"
@@ -26,3 +27,32 @@ max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the
 
 [tests]
 dirs = ["tests"]
+
+# The core runs its own job queue (napoleon J62): rows in registries/jobs/<id>.json, folders in jobs/<id>/, ids W<n>, the same pipeline a game uses.
+[storage]
+dir = ["jobs"]
+
+[jobs]
+id_prefix = "W"
+
+[jobs.text]
+wsc = "python3 wsc.py"
+plan_doc = "docs/BACKLOG.md"
+review_doc = "docs/REVIEW.md"
+owner = "Liam"
+rules_ref = "CLAUDE.md, Jobs"
+trailer_hint = 'by hand: git commit --trailer "Claude-Session: <session id>"'
+plan_summary = "docs, briefs, the jobs registry, README.md and CLAUDE.md"
+ref_merge = "C18"
+ref_brief_merge = "C18"
+
+[policy]
+decisions = "docs/DECISIONS.md"
+decision_prefix = "C"
+plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/jobs.md", "README.md", "CLAUDE.md"]
+meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/jobs.md", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
+        "tests/**", "wsc.toml", ".gitattributes", ".gitignore", "schemas/*", "registries/*"]
+
+[ci]
+workflows = ["gates.yml", "policy.yml"]
+core = ""
