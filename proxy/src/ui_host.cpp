@@ -322,8 +322,9 @@ HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT ad, D3DDEVTYPE type, HWND f
     if (FAILED(hr) || !out || !*out || !pp) return hr;
     IDirect3DDevice9* dev = *out;
     HWND w = pp->hDeviceWindow ? pp->hDeviceWindow : focus;
-    D3DPRESENT_PARAMETERS q = *pp; SizeFrom(&q, w);
-    const bool main = UiIsMainDevice((unsigned)s_bbW, (unsigned)s_bbH, w != nullptr && GetAncestor(w, GA_ROOT) == w);
+    int bw = (int)pp->BackBufferWidth, bh = (int)pp->BackBufferHeight;   // local: a helper device must not change the UI's size
+    if ((bw == 0 || bh == 0) && w) { RECT rc; GetClientRect(w, &rc); bw = rc.right; bh = rc.bottom; }
+    const bool main = UiIsMainDevice((unsigned)bw, (unsigned)bh, w != nullptr && GetAncestor(w, GA_ROOT) == w);
     LOGI("ui: CreateDevice %p window %p back buffer %ux%u (%s, flags 0x%lx, multisample %d) -> %s", (void*)dev, (void*)w, pp->BackBufferWidth, pp->BackBufferHeight,
          pp->Windowed ? "windowed" : "fullscreen", flags, (int)pp->MultiSampleType, main ? "the UI's device" : "not the UI's (helper)");
     Lock l;
@@ -332,6 +333,7 @@ HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT ad, D3DDEVTYPE type, HWND f
     std::vector<std::string> reshow;
     if (act & kActShutdown) { LOGI("ui: a new main device replaces %p: release and re-init", (void*)s_dev); reshow = Shutdown(); }
     s_dev = dev;   // no reference of our own: a held device could block the game re-creating it in exclusive mode
+    s_bbW = bw; s_bbH = bh;
     void** vt = *(void***)dev;
     VtableHook(vt, 16, (void*)hk_Reset, o_Reset ? nullptr : (void**)&o_Reset, "IDirect3DDevice9::Reset (ui)");
     VtableHook(vt, 17, (void*)hk_Present, o_Present ? nullptr : (void**)&o_Present, "IDirect3DDevice9::Present (ui)");

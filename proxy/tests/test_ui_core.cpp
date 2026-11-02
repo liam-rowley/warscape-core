@@ -138,6 +138,10 @@ int main(int argc, char** argv) {
             CHECK(!s.empty());
             CHECK(s.find("#include <lua") == std::string::npos && s.find("#include \"lua") == std::string::npos && s.find("lua_State") == std::string::npos);
         }
+        // a detour already in a slot's chain is never installed again (a second device of the same class re-hooking Present made the dev
+        // side and the UI host call each other forever: the battle loader's helper device, run 20261102_j30pc)
+        const std::string hooks = tk::ReadFile("core/hooks.cpp");
+        CHECK(hooks.find("already in the chain") != std::string::npos && hooks.find("installed.push_back({ slot, detour })") != std::string::npos);
         // the D3DCompile blob is a C-style vtable: a TU-local abstract class made GCC emit "call 0" for every call through it (the first
         // J30 start-up crash, 2026-11-02); no pure virtual in the render interface's own types
         CHECK(tk::ReadFile("core/ui_render_d3d9.cpp").find(") = 0;") == std::string::npos);
