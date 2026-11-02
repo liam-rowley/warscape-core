@@ -12,7 +12,7 @@ upath() { if command -v cygpath >/dev/null; then cygpath -u "$1"; else printf '%
 DOCKER=0; [[ "${1:-}" == "--docker" ]] && { DOCKER=1; shift; }
 # D31: the container CI's proxy job runs in (ubuntu-24.04), pinned by digest, with the packages CI installs or its runner image has
 IMAGE="ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852"   # ubuntu:24.04, pinned 2026-10-29
-APT="g++-mingw-w64-i686 g++ python3 ca-certificates"
+APT="g++-mingw-w64-i686 g++ python3 ca-certificates git"   # git: fetch_ui.py fetches RmlUi and FreeType by commit (napoleon J30)
 WHAT="${1:-all}"
 if [[ "${2:-}" == "--adapter" ]]; then WSP_PROXY_ADAPTER="$(cd "${3:?adapter folder}" && pwd)"; export WSP_PROXY_ADAPTER; fi
 ROOT="$(upath "$(layout game-root)")"; SRC="$(upath "$(layout proxy-src)")"; ADIR="$(upath "$(layout proxy-adapter)")"; ADAPTER="$(basename "$ADIR")"
@@ -50,23 +50,89 @@ fi
 # File names in the DLL are fixed labels (core/, adapter/, lua/), never checkout paths: the same inputs give the same bytes from any
 # folder and in either layout (before and after the move to warscape-core; J12 proves it with `id` and `repro`).
 LUA_SRC="$ROOT/build/lua/src"   # proxy/tools/fetch_lua.py: Lua 5.1.1, pinned, patched for the engine
+UI_SRC="$ROOT/build/ui/src"     # proxy/tools/fetch_ui.py: RmlUi, FreeType, the host's own Lua (float only) and stb, by the game's UI pins (J30)
+UI_DEFS=(-DRMLUI_STATIC_LIB -DRMLUI_FONT_ENGINE_FREETYPE '-DRMLUI_VERSION="6.3"')
+LUA_CORE="lapi lcode ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio lauxlib"
+
+# The RmlUi host's third-party objects (napoleon J30): RmlUi Core with its FreeType font engine, FreeType (TrueType only: sfnt, truetype,
+# autofit, psnames, smooth; no zlib, bzip2, png, harfbuzz or brotli) and, for the Lua binding, RmlUi's Lua plugin plus a second Lua 5.1.1
+# (the viewer's: float numbers, collector and dummynode untouched). They depend only on the pinned sources and these flags, so they are
+# cached per compiler under build/ui/obj/<tag> (a stamp of the pin file, the flags and the compiler); file names in them are labels (ui/).
+# $1 compiler (g++), $2 C compiler, $3 tag. Prints the object folder.
+ui_objs() {   # $4 core sources (the compat header)
+  local CXXU="$1" CCU="$2" U="$ROOT/build/ui/obj/$3" stamp; export UIS="$4"
+  stamp="$( { sha256sum "$(layout ui-pins)" "$4/ui_lua51_compat.h" | cut -c1-64; "$CXXU" --version | head -1; echo "${UI_DEFS[*]} O2 v2"; } | sha256sum | cut -c1-16)"
+  if [[ -f "$U/STAMP" && "$(cat "$U/STAMP")" == "$stamp" ]]; then echo "$U"; return; fi
+  rm -rf "$U"; mkdir -p "$U/rml" "$U/ft" "$U/lua" "$U/rmllua" "$U/ftconf"
+  # FreeType configuration: the stock options without zlib (as the viewer's CMake FT_DISABLE_ZLIB), and only the TrueType modules
+  sed 's|^#define FT_CONFIG_OPTION_USE_ZLIB|/* J30: no zlib */ /* #define FT_CONFIG_OPTION_USE_ZLIB */|' "$UI_SRC/freetype/include/freetype/config/ftoption.h" > "$U/ftconf/ui_ftoption.h"
+  grep -q 'no zlib' "$U/ftconf/ui_ftoption.h" || { echo "build.sh: the FreeType zlib option was not found" >&2; exit 3; }
+  printf '%s\n' 'FT_USE_MODULE( FT_Module_Class, autofit_module_class )' 'FT_USE_MODULE( FT_Driver_ClassRec, tt_driver_class )' \
+    'FT_USE_MODULE( FT_Module_Class, psnames_module_class )' 'FT_USE_MODULE( FT_Module_Class, sfnt_module_class )' \
+    'FT_USE_MODULE( FT_Renderer_Class, ft_smooth_renderer_class )' > "$U/ftconf/ui_ftmodule.h"
+  local FTF=(-std=gnu99 -O2 -w -DFT2_BUILD_LIBRARY '-DFT_CONFIG_OPTIONS_H=<ui_ftoption.h>' '-DFT_CONFIG_MODULES_H=<ui_ftmodule.h>' -I"$U/ftconf" -I"$UI_SRC/freetype/include" -ffile-prefix-map="$UI_SRC/"=ui/ -ffile-prefix-map="$U/"=uiobj/)
+  local RMF=(-std=c++17 -O2 -w "${UI_DEFS[@]}" -I"$UI_SRC/rmlui/Include" -I"$UI_SRC/freetype/include" -I"$U/ftconf" '-DFT_CONFIG_OPTIONS_H=<ui_ftoption.h>' '-DFT_CONFIG_MODULES_H=<ui_ftmodule.h>' -ffile-prefix-map="$UI_SRC/"=ui/ -ffile-prefix-map="$U/"=uiobj/)
+  local LUF=(-std=gnu99 -O2 -w -ffile-prefix-map="$UI_SRC/"=ui/)
+  local jobs; jobs="$( (nproc || echo 4) 2>/dev/null)"
+  local list="$U/list.txt"; : > "$list"
+  local f
+  for f in base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftmm base/ftbitmap sfnt/sfnt truetype/truetype autofit/autofit psnames/psnames smooth/smooth; do
+    echo "C ft/${f//\//_}.o $UI_SRC/freetype/src/$f.c" >> "$list"
+  done
+  for f in $LUA_CORE lbaselib lstrlib ltablib lmathlib ldblib; do echo "L lua/$f.o $UI_SRC/lua/src/$f.c" >> "$list"; done
+  local core="$UI_SRC/rmlui/Source/Core"
+  while IFS= read -r f; do r="${f#"$core/"}"; echo "X rml/${r//\//_}.o $f" >> "$list"; done < <(find "$core" "$core/Elements" "$core/Layout" "$core/FontEngineDefault" -maxdepth 1 -name '*.cpp' | LC_ALL=C sort -u)
+  while IFS= read -r f; do r="${f#"$UI_SRC/rmlui/Source/Lua/"}"; echo "Y rmllua/${r//\//_}.o $f" >> "$list"; done < <(find "$UI_SRC/rmlui/Source/Lua" -name '*.cpp' | LC_ALL=C sort)
+  # one compiler per line, in parallel; any failure fails the build
+  export CXXU CCU U; export FTF_S="${FTF[*]}" RMF_S="${RMF[*]}" LUF_S="${LUF[*]}" LUAI="-I$UI_SRC/lua/src"
+  # (arrays do not cross xargs: the flags carry no spaces except the quoted defines, rebuilt below)
+  if ! xargs -P "$jobs" -L 1 bash -c '
+      kind="$0"; out="$U/$1"; src="$2"
+      case "$kind" in
+        C) "$CCU" $FTF_S -c -o "$out" "$src" ;;
+        L) "$CCU" $LUF_S -c -o "$out" "$src" ;;
+        X) "$CXXU" $RMF_S -c -o "$out" "$src" ;;
+        Y) "$CXXU" $RMF_S $LUAI -include "$UIS/ui_lua51_compat.h" -c -o "$out" "$src" ;;
+      esac || { echo "build.sh: compile failed: $src" >&2; exit 255; }' < "$list"; then
+    echo "build.sh: the UI third-party objects did not build" >&2; exit 3
+  fi
+  echo "$stamp" > "$U/STAMP"
+  echo "$U"
+}
+# The host's Lua binding as one object whose Lua symbols are all local: ui_lua.cpp + RmlUi's Lua plugin + the host's Lua copy, partially
+# linked, then every C symbol starting "lua" made local, so they never meet the proxy's engine-patched Lua (src/ui_lua.h has the why).
+# $1 core sources, $2 object folder of ui_objs, $3 output object, $4 compiler, $5 binutils prefix ("" on the host).
+ui_lua_obj() {
+  local S="$1" U="$2" O="$3" CXXU="$4" P="$5"
+  "$CXXU" -std=c++17 -O2 -Wall -Wextra -Werror "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/lua/src" -I"$S" \
+    -ffile-prefix-map="$S/"=core/ -c -o "$O.part.o" "$S/ui_lua.cpp"
+  "${P}ld" -r -o "$O.all.o" "$O.part.o" $(LC_ALL=C ls "$U"/rmllua/*.o "$U"/lua/*.o)
+  "${P}objcopy" --wildcard --localize-symbol='_lua*' --localize-symbol='lua*' "$O.all.o" "$O"
+  if "${P}nm" -g --defined-only "$O" | grep -E ' _?lua' >/dev/null; then echo "build.sh: Lua symbols left global in $O" >&2; exit 3; fi
+  rm -f "$O.part.o" "$O.all.o"
+}
+
 build_dll() {
   local S="$1" A="$2" O="$3" L="$3.lua"; mkdir -p "$L"
   local CC="${CXX/g++/gcc}"
-  for c in lapi lcode ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio lauxlib; do
+  for c in $LUA_CORE; do
     "$CC" -std=gnu99 -O2 -w -ffile-prefix-map="$LUA_SRC/"=lua/ -c -o "$L/$c.o" "$LUA_SRC/$c.c"
   done
+  local U; U="$(ui_objs "$CXX" "$CC" mingw32 "$S")"; [[ -f "$U/STAMP" ]] || exit 3
+  ui_lua_obj "$S" "$U" "$L/ui_lua.o" "$CXX" "${CXX%%g++*}"
   # -win32 thread model (no winpthread DLL), static libgcc/libstdc++ (the DLL depends on system DLLs only), no PE timestamp and
   # relative file names (the same sources give the same bytes: the PC test binary is the CI binary). --disable-auto-image-base: mingw
   # ld otherwise hashes the OUTPUT PATH into the DLL's ImageBase, so the container, CI and a worktree gave three different DLLs for
   # one commit (review of J1, 2026-10-28). `build.sh repro` proves it stays fixed.
   "$CXX" -std=c++17 -O2 -s -shared -Wall -Wextra -Werror -DWSP_BUILD_ID="\"$BUILD_ID\"" -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
     -ffile-prefix-map="$S/"=core/ -ffile-prefix-map="$A/"=adapter/ -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp -Wl,--disable-auto-image-base -Wl,--enable-stdcall-fixup \
-    -I"$S" -I"$LUA_SRC" -o "$O" "$S"/*.cpp "$A/adapter.cpp" "$L"/*.o "$S/d3d9.def" -ldbghelp -ladvapi32
+    -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" -o "$O" $(LC_ALL=C ls "$S"/*.cpp | grep -v '/ui_lua\.cpp$') "$A/adapter.cpp" \
+    "$L"/*.o $(LC_ALL=C ls "$U"/rml/*.o "$U"/ft/*.o) "$S/d3d9.def" -ldbghelp -ladvapi32
 }
 
 python3 "$OWN/proxy/tools/gen_tables.py" --check
 if [[ "$WHAT" == dll || "$WHAT" == all || "$WHAT" == repro ]]; then python3 "$OWN/proxy/tools/fetch_lua.py" --out "$ROOT/build/lua" >/dev/null; fi
+if [[ "$WHAT" == dll || "$WHAT" == all || "$WHAT" == repro || "$WHAT" == tests ]]; then python3 "$OWN/proxy/tools/fetch_ui.py" --out "$UI_SRC" >/dev/null; fi
 
 if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
   CXX="$(command -v i686-w64-mingw32-g++-win32 || command -v i686-w64-mingw32-g++ || true)"

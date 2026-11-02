@@ -8,6 +8,7 @@
 // Control protocol (proxy/README.md "Dev control channel"): <ctl_dir>\<id>.cmd -> <ctl_dir>\<id>.done (JSON, written last).
 #include "dev.h"
 #include "capture.h"
+#include "ui_host.h"
 #ifndef PSAPI_VERSION
 #define PSAPI_VERSION 2
 #endif
@@ -389,6 +390,11 @@ Outcome Execute(const std::string& id, const CtlRequest& r) {
         const CaptureArgs a = ParseCaptureArgs(r.arg);
         std::string why;
         if (!CaptureRun(a.name, a.frames, timeout, o.result, why)) { o.status = Dk().capture ? "failed" : "refused"; o.reason = why; }
+        return o;
+    }
+    if (r.verb == "ui") {   // ui ... (J30): ui_host.cpp; refused when ui.enabled is off
+        std::string why;
+        if (!UiCtl(r.arg, timeout, o.result, why)) { o.status = UiEnabled() ? "failed" : "refused"; o.reason = why; }
         return o;
     }
     if (r.verb == "exit") return o;   // the caller exits after writing the result
