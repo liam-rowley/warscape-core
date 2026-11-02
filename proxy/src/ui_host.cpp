@@ -325,8 +325,11 @@ HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT ad, D3DDEVTYPE type, HWND f
     int bw = (int)pp->BackBufferWidth, bh = (int)pp->BackBufferHeight;   // local: a helper device must not change the UI's size
     if ((bw == 0 || bh == 0) && w) { RECT rc; GetClientRect(w, &rc); bw = rc.right; bh = rc.bottom; }
     const bool main = UiIsMainDevice((unsigned)bw, (unsigned)bh, w != nullptr && GetAncestor(w, GA_ROOT) == w);
-    LOGI("ui: CreateDevice %p window %p back buffer %ux%u (%s, flags 0x%lx, multisample %d) -> %s", (void*)dev, (void*)w, pp->BackBufferWidth, pp->BackBufferHeight,
-         pp->Windowed ? "windowed" : "fullscreen", flags, (int)pp->MultiSampleType, main ? "the UI's device" : "not the UI's (helper)");
+    // the depth surface's format says whether the game's depth buffer has a stencil (D24S8 75, D24X8 77, D16 80); the host uses its own D24S8
+    LOGI("ui: CreateDevice %p window %p back buffer %ux%u format %d x%u (%s, flags 0x%lx, multisample %d, auto depth %d format %d, swap %d, interval 0x%x) thread %lu -> %s",
+         (void*)dev, (void*)w, pp->BackBufferWidth, pp->BackBufferHeight, (int)pp->BackBufferFormat, pp->BackBufferCount, pp->Windowed ? "windowed" : "fullscreen", flags,
+         (int)pp->MultiSampleType, (int)pp->EnableAutoDepthStencil, (int)pp->AutoDepthStencilFormat, (int)pp->SwapEffect, pp->PresentationInterval, GetCurrentThreadId(),
+         main ? "the UI's device" : "not the UI's (helper)");
     Lock l;
     const uint8_t act = s_life.Created(dev, main);
     if (!act) return hr;
