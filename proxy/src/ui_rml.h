@@ -1,5 +1,5 @@
 #pragma once
-// ui_rml.h - the RmlUi host's RmlUi-side helpers that need no Windows (napoleon J30): what the router asks RmlUi after each pointer event
+// ui_rml.h - the RmlUi host's RmlUi-side helpers that need no Windows (J30): what the router asks RmlUi after each pointer event
 // (scrollable under the pointer, text focus) and the C++-registered click counter (data-host-counter). Shared by ui_host.cpp and the
 // host test proxy/tests/test_ui_rml.cpp, which runs them on a null render interface.
 #include <RmlUi/Core.h>

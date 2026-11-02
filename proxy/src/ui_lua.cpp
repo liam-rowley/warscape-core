@@ -1,4 +1,4 @@
-// ui_lua.cpp - the RmlUi host's own Lua state (napoleon J30); the decision is in ui_lua.h. build.sh compiles this file apart from the
+// ui_lua.cpp - the RmlUi host's own Lua state (J30); the decision is in ui_lua.h. build.sh compiles this file apart from the
 // other core sources, partially links it with the host's Lua copy and RmlUi's Lua plugin, and makes every _lua* symbol local.
 // It must include nothing that declares the proxy's Lua (luabridge): the source lint in test_ui_core.cpp checks the other ui_ files
 // never include a Lua header.

@@ -1,8 +1,8 @@
 #pragma once
-// ui_render_d3d9.h - the RmlUi host's render interface (napoleon J30), ported from empire-remastered rml_mod/src/rml_render_d3d9.h
-// (Empire's shipped interface: layers, filters, clip masks, gradients, box-shadow). Changes from Empire: logging through the proxy
+// ui_render_d3d9.h - the RmlUi host's render interface (J30), ported from empire-remastered rml_mod/src/rml_render_d3d9.h
+// (empire-remastered's shipped interface: layers, filters, clip masks, gradients, box-shadow). Changes from empire-remastered: logging through the proxy
 // log, no background image preload (the host decodes on demand), art textures get a full mip chain and trilinear sampling so a 2.5x
-// master scales down cleanly (napoleon D19), and a missing shader compiler is reported by Ready() == false (the host turns the UI off).
+// master scales down cleanly (D19), and a missing shader compiler is reported by Ready() == false (the host turns the UI off).
 // RmlUi RenderInterface for Direct3D 9, shader-based (vs_3_0 / ps_3_0), with RmlUi 6 advanced rendering:
 //   layers (render-to-texture), filters (opacity, blur, drop-shadow, brightness/contrast/... colour matrices, mask-image),
 //   clip masks (stencil), gradients (linear/radial/conic, repeating), SaveLayerAsTexture (box-shadow).

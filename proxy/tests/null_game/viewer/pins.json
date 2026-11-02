@@ -1,0 +1,48 @@
+{
+  "_doc": "J31: the versions the review viewer and the in-game host (J30) build from. viewer/core/fetch_sources.py fetches each by commit or sha256; nothing is vendored. Change a pin only with a reason in the job report.",
+  "rmlui": {
+    "version": "6.3",
+    "repo": "https://github.com/mikke89/RmlUi.git",
+    "tag": "6.3",
+    "commit": "ba95ffe8bfb6370efb2cdcca927eaad4710c5413",
+    "licence": "MIT",
+    "why": "Empire's shipped version (empire-remastered rml_mod/src/CMakeLists.txt, LEGAL_NOTES A1)"
+  },
+  "freetype": {
+    "version": "2.13.3",
+    "repo": "https://github.com/freetype/freetype.git",
+    "tag": "VER-2-13-3",
+    "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
+    "licence": "FTL",
+    "why": "Empire's FreeType (same CMakeLists), TTF only, no optional dependencies"
+  },
+  "lua": {
+    "version": "5.1.1",
+    "url": "https://www.lua.org/ftp/lua-5.1.1.tar.gz",
+    "sha256": "c5daeed0a75d8e4dd2328b7c7a69888247868154acbda69110e97d4a6e17d1f0",
+    "licence": "MIT",
+    "why": "the engine's Lua (exe string 'Lua 5.1 Copyright (C) 1994-2006'); the same tarball as proxy/tools/fetch_lua.py (tests/test_viewer.py checks they agree); built with float lua_Number"
+  },
+  "emsdk_image": {
+    "image": "emscripten/emsdk",
+    "tag": "4.0.10",
+    "digest": "sha256:90b757eb11fa9a0e3ce4d2d9f76d932a56018e4accc37b5a28b2783751e60eb7",
+    "why": "official Emscripten image (emcc 4.0.10, cmake 3.22, node 22); keeps Emscripten off the PC (D30, D31)"
+  },
+  "stb_image": {
+    "version": "2.30",
+    "url": "https://raw.githubusercontent.com/nothings/stb/f0569113c93ad095470c54bf34a17b36646bbbb5/stb_image.h",
+    "commit": "f0569113c93ad095470c54bf34a17b36646bbbb5",
+    "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3",
+    "licence": "MIT or public domain",
+    "why": "PNG and JPEG decoding for art (the review artifact serves web image types only, not .tga); the same commit as Empire's rml_mod"
+  },
+  "stb_image_write": {
+    "version": "1.16",
+    "url": "https://raw.githubusercontent.com/nothings/stb/f0569113c93ad095470c54bf34a17b36646bbbb5/stb_image_write.h",
+    "commit": "f0569113c93ad095470c54bf34a17b36646bbbb5",
+    "sha256": "cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05",
+    "licence": "MIT or public domain",
+    "why": "J30: the in-game host's lossless backbuffer dump (ctl ui dump) writes PNG; the same stb commit as stb_image"
+  }
+}

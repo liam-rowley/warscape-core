@@ -1,5 +1,5 @@
 #pragma once
-// ui_lua.h - the RmlUi host's own Lua state (napoleon J30). No Lua type crosses this header: only ui_lua.cpp sees Lua.
+// ui_lua.h - the RmlUi host's own Lua state (J30). No Lua type crosses this header: only ui_lua.cpp sees Lua.
 //
 // Decision (engine_facts <game>.ui.lua_state): the host does NOT run on the proxy's engine-patched Lua core (fetch_lua.py: the engine's
 // dummynode as a runtime variable, no GC step), whose tables are only valid once the bridge's sentinel has read the engine's dummynode

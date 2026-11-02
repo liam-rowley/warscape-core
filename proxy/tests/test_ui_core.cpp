@@ -1,4 +1,4 @@
-// test_ui_core.cpp - host tests for the RmlUi host's pure decisions (napoleon J30): the D19 scale model, the input-routing table, the
+// test_ui_core.cpp - host tests for the RmlUi host's pure decisions (J30): the D19 scale model, the input-routing table, the
 // device lifecycle as a state machine on fake devices, the `ui` control grammar, the frame-cost percentiles; and source lints (ui.enabled=0
 // hooks and allocates nothing, only ui_lua.cpp sees Lua, the compat header carries its five functions, the config keys exist in the
 // adapter with release values off). Built and run by proxy/tools/build.sh tests.
@@ -138,6 +138,10 @@ int main(int argc, char** argv) {
             CHECK(!s.empty());
             CHECK(s.find("#include <lua") == std::string::npos && s.find("#include \"lua") == std::string::npos && s.find("lua_State") == std::string::npos);
         }
+        // the D3DCompile blob is a C-style vtable: a TU-local abstract class made GCC emit "call 0" for every call through it (the first
+        // J30 start-up crash, 2026-11-02); no pure virtual in the render interface's own types
+        CHECK(tk::ReadFile("core/ui_render_d3d9.cpp").find(") = 0;") == std::string::npos);
+        CHECK(tk::ReadFile("core/ui_render_d3d9.cpp").find("struct BlobVtbl") != std::string::npos);
         const std::string compat = tk::ReadFile("core/ui_lua51_compat.h");
         for (const char* fn : { "luaL_setfuncs", "LUA_OK", "luaL_testudata", "luaL_traceback", "lua_tointegerx" }) CHECK(compat.find(fn) != std::string::npos);
         const std::string build = tk::ReadFile("core/../tools/build.sh");

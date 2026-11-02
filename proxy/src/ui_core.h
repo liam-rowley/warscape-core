@@ -1,6 +1,6 @@
 #pragma once
-// ui_core.h - the RmlUi host's pure decisions (napoleon J30), host-tested by proxy/tests/test_ui_core.cpp; no Windows, no RmlUi here.
-//   - the scale model (napoleon D19): dp ratio = back-buffer height / 1080 x ui.scale / 100, ui.scale 85..125 in steps of 5
+// ui_core.h - the RmlUi host's pure decisions (J30), host-tested by proxy/tests/test_ui_core.cpp; no Windows, no RmlUi here.
+//   - the scale model (D19): dp ratio = back-buffer height / 1080 x ui.scale / 100, ui.scale 85..125 in steps of 5
 //   - input routing: which events reach RmlUi, the engine or both (the contract a panel host builds on)
 //   - the device lifecycle: which device the UI attaches to, and what to release or rebuild on Reset and re-creation
 //   - the `ui` control-channel grammar (dev.cpp runs it; ui_host.cpp executes it on the render thread)
@@ -33,7 +33,7 @@ inline float UiDpRatio(int backbufferHeight, int percent) {
 
 // ---- input routing ------------------------------------------------------------------------------------------------------------
 // The rule (brief J30): the pointer belongs to RmlUi only while it is over an interactive element; every other mouse event, including the
-// move that ends the hover and every event of a press that began on the engine until all its buttons are released (Empire's pointer
+// move that ends the hover and every event of a press that began on the engine until all its buttons are released (empire-remastered input.cpp's pointer
 // capture), reaches the engine unchanged. A press that began on RmlUi keeps RmlUi the owner until released (a scrollbar drag that leaves
 // the bar). The wheel goes to RmlUi only over a scrollable element; the keyboard only while a text field has focus.
 // RmlUi always sees pointer moves (it needs them for hover), so a move is "both" unless RmlUi owns the pointer.
@@ -90,7 +90,7 @@ inline const char* UiEvName(UiEv e) {
 
 // ---- device lifecycle -----------------------------------------------------------------------------------------------------------
 // The UI attaches to the main device only: the game's window and a real back buffer. The battle loader's tiny windowed helper device
-// and any other small device are not the UI's (napoleon J13). Back-buffer size 0 means "the window's client size" (windowed D3D9).
+// and any other small device are not the UI's (J13). Back-buffer size 0 means "the window's client size" (windowed D3D9).
 inline bool UiIsMainDevice(unsigned bbW, unsigned bbH, bool gameWindow) { return gameWindow && (bbW == 0 || bbW >= 640) && (bbH == 0 || bbH >= 480); }
 
 enum class UiLife : uint8_t { NoDevice, Ready, Lost, Off };

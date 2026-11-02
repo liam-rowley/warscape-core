@@ -1,4 +1,4 @@
-// ui_render_d3d9.cpp - see ui_render_d3d9.h (ported from empire-remastered rml_mod/src/rml_render_d3d9.cpp, napoleon J30)
+// ui_render_d3d9.cpp - see ui_render_d3d9.h (ported from empire-remastered rml_mod/src/rml_render_d3d9.cpp, J30)
 #include "ui_render_d3d9.h"
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/DecorationTypes.h>
@@ -120,10 +120,15 @@ float4 PSGradient(float4 col : COLOR0, float2 uv : TEXCOORD0) : COLOR {
 
 static int s_trace = 40;   // log the first N advanced-rendering calls
 static const double kSlowFrameMs = 20.0;   // a frame spending more than this inside the overlay gets a profile line
+// Milliseconds since a base that moves every frame (BeginFrame), taken as an integer tick difference first: D3D9 drops the render
+// thread's x87 FPU to 24-bit precision (no D3DCREATE_FPU_PRESERVE), and an absolute QPC time in ms rounded to 8-32 ms steps (empire-remastered's
+// absolute form logged "slow frame 32.0 ms" for every frame in the J30 smoke, 2026-11-02; the same trap as J44's perf).
+static LONGLONG s_msBase = 0;
 double RenderInterface_D3D9::NowMs() {
     static LARGE_INTEGER f = [] { LARGE_INTEGER x; QueryPerformanceFrequency(&x); return x; }();
     LARGE_INTEGER c; QueryPerformanceCounter(&c);
-    return 1000.0 * (double)c.QuadPart / (double)f.QuadPart;
+    if (!s_msBase) s_msBase = c.QuadPart;
+    return (double)((c.QuadPart - s_msBase) * 1000000 / f.QuadPart) / 1000.0;
 }
 #define TRACE(...) do { if (s_trace > 0) { --s_trace; LOGI(__VA_ARGS__); } } while (0)
 
@@ -154,8 +159,10 @@ Rml::Colourf ToF(Rml::ColourbPremultiplied c) { Rml::Colourf r; for (int i = 0; 
 inline float El(const Rml::Matrix4f& m, int r, int c) { return m.data()[c * 4 + r]; }
 
 // D3DCompile from d3dcompiler_47 (loaded at run time; no import): the blob is used through its vtable only
-struct Blob { virtual HRESULT __stdcall QI(const void*, void**) = 0; virtual ULONG __stdcall AddRef() = 0; virtual ULONG __stdcall Release() = 0;
-              virtual void* __stdcall GetBufferPointer() = 0; virtual SIZE_T __stdcall GetBufferSize() = 0; };
+// A C-style vtable, not a C++ class with pure virtuals: GCC proves a TU-local abstract class can have no object and turned every call
+// through it into "call 0" (the J30 first start-up crash, 2026-11-02: d3d9 CompileShaders+0xba). ID3DBlob = IUnknown + GetBufferPointer, GetBufferSize.
+struct BlobVtbl { void* qi; void* addRef; ULONG(WINAPI* Release)(void*); void*(WINAPI* GetBufferPointer)(void*); SIZE_T(WINAPI* GetBufferSize)(void*); };
+struct Blob { const BlobVtbl* v; void* Ptr() { return v->GetBufferPointer(this); } void Release() { v->Release(this); } };
 using PFN_D3DCompile = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const void*, void*, LPCSTR, LPCSTR, UINT, UINT, Blob**, Blob**);
 } // namespace
 
@@ -179,12 +186,12 @@ bool RenderInterface_D3D9::CompileShaders() {
     auto build = [&](const char* entry, const char* target, Blob** out) -> bool {
         Blob* errors = nullptr;
         HRESULT hr = compile(kShaderSource, strlen(kShaderSource), "rml_d3d9", nullptr, nullptr, entry, target, (1 << 15) /* D3DCOMPILE_OPTIMIZATION_LEVEL3 */, 0, out, &errors);
-        if (FAILED(hr)) { LOGE("rml: shader %s (%s) failed: %s", entry, target, errors ? (const char*)errors->GetBufferPointer() : "?"); if (errors) errors->Release(); return false; }
+        if (FAILED(hr)) { LOGE("rml: shader %s (%s) failed: %s", entry, target, errors ? (const char*)errors->Ptr() : "?"); if (errors) errors->Release(); return false; }
         if (errors) errors->Release();
         return true;
     };
-    auto vs = [&](const char* e, IDirect3DVertexShader9** o) { Blob* b = nullptr; if (!build(e, "vs_3_0", &b)) return false; bool ok = SUCCEEDED(m_dev->CreateVertexShader((const DWORD*)b->GetBufferPointer(), o)); b->Release(); return ok; };
-    auto ps = [&](const char* e, IDirect3DPixelShader9** o) { Blob* b = nullptr; if (!build(e, "ps_3_0", &b)) return false; bool ok = SUCCEEDED(m_dev->CreatePixelShader((const DWORD*)b->GetBufferPointer(), o)); b->Release(); return ok; };
+    auto vs = [&](const char* e, IDirect3DVertexShader9** o) { Blob* b = nullptr; if (!build(e, "vs_3_0", &b)) return false; bool ok = SUCCEEDED(m_dev->CreateVertexShader((const DWORD*)b->Ptr(), o)); b->Release(); return ok; };
+    auto ps = [&](const char* e, IDirect3DPixelShader9** o) { Blob* b = nullptr; if (!build(e, "ps_3_0", &b)) return false; bool ok = SUCCEEDED(m_dev->CreatePixelShader((const DWORD*)b->Ptr(), o)); b->Release(); return ok; };
 
     bool ok = vs("VSMain", &m_vsMain) && vs("VSQuad", &m_vsQuad) && ps("PSColor", &m_psColor) && ps("PSTexture", &m_psTexture)
            && ps("PSGradient", &m_psGradient) && ps("PSPassthrough", &m_psPassthrough) && ps("PSColorMatrix", &m_psColorMatrix)
@@ -247,6 +254,7 @@ void RenderInterface_D3D9::BindTarget(IDirect3DSurface9* s) {
 // ================================================================ frame =============================
 void RenderInterface_D3D9::BeginFrame() {
     m_stats.draws = 0; m_stats.layersPeak = 0; m_stats.filters = 0;
+    { LARGE_INTEGER c; QueryPerformanceCounter(&c); s_msBase = c.QuadPart; }   // small values: exact even at 24-bit precision
     m_prof = Prof(); m_frameStart = NowMs();
     if (!m_shadersTried) m_shadersOk = CompileShaders();
     if (!m_shadersOk) return;

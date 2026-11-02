@@ -220,7 +220,7 @@ UI_SUFFIXES = ('.rml', '.rcss', '.lua', '.png', '.jpg', '.jpeg', '.tga', '.ttf',
 
 
 def kit_ui(had):
-    """The RmlUi host's loose files (napoleon J30): the harness adapter's `kit_ui` list of {from (repo folder), to (path under the game
+    """The RmlUi host's loose files (J30): the harness adapter's `kit_ui` list of {from (repo folder), to (path under the game
     folder)}; every file with a UI suffix is copied, sub-folders kept. Inert unless ui.enabled; install and uninstall treat them as any
     other kit file (sha-checked copy, byte-exact uninstall). -> [(path, kit path, role 'ui')]"""
     files = []

@@ -6,8 +6,8 @@ usage: python3 proxy/tools/fetch_ui.py [--pins FILE] [--out DIR]   (defaults: pr
 when: build.sh runs it before compiling the DLL or the UI host tests; the review viewer's build runs it too (one fetcher, one pin file); never commit the output
 not-a-verb: needs network and writes build output, not a registry operation; build.sh calls it
 
-Promoted from napoleon-remastered viewer/core/fetch_sources.py (napoleon J31, J30): the review viewer and the in-game RmlUi host must
-build from the same sources (napoleon D37), so both read one pin file (the game's viewer/pins.json, layout.py ui-pins) through this
+Promoted from the first consumer's viewer/core/fetch_sources.py (J31, J30): the review viewer and the in-game RmlUi host must
+build from the same sources (the consumer's decision D37), so both read one pin file (the game's viewer/pins.json, layout.py ui-pins) through this
 fetcher. The Lua copy is the viewer's: float lua_Number (the engine's number type) and nothing else; the proxy's engine-patched core
 (fetch_lua.py: the engine's dummynode, no GC step) is a different copy for the engine's own lua_State. The host links this one with
 its symbols made local (build.sh), so the two never meet.

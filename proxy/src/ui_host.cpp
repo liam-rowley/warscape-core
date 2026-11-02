@@ -1,4 +1,4 @@
-// ui_host.cpp - the RmlUi host inside the proxy (napoleon J30): context and lifecycle on the main D3D9 device, the frame pass from the
+// ui_host.cpp - the RmlUi host inside the proxy (J30): context and lifecycle on the main D3D9 device, the frame pass from the
 // Present chain, input routing (a Win32 window subclass plus the DirectInput mouse and keyboard devices' vtables), the scale model, the
 // `ui` control verb and the lossless back-buffer dump. Pure decisions live in ui_core.h (host-tested); the render interface in
 // ui_render_d3d9.*; Lua in ui_lua.* (its own copy). Ported in design from empire-remastered rml_mod/src/{overlay,input,hooks}.cpp
@@ -81,14 +81,15 @@ std::string JEsc(const std::string& s) {
 // ---- RmlUi interfaces -------------------------------------------------------------------------------------------------------------
 class System : public Rml::SystemInterface {
 public:
-    double GetElapsedTime() override { return MonoS() - t0; }
+    // integer ticks since start first: the render thread runs the x87 FPU at 24-bit precision, where MonoS() rounds to ~60 ms steps
+    double GetElapsedTime() override { LARGE_INTEGER c, f; QueryPerformanceCounter(&c); QueryPerformanceFrequency(&f); if (!t0.QuadPart) t0 = c; return (double)((c.QuadPart - t0.QuadPart) * 1000 / f.QuadPart) / 1000.0; }
     bool LogMessage(Rml::Log::Type type, const Rml::String& m) override {
         if (type == Rml::Log::LT_ERROR || type == Rml::Log::LT_ASSERT) { InterlockedIncrement(&s_rmlErr); LOGE("rml: %s", m.c_str()); }
         else if (type == Rml::Log::LT_WARNING) { InterlockedIncrement(&s_rmlWarn); LOGW("rml: %s", m.c_str()); }
         else LOGI("rml: %s", m.c_str());
         return true;
     }
-    double t0 = MonoS();
+    LARGE_INTEGER t0{};
 } s_sys;
 
 UiClicks s_clicks;   // data-host-counter (ui_rml.h)
@@ -111,7 +112,8 @@ void ApplyScale() {
 bool LoadDoc(const std::string& name, std::string& why) {
     auto it = s_docs.find(name);
     if (it != s_docs.end() && it->second.doc) return true;
-    const std::string path = Narrow8(UiPath(name));
+    std::string path = Narrow8(UiPath(name));
+    for (char& c : path) if (c == '\\') c = '/';   // RmlUi joins relative URLs (images, style sheets) at the last /
     if (GetFileAttributesW(UiPath(name).c_str()) == INVALID_FILE_ATTRIBUTES) { why = "no file " + path; return false; }
     Rml::ElementDocument* d = s_ctx->LoadDocument(path);
     if (!d) { why = "RmlUi could not load " + path + " (log: rml: lines)"; return false; }
@@ -521,6 +523,16 @@ std::string StateJson(double windowS, double since) {
     std::string hov = "";
     if (s_ctx) if (Rml::Element* e = s_ctx->GetHoverElement()) hov = e->GetTagName() + (e->GetId().empty() ? "" : "#" + e->GetId());
     j += ", \"hovered\": \"" + JEsc(hov) + "\"";
+    // elements scrolled away from the top (evidence that the wheel scrolled what it should and nothing else)
+    j += ", \"scrolled\": {"; first = true;
+    std::vector<Rml::Element*> stack;
+    for (auto& kv : s_docs) if (kv.second.doc && kv.second.visible) stack.push_back(kv.second.doc);
+    while (!stack.empty()) {
+        Rml::Element* e = stack.back(); stack.pop_back();
+        if (e->GetScrollTop() > 0.f) { snprintf(b, sizeof b, "%s\"%s\": %.1f", first ? "" : ", ", JEsc(e->GetId()).c_str(), e->GetScrollTop()); j += b; first = false; }
+        for (int i = 0; i < e->GetNumChildren(); ++i) stack.push_back(e->GetChild(i));
+    }
+    j += "}";
     snprintf(b, sizeof b, ", \"route_state\": {\"hover_interactive\": %s, \"over_scrollable\": %s, \"text_focus\": %s, \"engine_buttons\": %u, \"rml_buttons\": %u, \"rml_owns_pointer\": %s}",
              s_route.hoverInteractive ? "true" : "false", s_route.overScrollable ? "true" : "false", s_route.textFocus ? "true" : "false", s_route.engineButtons, s_route.rmlButtons, s_rmlOwner ? "true" : "false");
     j += b;

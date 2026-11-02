@@ -1,4 +1,4 @@
-// test_ui_rml.cpp - host test of the RmlUi host's document side on a null render interface (napoleon J30; the pattern of
+// test_ui_rml.cpp - host test of the RmlUi host's document side on a null render interface (J30; the pattern of
 // empire-remastered tips_rmlui_check.cpp): RmlUi 6.3 with FreeType initialises, a document loads with no Lua, hover and click
 // dispatch reach the C++ counter (data-host-counter), the router's questions (interactive, scrollable, text focus) answer as the
 // router expects, the wheel scrolls the list; then the host's own Lua state (ui_lua.cpp, the localised copy build.sh makes) runs a

@@ -12,7 +12,7 @@ upath() { if command -v cygpath >/dev/null; then cygpath -u "$1"; else printf '%
 DOCKER=0; [[ "${1:-}" == "--docker" ]] && { DOCKER=1; shift; }
 # D31: the container CI's proxy job runs in (ubuntu-24.04), pinned by digest, with the packages CI installs or its runner image has
 IMAGE="ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852"   # ubuntu:24.04, pinned 2026-10-29
-APT="g++-mingw-w64-i686 g++ python3 ca-certificates git"   # git: fetch_ui.py fetches RmlUi and FreeType by commit (napoleon J30)
+APT="g++-mingw-w64-i686 g++ python3 ca-certificates git"   # git: fetch_ui.py fetches RmlUi and FreeType by commit (J30)
 WHAT="${1:-all}"
 if [[ "${2:-}" == "--adapter" ]]; then WSP_PROXY_ADAPTER="$(cd "${3:?adapter folder}" && pwd)"; export WSP_PROXY_ADAPTER; fi
 ROOT="$(upath "$(layout game-root)")"; SRC="$(upath "$(layout proxy-src)")"; ADIR="$(upath "$(layout proxy-adapter)")"; ADAPTER="$(basename "$ADIR")"
@@ -54,7 +54,7 @@ UI_SRC="$ROOT/build/ui/src"     # proxy/tools/fetch_ui.py: RmlUi, FreeType, the 
 UI_DEFS=(-DRMLUI_STATIC_LIB -DRMLUI_FONT_ENGINE_FREETYPE '-DRMLUI_VERSION="6.3"')
 LUA_CORE="lapi lcode ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio lauxlib"
 
-# The RmlUi host's third-party objects (napoleon J30): RmlUi Core with its FreeType font engine, FreeType (TrueType only: sfnt, truetype,
+# The RmlUi host's third-party objects (J30): RmlUi Core with its FreeType font engine, FreeType (TrueType only: sfnt, truetype,
 # autofit, psnames, smooth; no zlib, bzip2, png, harfbuzz or brotli) and, for the Lua binding, RmlUi's Lua plugin plus a second Lua 5.1.1
 # (the viewer's: float numbers, collector and dummynode untouched). They depend only on the pinned sources and these flags, so they are
 # cached per compiler under build/ui/obj/<tag> (a stamp of the pin file, the flags and the compiler); file names in them are labels (ui/).

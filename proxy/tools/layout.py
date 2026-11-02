@@ -98,7 +98,7 @@ def harness_adapter(game=None):
 
 
 def ui_pins(game=None):
-    """The pin file of the RmlUi host's sources (napoleon J30): wsc.toml [proxy] ui_pins, else viewer/pins.json under the game root
+    """The pin file of the RmlUi host's sources (J30): wsc.toml [proxy] ui_pins, else viewer/pins.json under the game root
     (the one pin file the review viewer and the in-game host build from; proxy/tools/fetch_ui.py reads it)."""
     game = game or game_root()
     f = game / 'wsc.toml'
