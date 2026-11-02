@@ -109,7 +109,7 @@ def brief_problems(jid, row, text, ctx=None):
         if m.group(1).lower() != row.get('model'):
             errs.append(f'Model line says {m.group(1)}, the row says {row.get("model")}')
         if m.group(1).lower() in S.models[1:] and not re.search(r'\breason\b', m.group(2), re.I):
-            errs.append(f'{m.group(1).title()} without "reason:" on the Model line' + ref('ref_models', ' ({}: only with a stated reason)'))
+            errs.append(f'{m.group(1).title()} without "reason:" on the Model line' + ref('ref_models', ' ({}: ' + m.group(1).title() + ' only with a stated reason)'))
     if not re.search(r'[Bb]udget\s+about\s+\d+\s+tool\s+calls', text):
         errs.append('no call budget ("Budget about <n> tool calls"' + ref('ref_models', ', {}') + ')')
     kill = re.search(r'^## Kill criteria\s*\n(.*?)(?=^## |\Z)', text, re.M | re.S)

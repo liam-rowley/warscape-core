@@ -12,6 +12,7 @@ Five names, no more: a general game-gates mechanism is backlog B1, and these hoo
 it needs no tool header, runs inside the `wsc` process and may import from the repo it lives in.
 """
 import importlib.util
+import sys
 from pathlib import Path
 
 NAMES = ('brief_problems', 'queue_problems', 'policy_problems', 'view_panel', 'summary')
@@ -27,7 +28,11 @@ def load(root, paths):
             raise ValueError(f'wsc.toml [jobs] hooks: {p} does not exist')
         spec = importlib.util.spec_from_file_location(f'wsc_hook_{f.stem}', f)
         m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
+        keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True   # no __pycache__ in the repo being checked (`git add -A` would commit it)
+        try:
+            spec.loader.exec_module(m)
+        finally:
+            sys.dont_write_bytecode = keep
         if not any(hasattr(m, n) for n in NAMES):
             raise ValueError(f'{p} is listed in [jobs] hooks but defines none of: {", ".join(NAMES)}')
         mods.append(m)
