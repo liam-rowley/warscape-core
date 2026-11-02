@@ -648,9 +648,11 @@ class Ctl:
         return parse_unit(text)
 
     def v_order(self, start, unit=None, action=None, *rest):
-        """`order list`, or `order <unit> move <x> <z> [facing] [width] [run]`: push one move/face order through the engine's own command
-        path (the route's chunk), wait until the unit is at rest (order_settle), read it back and compare the front centre, the facing and
-        the width with the order within the route's tolerance (arrival_check). Refused: a unit the engine or the proxy will not order."""
+        """`order list`, or `order <unit>[,<unit>...] move <x> <z> [facing] [width] [run]` (each of x, z, facing, width one value or a comma
+        list, one per unit): push one move/face order per unit through the engine's own command path (the route's chunk), back to back,
+        wait until every unit is at rest (order_settle), read each back and compare its front centre, facing and width with its order
+        within the route's tolerance (arrival_check). A number names the unit's place in the player's army list at the start of the call
+        (pinned to its pointer for the rest of it). Refused: a unit the engine or the proxy will not order (nothing is pushed then)."""
         rt = self.route('orders')
         if unit == 'list':
             ok, text, r = self.lua(rt['chunk'], 'list')
@@ -659,43 +661,72 @@ class Ctl:
             check = {'compared': 'every unit of the player army read (in its army list, on land)', 'expected': 'units > 0, none refused', 'got': len(units), 'ok': good}
             return make_result('order', 'ok' if good else 'failed', '' if good else f'step list: {text[:300]}', start, kind=rt.get('kind'), units=units,
                                check=check, evidence={'list': r})
-        if action != 'move':
-            raise Refused('order takes: list | <unit> move <x> <z> [facing] [width] [run]')
+        if action != 'move' or unit is None:
+            raise Refused('order takes: list | <unit>[,<unit>...] move <x> <z> [facing] [width] [run]')
+        names = unit.split(',')
+
+        def per_unit(i, default):
+            v = rest[i] if len(rest) > i else '-'
+            vals = v.split(',')
+            if len(vals) not in (1, len(names)):
+                raise Refused(f'{v}: one value, or one per unit ({len(names)})')
+            return [None if x == '-' else float(x) for x in (vals * len(names) if len(vals) == 1 else vals)] if v != '-' else [default] * len(names)
         try:
-            x, z = float(rest[0]), float(rest[1])
-            facing = float(rest[2]) if len(rest) > 2 and rest[2] != '-' else None
-            width = float(rest[3]) if len(rest) > 3 and rest[3] != '-' else None
+            xs, zs, fs, ws = per_unit(0, None), per_unit(1, None), per_unit(2, None), per_unit(3, None)
             run = len(rest) > 4 and rest[4] in ('1', 'run', 'true')
-        except (IndexError, ValueError):
+        except ValueError:
             raise Refused('order <unit> move <x> <z> [facing|-] [width|-] [run]: numbers')
-        before = self.unit_read(rt, unit)
-        named, unit = unit, before['ptr']   # a number is the army list position now: a lost unit renumbers the rest (run 20261102_j28pc c6)
-        arg = f"move {unit} {x!r} {z!r} {'-' if facing is None else repr(facing)} {'-' if width is None else repr(width)} {1 if run else 0}"
-        ok, text, r = self.lua(rt['chunk'], arg)
-        if not ok or not text.startswith('pushed '):
-            reason = text.replace('orders refused: ', '') if ok else text
-            if any(w in reason for w in ('refused the unit', 'no men alive', 'not in its army', 'moving frame', 'dev.orders=0')):
-                raise Refused(reason)
-            return make_result('order', 'failed', f'step push: {reason}', start, unit=unit, before=before, evidence={'push': r})
-        pushed = text.splitlines()[0]
-        want = {'x': x, 'z': z, 'facing': before['facing'] if facing is None else facing % 360.0, 'width': before.get('width') if width is None else width}
+        if None in xs or None in zs:
+            raise Refused('order <unit> move <x> <z>: x and z are required')
+        befores = [self.unit_read(rt, n) for n in names]
+        ptrs = [b['ptr'] for b in befores]   # a number is the army list position now: a lost unit renumbers the rest (run 20261102_j28pc c6)
+        if len(set(ptrs)) != len(ptrs):
+            raise Refused('a unit is named twice')
+        wants, pushes, evid = [], [], {}
+        for i, ptr in enumerate(ptrs):
+            arg = f"move {ptr} {xs[i]!r} {zs[i]!r} {'-' if fs[i] is None else repr(fs[i])} {'-' if ws[i] is None else repr(ws[i])} {1 if run else 0}"
+            ok, text, r = self.lua(rt['chunk'], arg)
+            evid[f'push_{names[i]}'] = r
+            if not ok or not text.startswith('pushed '):
+                reason = text.replace('orders refused: ', '') if ok else text
+                step = f'unit {names[i]}: {reason}' + (f' ({i} of {len(ptrs)} already pushed)' if i else '')
+                if not i and any(w in reason for w in ('refused the unit', 'no men alive', 'not in its army', 'moving frame', 'dev.orders=0')):
+                    raise Refused(step)
+                return make_result('order', 'failed', f'step push: {step}', start, unit=unit, before=befores, evidence=evid)
+            pushes.append(text.splitlines()[0])
+            b = befores[i]
+            wants.append({'x': xs[i], 'z': zs[i], 'facing': b['facing'] if fs[i] is None else fs[i] % 360.0, 'width': b.get('width') if ws[i] is None else ws[i]})
         st = rt.get('settle', {})
-        dist = ((before.get('fx', before['x']) - x) ** 2 + (before.get('fz', before['z']) - z) ** 2) ** 0.5
+        dist = max(((b.get('fx', b['x']) - w['x']) ** 2 + (b.get('fz', b['z']) - w['z']) ** 2) ** 0.5 for b, w in zip(befores, wants))
         limit = min(st.get('base_s', 10) + dist / st.get('min_speed_mps', 0.8), st.get('max_s', 240))   # battle seconds
         speed = self.order_speed(rt, dist)
         try:
-            settle, got = self.order_settle(rt, unit, limit / speed['rate'])
+            settles, gots = self.order_settle(rt, ptrs, limit / speed['rate'])
         finally:
             if speed['set']:   # the request lands on a later frame: read it back after the route's lead_s
                 self.battle_clock(speed['rt'], speed['was'])
                 self.sleep(speed['rt'].get('lead_s', 0.5))
                 speed['restored'] = self.battle_clock(speed['rt'], 'read')['tick']
-        settle['speed'] = {k: v for k, v in speed.items() if k != 'rt'}
-        check = arrival_check(want, got, rt.get('tolerance', {}))
-        ok = check['ok'] and settle['settled']
-        reason = '' if ok else ('not at rest before the timeout' if not settle['settled'] else 'readback outside tolerance')
-        return make_result('order', 'ok' if ok else 'failed', reason, start, unit=named, ptr=unit, kind=rt.get('kind'), action='move', ordered=want, run=run,
-                           before=before, got=got, pushed=pushed, settle=settle, check=check, evidence={'push': r})
+        speed = {k: v for k, v in speed.items() if k != 'rt'}
+        results = []
+        for i in range(len(ptrs)):
+            check = arrival_check(wants[i], gots[i], rt.get('tolerance', {}))
+            ok = check['ok'] and settles[i]['settled']
+            reason = '' if ok else ('not at rest before the timeout' if not settles[i]['settled'] else 'readback outside tolerance')
+            results.append({'unit': names[i], 'ptr': ptrs[i], 'status': 'ok' if ok else 'failed', 'reason': reason, 'ordered': wants[i], 'before': befores[i],
+                            'got': gots[i], 'pushed': pushes[i], 'settle': settles[i], 'check': check})
+        bad = [r for r in results if r['status'] != 'ok']
+        if len(results) == 1:
+            r = results[0]
+            r['settle']['speed'] = speed
+            return make_result('order', r['status'], r['reason'], start, unit=r['unit'], ptr=r['ptr'], kind=rt.get('kind'), action='move', ordered=r['ordered'],
+                               run=run, before=r['before'], got=r['got'], pushed=r['pushed'], settle=r['settle'], check=r['check'], evidence=evid)
+        check = {'compared': f'{len(results)} units, each order against its readback at rest', 'expected': 'every unit ok', 'got': f'{len(results) - len(bad)} ok',
+                 'ok': not bad}
+        settle = {'waited_for': 'every unit at rest', 'waited_s': max(x['waited_s'] for x in settles), 'settled': all(x['settled'] for x in settles), 'speed': speed}
+        reason = '' if not bad else 'units ' + ','.join(r['unit'] for r in bad) + ': ' + '; '.join(sorted({r['reason'] for r in bad}))
+        return make_result('order', 'ok' if not bad else 'failed', reason, start, unit=unit, kind=rt.get('kind'), action='move', run=run, units=results,
+                           settle=settle, check=check, evidence=evid)
 
     def order_speed(self, rt, dist):
         """The battle speed for the wait: the route's settle.wait_speed (a speed route name, e.g. ffwd) when the move is at least
@@ -712,31 +743,38 @@ class Ctl:
         rate = float(srt.get('measured', {}).get(want, 1.0)) / float(srt.get('measured', {}).get(was, 1.0) or 1.0)
         return {'set': True, 'rate': rate, 'was': was, 'speed': want, 'rt': srt}
 
-    def order_settle(self, rt, unit, limit):
-        """Read the unit every poll_s until its centre and facing are still for rest_reads reads in a row (once it has moved, or after
-        min_wait_s), or until `limit` seconds: (settle, last state). The route's settle block holds the numbers and their run."""
+    def order_settle(self, rt, ptrs, limit):
+        """Read every unit every poll_s until each one's centre and facing have been still for rest_reads reads in a row (once it has
+        moved, or after min_wait_s), or until `limit` seconds: ([settle per unit], [last state per unit]). Numbers: the route's settle."""
         st = rt.get('settle', {})
         poll, need, eps, eps_deg = st.get('poll_s', 1.0), st.get('rest_reads', 3), st.get('eps_m', 0.02), st.get('eps_deg', 0.05)
         t0 = self.clock()
-        prev, still, reads, moved = self.unit_read(rt, unit), 0, 1, False
+        prev = [self.unit_read(rt, p) for p in ptrs]
+        n = len(ptrs)
+        still, moved, done, reads = [0] * n, [False] * n, [None] * n, 1
         while True:
             self.sleep(poll)
-            cur = self.unit_read(rt, unit)
+            cur = [self.unit_read(rt, p) if done[i] is None else prev[i] for i, p in enumerate(ptrs)]
             reads += 1
-            d = ((cur['x'] - prev['x']) ** 2 + (cur['z'] - prev['z']) ** 2) ** 0.5
-            df = abs((cur['facing'] - prev['facing'] + 180) % 360 - 180)
-            if d >= eps or df >= eps_deg:
-                moved, still = True, 0
-            else:
-                still += 1
             el = self.clock() - t0
-            if still >= need and (moved or el >= st.get('min_wait_s', 3)):
-                return {'waited_for': f'centre still for {need} reads ({eps} m, {eps_deg} deg) every {poll} s', 'waited_s': round(el, 2), 'reads': reads,
-                        'moved': moved, 'settled': True}, cur
-            if el >= limit:
-                return {'waited_for': f'centre still for {need} reads, timeout {round(limit, 1)} s', 'waited_s': round(el, 2), 'reads': reads,
-                        'moved': moved, 'settled': False}, cur
+            for i in range(n):
+                if done[i] is not None:
+                    continue
+                d = ((cur[i]['x'] - prev[i]['x']) ** 2 + (cur[i]['z'] - prev[i]['z']) ** 2) ** 0.5
+                df = abs((cur[i]['facing'] - prev[i]['facing'] + 180) % 360 - 180)
+                if d >= eps or df >= eps_deg:
+                    moved[i], still[i] = True, 0
+                else:
+                    still[i] += 1
+                if still[i] >= need and (moved[i] or el >= st.get('min_wait_s', 3)):
+                    done[i] = {'waited_for': f'centre still for {need} reads ({eps} m, {eps_deg} deg) every {poll} s', 'waited_s': round(el, 2), 'reads': reads,
+                               'moved': moved[i], 'settled': True}
             prev = cur
+            if all(x is not None for x in done):
+                return done, cur
+            if el >= limit:
+                return [x or {'waited_for': f'centre still for {need} reads, timeout {round(limit, 1)} s', 'waited_s': round(el, 2), 'reads': reads,
+                              'moved': moved[i], 'settled': False} for i, x in enumerate(done)], cur
 
     def v_pause(self, start, mode):
         if mode not in ('on', 'off'):
