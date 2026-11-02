@@ -680,13 +680,34 @@ class Ctl:
         want = {'x': x, 'z': z, 'facing': before['facing'] if facing is None else facing % 360.0, 'width': before.get('width') if width is None else width}
         st = rt.get('settle', {})
         dist = ((before.get('fx', before['x']) - x) ** 2 + (before.get('fz', before['z']) - z) ** 2) ** 0.5
-        limit = min(st.get('base_s', 10) + dist / st.get('min_speed_mps', 0.8), st.get('max_s', 240))
-        settle, got = self.order_settle(rt, unit, limit)
+        limit = min(st.get('base_s', 10) + dist / st.get('min_speed_mps', 0.8), st.get('max_s', 240))   # battle seconds
+        speed = self.order_speed(rt, dist)
+        try:
+            settle, got = self.order_settle(rt, unit, limit / speed['rate'])
+        finally:
+            if speed['set']:
+                speed['restored'] = self.battle_clock(speed['rt'], speed['was'])['tick'] if speed['was'] else None
+        settle['speed'] = {k: v for k, v in speed.items() if k != 'rt'}
         check = arrival_check(want, got, rt.get('tolerance', {}))
         ok = check['ok'] and settle['settled']
         reason = '' if ok else ('not at rest before the timeout' if not settle['settled'] else 'readback outside tolerance')
         return make_result('order', 'ok' if ok else 'failed', reason, start, unit=unit, kind=rt.get('kind'), action='move', ordered=want, run=run,
                            before=before, got=got, pushed=pushed, settle=settle, check=check, evidence={'push': r})
+
+    def order_speed(self, rt, dist):
+        """The battle speed for the wait: the route's settle.wait_speed (a speed route name, e.g. ffwd) when the move is at least
+        wait_speed_over_m long, through the speed route; the speed it had is restored after the readback (v_order)."""
+        st = rt.get('settle', {})
+        want = st.get('wait_speed')
+        if not want or dist < st.get('wait_speed_over_m', 0):
+            return {'set': False, 'rate': 1.0}
+        srt = self.route('speed', rt.get('kind'))
+        was = self.battle_clock(srt, 'read')['tick']
+        if was == want:
+            return {'set': False, 'rate': float(srt.get('measured', {}).get(want, 1.0)), 'was': was}
+        self.battle_clock(srt, want)
+        rate = float(srt.get('measured', {}).get(want, 1.0)) / float(srt.get('measured', {}).get(was, 1.0) or 1.0)
+        return {'set': True, 'rate': rate, 'was': was, 'speed': want, 'rt': srt}
 
     def order_settle(self, rt, unit, limit):
         """Read the unit every poll_s until its centre and facing are still for rest_reads reads in a row (once it has moved, or after
