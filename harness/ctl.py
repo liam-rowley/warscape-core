@@ -669,6 +669,7 @@ class Ctl:
         except (IndexError, ValueError):
             raise Refused('order <unit> move <x> <z> [facing|-] [width|-] [run]: numbers')
         before = self.unit_read(rt, unit)
+        named, unit = unit, before['ptr']   # a number is the army list position now: a lost unit renumbers the rest (run 20261102_j28pc c6)
         arg = f"move {unit} {x!r} {z!r} {'-' if facing is None else repr(facing)} {'-' if width is None else repr(width)} {1 if run else 0}"
         ok, text, r = self.lua(rt['chunk'], arg)
         if not ok or not text.startswith('pushed '):
@@ -685,13 +686,15 @@ class Ctl:
         try:
             settle, got = self.order_settle(rt, unit, limit / speed['rate'])
         finally:
-            if speed['set']:
-                speed['restored'] = self.battle_clock(speed['rt'], speed['was'])['tick'] if speed['was'] else None
+            if speed['set']:   # the request lands on a later frame: read it back after the route's lead_s
+                self.battle_clock(speed['rt'], speed['was'])
+                self.sleep(speed['rt'].get('lead_s', 0.5))
+                speed['restored'] = self.battle_clock(speed['rt'], 'read')['tick']
         settle['speed'] = {k: v for k, v in speed.items() if k != 'rt'}
         check = arrival_check(want, got, rt.get('tolerance', {}))
         ok = check['ok'] and settle['settled']
         reason = '' if ok else ('not at rest before the timeout' if not settle['settled'] else 'readback outside tolerance')
-        return make_result('order', 'ok' if ok else 'failed', reason, start, unit=unit, kind=rt.get('kind'), action='move', ordered=want, run=run,
+        return make_result('order', 'ok' if ok else 'failed', reason, start, unit=named, ptr=unit, kind=rt.get('kind'), action='move', ordered=want, run=run,
                            before=before, got=got, pushed=pushed, settle=settle, check=check, evidence={'push': r})
 
     def order_speed(self, rt, dist):
