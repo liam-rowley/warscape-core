@@ -91,7 +91,7 @@ bool MoveLocked(uint32_t unit, MoveArgs a, std::string& info, std::string& why) 
     if (!CheckMove(a, why)) return false;
     UnitState s;
     if (!UnitLocked(unit, s, why)) return false;
-    if (s.men <= 0) { why = "the unit has no men alive"; return false; }
+    if (!UnitOrderable(s, why)) return false;
     ResolveMove(a, s);
     if (!a.hasWidth) { why = "no width given and the unit's own width is not readable"; return false; }
     uint32_t battle = 0, queue = 0, t1 = 0, terrain = 0;
@@ -140,7 +140,7 @@ bool CommandLocked(uint32_t unit, int cmd, float arg, std::string& info, std::st
     if (cmd < 0 || cmd > 0xff || !std::isfinite(arg)) { why = "a command code is 0..255 and its argument a finite number"; return false; }
     UnitState s;
     if (!UnitLocked(unit, s, why)) return false;
-    if (s.men <= 0) { why = "the unit has no men alive"; return false; }
+    if (!UnitOrderable(s, why)) return false;
     uint32_t battle = 0, queue = 0, owner = 0, cellBattle = 0;
     if (!Battle(battle, queue, why)) return false;
     if (!ReadPtr(s_global, owner) || !ReadPtr(owner + s_cellOff, cellBattle) || cellBattle != battle) { why = "the owner's command cell does not hold the battle"; return false; }

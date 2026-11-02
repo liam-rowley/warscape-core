@@ -129,6 +129,13 @@ UnitState ReadUnit(uint32_t unit, const UnitLayout& L, Read read) {
     return s;
 }
 
+// A decoded unit the driver will order: alive (a dead unit's UNIT can stay in its army's list).
+inline bool UnitOrderable(const UnitState& s, std::string& why) {
+    if (!s.ok) { why = s.why.empty() ? "the unit is not readable" : s.why; return false; }
+    if (s.men <= 0) { why = "the unit has no men alive"; return false; }
+    return true;
+}
+
 // ---- order arguments ---------------------------------------------------------------------------------------------------------------
 struct MoveArgs {
     float x = 0, z = 0;
