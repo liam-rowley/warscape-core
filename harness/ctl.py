@@ -720,9 +720,13 @@ class Ctl:
         speed = {k: v for k, v in speed.items() if k != 'rt'}
         results = []
         for i in range(len(ptrs)):
-            check = arrival_check(wants[i], gots[i], rt.get('tolerance', {}))
-            ok = check['ok'] and settles[i]['settled']
-            reason = '' if ok else ('not at rest before the timeout' if not settles[i]['settled'] else 'readback outside tolerance')
+            check = arrival_check(wants[i], gots[i], rt.get('tolerance', {}), befores[i])
+            away = ((befores[i].get('fx', befores[i]['x']) - wants[i]['x']) ** 2 + (befores[i].get('fz', befores[i]['z']) - wants[i]['z']) ** 2) ** 0.5
+            still = not settles[i]['moved'] and away > rt.get('tolerance', {}).get('pos_m', 1.0)
+            check['moved'] = {'expected': f"moved (ordered {round(away, 2)} m away)" if away > rt.get('tolerance', {}).get('pos_m', 1.0) else 'any', 'got': settles[i]['moved'], 'ok': not still}
+            ok = check['ok'] and settles[i]['settled'] and not still
+            reason = '' if ok else ('the unit never moved: the engine took the order and found no path (a cliff, a wall, off the map?)' if still else
+                                    'not at rest before the timeout' if not settles[i]['settled'] else 'readback outside tolerance')
             results.append({'unit': names[i], 'ptr': ptrs[i], 'status': 'ok' if ok else 'failed', 'reason': reason, 'ordered': wants[i], 'before': befores[i],
                             'got': gots[i], 'pushed': pushes[i], 'settle': settles[i], 'check': check})
         bad = [r for r in results if r['status'] != 'ok']
@@ -882,7 +886,15 @@ def parse_unit(line):
     return u
 
 
-def arrival_check(want, got, tol):
+def centre_ahead(u):
+    """How far the unit's front centre is ahead of its centre along its facing (metres), or None without a front centre."""
+    if 'fx' not in u:
+        return None
+    b = math.radians(u['facing'])
+    return (u['fx'] - u['x']) * math.sin(b) + (u['fz'] - u['z']) * math.cos(b)
+
+
+def arrival_check(want, got, tol, before=None):
     """The order against the unit at rest: the front centre (the point an order names; the centre when the layout has none), the facing
     (wrapped) and the width, each within the route's tolerance (pos_m, facing_deg, width_m)."""
     px, pz = got.get('fx', got.get('x')), got.get('fz', got.get('z'))
@@ -897,7 +909,11 @@ def arrival_check(want, got, tol):
         b = math.radians(got['facing'])
         dx, dz = want['x'] - got['x'], want['z'] - got['z']
         ahead, lateral = dx * math.sin(b) + dz * math.cos(b), dx * math.cos(b) - dz * math.sin(b)
-        lo, hi = tol.get('centre_ahead_m', [0.0, 30.0])
+        lo, hi = tol.get('centre_ahead_m', [-1.0, 30.0])
+        was = centre_ahead(before) if before else None
+        if was is not None:   # half the depth before the order, scaled by the width change; ranks are discrete, so a factor and a floor
+            exp = max(was, 0.0) * ((before.get('width') or want.get('width') or 1.0) / (want.get('width') or before.get('width') or 1.0))
+            hi = min(hi, max(tol.get('centre_ahead_floor_m', 3.0), tol.get('centre_ahead_factor', 3.0) * exp))
         fields['centre_lateral_m'] = {'expected': 0, 'got': round(lateral, 4), 'err': round(abs(lateral), 4), 'tol': tol.get('centre_lateral_m', 1.5)}
         fields['centre_ahead_m'] = {'expected': [lo, hi], 'got': round(ahead, 4), 'err': round(max(lo - ahead, ahead - hi, 0.0), 4), 'tol': 0.0}
     for f in fields.values():
