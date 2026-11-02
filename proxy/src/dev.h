@@ -6,15 +6,16 @@
 #include "filerules.h"
 #include "console.h"
 #include "camera.h"
+#include "orders.h"
 
 namespace wsp {
 
 struct DevKeys {
-    bool timeline = false, logFiles = false, skipIntro = false, stateJson = false, luaBridge = false, ctl = false, console = false, perf = false, camera = false, capture = false;
+    bool timeline = false, logFiles = false, skipIntro = false, stateJson = false, luaBridge = false, ctl = false, console = false, perf = false, camera = false, capture = false, orders = false;
     std::wstring fileRules, ctlDir, captureDir;
     std::string autostart;
     int autostartDelayMs = 1500;
-    bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || capture || !fileRules.empty() || !autostart.empty(); }
+    bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || capture || orders || !fileRules.empty() || !autostart.empty(); }
 };
 DevKeys& Dk();
 bool DevActive();
@@ -44,6 +45,21 @@ std::string ConsoleStatusJson();                      // result members of ctl c
 void CameraInit(bool key, const CameraAdapter* ad);   // DevInit
 void CameraInstall();                                 // first Direct3DCreate9: verify the sites, read the chain's offsets
 bool CameraSet(const CamPose& p, std::string& why);   // the engine thread (wsp.cam_set): the active mode's SetTargetAndPosition
+
+// orders.cpp (J28): the battle unit control route behind dev.orders; decisions in orders.h
+void OrdersInit(bool key, const OrdersAdapter* ad);   // DevInit
+void OrdersInstall();                                 // first Direct3DCreate9: verify the sites, read the offsets
+void OrdersPump();                                    // the engine thread, every Lua pump: records the thread, runs posted orders
+void OrdersPresent();                                 // the render thread, every Present: records the thread facts once
+bool OrdersUnit(uint32_t unit, UnitState& s, std::string& why);                      // any thread (reads only)
+bool OrdersArmy(uint32_t unit, std::vector<uint32_t>& units, std::string& why);      // unit's army (0 = the cached player army)
+bool OrdersSelection(std::vector<uint32_t>& loose, int& groups, std::string& why);   // the UI's own selection S
+bool OrdersMove(uint32_t unit, const MoveArgs& a, std::string& info, std::string& why);   // the engine thread only (refuses others)
+bool OrdersCommand(uint32_t unit, int cmd, float arg, std::string& info, std::string& why);   // the engine thread: the owner's dispatcher
+long OrdersPost(uint32_t unit, const MoveArgs& a);    // any thread: queued for the next pump; 0 = dev.orders off
+bool OrdersPostResult(long id, bool& ok, std::string& text);   // a posted order's outcome, once
+bool OrdersPeek(uint32_t a, size_t n, std::string& hex, std::string& why);         // probe: n bytes as hex (reads only)
+std::string OrdersInfo();                             // install state, the owner path's pointers, the thread ids
 
 // capture.cpp (J8): the frame capture behind dev.capture; decisions in its header
 void CaptureInit();                                   // DevInit: the capture folder

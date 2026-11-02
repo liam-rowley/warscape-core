@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
             CHECK(std::string(gen::kKeys[i].def) == "0");
         }
         const std::string ini = tk::AdapterIni();
-        for (const char* k : { "timeline=0", "log_files=0", "skip_intro=0", "state_json=0", "lua_bridge=0", "ctl=0", "console=0", "perf=0", "camera=0", "autostart=\r\n" }) {
+        for (const char* k : { "timeline=0", "log_files=0", "skip_intro=0", "state_json=0", "lua_bridge=0", "ctl=0", "console=0", "perf=0", "camera=0", "orders=0", "autostart=\r\n" }) {
             const bool has = ini.find(std::string("\n") + k) != std::string::npos || ini.find(std::string("\n") + std::string(k).substr(0, strlen(k) - 2) + "\n") != std::string::npos;
             if (!has) { printf("    shipped ini lacks %s\n", k); CHECK(has); }
         }
