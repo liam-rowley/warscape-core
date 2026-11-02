@@ -642,10 +642,15 @@ class Ctl:
 
     def unit_read(self, rt, unit):
         """One unit through the route's chunk: a dict of its fields (floats where numeric)."""
-        ok, text, r = self.lua(rt['chunk'], f'state {unit}')
-        if not ok or not text.startswith('unit '):
-            raise RuntimeError(f'step read {unit}: {text}')
-        return parse_unit(text)
+        return self.unit_reads(rt, [unit])[0]
+
+    def unit_reads(self, rt, units):
+        """Several units in one chunk call (a settle round is one round trip): a dict per unit, in order."""
+        ok, text, r = self.lua(rt['chunk'], 'state ' + ','.join(str(u) for u in units))
+        lines = text.splitlines() if ok else []
+        if not ok or len(lines) != len(units) or not all(ln.startswith('unit ') for ln in lines):
+            raise RuntimeError(f"step read {','.join(str(u) for u in units)}: {text[:300]}")
+        return [parse_unit(ln) for ln in lines]
 
     def v_order(self, start, unit=None, action=None, *rest):
         """`order list`, or `order <unit>[,<unit>...] move <x> <z> [facing] [width] [run]` (each of x, z, facing, width one value or a comma
@@ -678,7 +683,7 @@ class Ctl:
             raise Refused('order <unit> move <x> <z> [facing|-] [width|-] [run]: numbers')
         if None in xs or None in zs:
             raise Refused('order <unit> move <x> <z>: x and z are required')
-        befores = [self.unit_read(rt, n) for n in names]
+        befores = self.unit_reads(rt, names)
         ptrs = [b['ptr'] for b in befores]   # a number is the army list position now: a lost unit renumbers the rest (run 20261102_j28pc c6)
         if len(set(ptrs)) != len(ptrs):
             raise Refused('a unit is named twice')
@@ -749,12 +754,12 @@ class Ctl:
         st = rt.get('settle', {})
         poll, need, eps, eps_deg = st.get('poll_s', 1.0), st.get('rest_reads', 3), st.get('eps_m', 0.02), st.get('eps_deg', 0.05)
         t0 = self.clock()
-        prev = [self.unit_read(rt, p) for p in ptrs]
+        prev = self.unit_reads(rt, ptrs)
         n = len(ptrs)
         still, moved, done, reads = [0] * n, [False] * n, [None] * n, 1
         while True:
             self.sleep(poll)
-            cur = [self.unit_read(rt, p) if done[i] is None else prev[i] for i, p in enumerate(ptrs)]
+            cur = self.unit_reads(rt, ptrs)
             reads += 1
             el = self.clock() - t0
             for i in range(n):
@@ -772,7 +777,7 @@ class Ctl:
             prev = cur
             if all(x is not None for x in done):
                 return done, cur
-            if el >= limit:
+            if el >= limit:   # a unit at rest earlier keeps its rest record; the state returned is the last read for all
                 return [x or {'waited_for': f'centre still for {need} reads, timeout {round(limit, 1)} s', 'waited_s': round(el, 2), 'reads': reads,
                               'moved': moved[i], 'settled': False} for i, x in enumerate(done)], cur
 
