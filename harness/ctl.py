@@ -23,6 +23,7 @@ the battle clock's rate against the windows clock over `measure_s` (J43).
 import argparse
 import datetime
 import json
+import math
 import os
 import re
 import subprocess
@@ -816,9 +817,16 @@ def arrival_check(want, got, tol):
     if want.get('width') is not None and 'width' in got:
         fields['width_m'] = {'expected': want['width'], 'got': round(got['width'], 4), 'err': round(abs(got['width'] - want['width']), 4),
                              'tol': tol.get('width_m', 0.5)}
+    if 'fx' in got:   # the front centre is the stored destination: the live centre proves the unit got there (behind it, on its axis)
+        b = math.radians(got['facing'])
+        dx, dz = want['x'] - got['x'], want['z'] - got['z']
+        ahead, lateral = dx * math.sin(b) + dz * math.cos(b), dx * math.cos(b) - dz * math.sin(b)
+        lo, hi = tol.get('centre_ahead_m', [0.0, 30.0])
+        fields['centre_lateral_m'] = {'expected': 0, 'got': round(lateral, 4), 'err': round(abs(lateral), 4), 'tol': tol.get('centre_lateral_m', 1.5)}
+        fields['centre_ahead_m'] = {'expected': [lo, hi], 'got': round(ahead, 4), 'err': round(max(lo - ahead, ahead - hi, 0.0), 4), 'tol': 0.0}
     for f in fields.values():
         f['within'] = f['err'] <= f['tol']
-    return {'compared': 'the order against the unit read back at rest (front centre, facing, width)', 'fields': fields,
+    return {'compared': 'the order against the unit read back at rest (front centre, facing, width; the live centre behind the front on its axis)', 'fields': fields,
             'ok': all(f['within'] for f in fields.values())}
 
 
