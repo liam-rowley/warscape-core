@@ -762,7 +762,7 @@ class Ctl:
                     continue
                 d = ((cur[i]['x'] - prev[i]['x']) ** 2 + (cur[i]['z'] - prev[i]['z']) ** 2) ** 0.5
                 df = abs((cur[i]['facing'] - prev[i]['facing'] + 180) % 360 - 180)
-                if d >= eps or df >= eps_deg:
+                if cur[i].get('moving', -1) > 0 or d >= eps or df >= eps_deg:   # the engine's is_moving first; the men shuffle at rest
                     moved[i], still[i] = True, 0
                 else:
                     still[i] += 1
@@ -864,7 +864,7 @@ def parse_unit(line):
             u[k] = v
             continue
         if f == f:
-            u[k] = int(f) if k in ('id', 'raw', 'men', 'queued') else f
+            u[k] = int(f) if k in ('id', 'raw', 'men', 'queued', 'moving') else f
     return u
 
 

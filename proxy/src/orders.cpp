@@ -26,7 +26,7 @@ const OrdersAdapter* s_ad = nullptr;
 UnitLayout s_L;
 uintptr_t s_global = 0;
 uint32_t s_battleOff = 0, s_queueOff = 0, s_holderOff = 0, s_selOff = 0, s_selVec = 0, s_groundA = 0, s_groundB = 0;
-uintptr_t s_selCtor = 0, s_selAdd = 0, s_moveCtor = 0, s_movePush = 0, s_cmdDtor = 0, s_free = 0, s_groundFn = 0;
+uintptr_t s_moving = 0, s_selCtor = 0, s_selAdd = 0, s_moveCtor = 0, s_movePush = 0, s_cmdDtor = 0, s_free = 0, s_groundFn = 0;
 DWORD s_engineTid = 0, s_presentTid = 0, s_wndTid = 0;
 uint32_t s_army = 0;          // the player's army, cached from the UI selection or the last unit a caller named
 int s_orders = 0;
@@ -69,12 +69,16 @@ using MoveFn = void*(__thiscall*)(void* self, void* sel, const uint32_t* loc, in
 using PushFn = uint32_t(__thiscall*)(void* queue, void* cmd);
 using DtorFn = void(__thiscall*)(void* self);
 using FreeFn = void(__cdecl*)(void* p);
+using MovingFn = uint32_t(__thiscall*)(void* unit);
 using GroundFn = void*(__thiscall*)(void* terrain, uint32_t* locOut, const float* xz, int a, int b, int c);
 
 bool UnitLocked(uint32_t unit, UnitState& s, std::string& why) {
     s = ReadUnit(unit, s_L, Read);
     if (!s.ok) { why = s.why; return false; }
     s_army = s.army;
+    // the engine's own is_moving (battle.unit.is_moving's callee: the entity table site is its entry), on the engine thread only, once
+    // the decode proved the unit is a live UNIT of its army
+    if (GetCurrentThreadId() == s_engineTid && Executable(s_moving)) s.moving = (((MovingFn)s_moving)((void*)(uintptr_t)unit) & 0xff) ? 1 : 0;
     return true;
 }
 
@@ -171,6 +175,7 @@ void OrdersInstall() {
     if (posEntity != s_L.entities) { s_sitesWhy = "the position getter's entity offset differs from the entity table's"; LOGE("orders: not installed: %s", s_sitesWhy.c_str()); return; }
     s_groundA = Operand8(a.groundChainSite, a.groundAOperand8);
     s_groundB = Operand(a.groundChainSite, a.groundBOperand);
+    s_moving = SiteAddress(a.entitySite);
     s_selCtor = SiteAddress(a.selCtorSite); s_selAdd = SiteAddress(a.selAddSite); s_moveCtor = SiteAddress(a.moveCtorSite);
     s_movePush = SiteAddress(a.movePushSite); s_cmdDtor = SiteAddress(a.cmdDtorSite); s_free = SiteAddress(a.freeSite); s_groundFn = SiteAddress(a.groundFnSite);
     s_installed = true; s_sitesWhy.clear();

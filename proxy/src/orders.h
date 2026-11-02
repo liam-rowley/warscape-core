@@ -78,6 +78,7 @@ struct UnitState {
     float x = 0, y = 0, z = 0;
     int16_t facingRaw = 0; double facing = 0;
     int men = 0, queued = 0;
+    int moving = -1;   // the engine's own is_moving (the driver calls it on the engine thread); -1 = not asked
     uint32_t frame = 0;
     bool hasFront = false, hasWidth = false;
     float fx = 0, fy = 0, fz = 0, width = 0;
@@ -162,9 +163,11 @@ inline Arrival CheckArrival(const MoveArgs& a, const UnitState& s, const Toleran
     r.ok = r.why.empty();
     return r;
 }
-// At rest: no queued orders and the centre moved less than eps metres and turned less than epsDeg since the previous read.
-inline bool AtRest(const UnitState& prev, const UnitState& cur, double eps = 0.02, double epsDeg = 0.05) {
-    return cur.queued == 0 && std::hypot(cur.x - prev.x, cur.z - prev.z) < eps && std::fabs(Wrap180(cur.facing - prev.facing)) < epsDeg;
+// At rest: the engine says the unit is not moving (when it was asked), and the centre moved less than eps metres and turned less than
+// epsDeg since the previous read. An idle unit still has one queued order (its current one), so the queue count is no rest signal
+// (run 20261102_j28pc).
+inline bool AtRest(const UnitState& prev, const UnitState& cur, double eps = 0.1, double epsDeg = 0.2) {
+    return cur.moving <= 0 && std::hypot(cur.x - prev.x, cur.z - prev.z) < eps && std::fabs(Wrap180(cur.facing - prev.facing)) < epsDeg;
 }
 
 } // namespace wsp

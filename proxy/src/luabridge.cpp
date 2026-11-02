@@ -23,7 +23,7 @@
 //   wsp.cam_set(x, y, z, yaw, pitch) -> true | nil, err   the battle camera (dev.camera, camera.cpp; J43)
 //   battle unit orders (dev.orders, orders.cpp; J28). A unit ref is a "0x..." pointer string, a light userdata, a
 //   full userdata (the engine's Pointer<UNIT>: its first dword), or a number n = the n-th unit (1-based) of the player's army as the last read saw it (lua numbers are floats here: never a pointer as a number):
-//   wsp.unit_state(ref) -> {id, ptr, x, y, z, facing, facing_raw, men, queued, army_index, army_count, front_x/y/z, width} | nil, err
+//   wsp.unit_state(ref) -> {id, ptr, x, y, z, facing, facing_raw, men, queued, moving, army_index, army_count, front_x/y/z, width} | nil, err
 //   wsp.unit_list([ref]) -> { {state}, ... } | nil, err    the army of ref (none: the cached player army)
 //   wsp.selection() -> {units = {ptr, ...}, groups = n} | nil, err   the UI's own selection (loose land units)
 //   wsp.order_move(ref, x, z, [facing], [width], [run], [queue]) -> true, info | nil, err   one unit, the engine's own command path
@@ -175,7 +175,7 @@ void PushState(lua_State* L, const UnitState& u) {
     SetNum(L, "id", u.armyIndex + 1); SetNum(L, "army_index", u.armyIndex); SetNum(L, "army_count", u.armyCount);
     lua_pushstring(L, HexPtr(u.army).c_str()); lua_setfield(L, -2, "army");
     SetNum(L, "x", u.x); SetNum(L, "y", u.y); SetNum(L, "z", u.z); SetNum(L, "facing", u.facing); SetNum(L, "facing_raw", u.facingRaw);
-    SetNum(L, "men", u.men); SetNum(L, "queued", u.queued);
+    SetNum(L, "men", u.men); SetNum(L, "queued", u.queued); SetNum(L, "moving", u.moving);
     if (u.hasFront) { SetNum(L, "front_x", u.fx); SetNum(L, "front_y", u.fy); SetNum(L, "front_z", u.fz); }
     if (u.hasWidth) SetNum(L, "width", u.width);
 }
