@@ -112,7 +112,7 @@ std::string StateJson() {   // s_cs held
 using PFN_CreateDevice = HRESULT(WINAPI*)(void*, UINT, int, HWND, DWORD, void*, void**);
 using PFN_Present = HRESULT(WINAPI*)(void*, const RECT*, const RECT*, HWND, const void*);
 PFN_CreateDevice o_CreateDevice; PFN_Present o_Present;
-HRESULT WINAPI hk_Present(void* dev, const RECT* a, const RECT* b, HWND w, const void* r) { DevPresent(); if (Dk().capture) CapturePresent(dev); return o_Present(dev, a, b, w, r); }
+HRESULT WINAPI hk_Present(void* dev, const RECT* a, const RECT* b, HWND w, const void* r) { DevPresent(); if (Dk().capture) CapturePresent(dev); if (Dk().orders) OrdersPresent(); return o_Present(dev, a, b, w, r); }
 HRESULT WINAPI hk_CreateDevice(void* d3d, UINT ad, int type, HWND w, DWORD flags, void* pp, void** out) {
     const HRESULT hr = o_CreateDevice(d3d, ad, type, w, flags, pp, out);
     char d[80]; snprintf(d, sizeof d, "hr 0x%08lx flags 0x%lx", (unsigned long)hr, flags);
@@ -511,6 +511,7 @@ void DevPump(const std::string& ctx) {
         UpdateSceneLocked(now);
     }
     if (first) { TlMark("frontend_first_pump"); if (s_ctlWake) SetEvent(s_ctlWake); }
+    OrdersPump();   // dev.orders: the engine thread's id, posted orders (no-op with the key off)
 }
 void DevBattleState(int naval, int deployPanel) {
     if (!s_active) return;
@@ -571,6 +572,7 @@ void DevInit() {
     k.perf = rt.cfg.Bool("dev.perf");
     k.camera = rt.cfg.Bool("dev.camera");
     k.capture = rt.cfg.Bool("dev.capture");
+    k.orders = rt.cfg.Bool("dev.orders");
     k.captureDir = WidenUtf8(rt.cfg.Str("dev.capture_dir"));
     k.fileRules = WidenUtf8(rt.cfg.Str("dev.file_rules"));
     k.ctlDir = WidenUtf8(rt.cfg.Str("dev.ctl_dir"));
@@ -592,6 +594,7 @@ void DevInit() {
     if (k.timeline) { s_tl.Add("process_start", "", s_tl.processStartMs); TlMark("dllmain"); }
     ConsoleInit(k.console, Adapter().console);
     CameraInit(k.camera, Adapter().camera);
+    OrdersInit(k.orders, Adapter().orders);
     if (k.capture) CaptureInit();
 
     std::vector<FileRule> rules;
@@ -625,6 +628,7 @@ void DevOnDirect3DCreate(void* d3d) {
     TlMarkOnce("d3d_create");
     ConsoleInstall();   // once, before any campaign (no-op with dev.console=0)
     CameraInstall();    // once (no-op with dev.camera=0)
+    OrdersInstall();    // once (no-op with dev.orders=0)
     if (s_frames && d3d && !o_CreateDevice) VtableHook(*(void***)d3d, 16, (void*)hk_CreateDevice, (void**)&o_CreateDevice, "IDirect3D9::CreateDevice");
 }
 

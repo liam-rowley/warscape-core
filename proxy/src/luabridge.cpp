@@ -21,6 +21,14 @@
 //   wsp.vanilla(entry) -> bytes | nil, err the newest real pack's copy of a pack entry (a wrapper loads the vanilla script with it)
 //   wsp.version() -> "wsp 1", build id
 //   wsp.cam_set(x, y, z, yaw, pitch) -> true | nil, err   the battle camera (dev.camera, camera.cpp; J43)
+//   battle unit orders (dev.orders, orders.cpp; J28). A unit ref is a "0x..." pointer string, a light userdata, or a number n = the
+//   n-th unit (1-based) of the player's army as the last read saw it (lua numbers are floats here: never a pointer as a number):
+//   wsp.unit_state(ref) -> {id, ptr, x, y, z, facing, facing_raw, men, queued, army_index, army_count, front_x/y/z, width} | nil, err
+//   wsp.unit_list([ref]) -> { {state}, ... } | nil, err    the army of ref (none: the cached player army)
+//   wsp.selection() -> {units = {ptr, ...}, groups = n} | nil, err   the UI's own selection (loose land units)
+//   wsp.order_move(ref, x, z, [facing], [width], [run], [queue]) -> true, info | nil, err   one unit, the engine's own command path
+//   wsp.peek(addr, n) -> hex | nil, err                     probe: n <= 512 bytes read (never a write)
+//   wsp.orders_info() -> text                              install state, owner path, thread ids
 #include "dev.h"
 #include <deque>
 #include <map>
@@ -134,9 +142,93 @@ int l_cam_set(lua_State* L) {
     return 1;
 }
 
+// ---- orders (J28)
+bool UnitRef(lua_State* L, int i, uint32_t& unit, std::string& why) {
+    if (lua_type(L, i) == LUA_TSTRING) {
+        const char* t = lua_tostring(L, i); char* end = nullptr;
+        unit = (uint32_t)strtoul(t, &end, 16);
+        if (!unit || !end || *end) { why = "a unit ref string is a hex pointer (0x...)"; return false; }
+        return true;
+    }
+    if (lua_type(L, i) == LUA_TLIGHTUSERDATA) { unit = (uint32_t)(uintptr_t)lua_touserdata(L, i); if (unit) return true; why = "null unit"; return false; }
+    if (lua_type(L, i) == LUA_TNUMBER) {
+        const int n = (int)lua_tonumber(L, i);
+        std::vector<uint32_t> units;
+        if (!OrdersArmy(0, units, why)) return false;
+        if (n < 1 || n > (int)units.size()) { why = "unit number " + std::to_string(n) + " is not in the army (1.." + std::to_string(units.size()) + ")"; return false; }
+        unit = units[n - 1]; return true;
+    }
+    why = "expected a unit ref (\"0x...\", a light userdata or the unit's number in the army)"; return false;
+}
+std::string HexPtr(uint32_t v) { char b[16]; snprintf(b, sizeof b, "0x%08x", v); return b; }
+void SetNum(lua_State* L, const char* k, double v) { lua_pushnumber(L, (lua_Number)v); lua_setfield(L, -2, k); }
+void PushState(lua_State* L, const UnitState& u) {
+    lua_createtable(L, 0, 18);
+    lua_pushstring(L, HexPtr(u.unit).c_str()); lua_setfield(L, -2, "ptr");
+    SetNum(L, "id", u.armyIndex + 1); SetNum(L, "army_index", u.armyIndex); SetNum(L, "army_count", u.armyCount);
+    lua_pushstring(L, HexPtr(u.army).c_str()); lua_setfield(L, -2, "army");
+    SetNum(L, "x", u.x); SetNum(L, "y", u.y); SetNum(L, "z", u.z); SetNum(L, "facing", u.facing); SetNum(L, "facing_raw", u.facingRaw);
+    SetNum(L, "men", u.men); SetNum(L, "queued", u.queued);
+    if (u.hasFront) { SetNum(L, "front_x", u.fx); SetNum(L, "front_y", u.fy); SetNum(L, "front_z", u.fz); }
+    if (u.hasWidth) SetNum(L, "width", u.width);
+}
+int l_unit_state(lua_State* L) {
+    uint32_t unit = 0; std::string why; UnitState u;
+    if (!UnitRef(L, 1, unit, why) || !OrdersUnit(unit, u, why)) return Fail(L, why.c_str());
+    PushState(L, u);
+    return 1;
+}
+int l_unit_list(lua_State* L) {
+    uint32_t unit = 0; std::string why; std::vector<uint32_t> units;
+    if (lua_gettop(L) >= 1 && !lua_isnil(L, 1) && !UnitRef(L, 1, unit, why)) return Fail(L, why.c_str());
+    if (!OrdersArmy(unit, units, why)) return Fail(L, why.c_str());
+    lua_createtable(L, (int)units.size(), 0);
+    int i = 1;
+    for (uint32_t p : units) {
+        UnitState u; std::string w;
+        if (OrdersUnit(p, u, w)) PushState(L, u);
+        else { lua_createtable(L, 0, 2); lua_pushstring(L, HexPtr(p).c_str()); lua_setfield(L, -2, "ptr"); lua_pushstring(L, w.c_str()); lua_setfield(L, -2, "why"); }
+        lua_rawseti(L, -2, i++);
+    }
+    return 1;
+}
+int l_selection(lua_State* L) {
+    std::vector<uint32_t> loose; int groups = 0; std::string why;
+    if (!OrdersSelection(loose, groups, why)) return Fail(L, why.c_str());
+    lua_createtable(L, 0, 2);
+    lua_createtable(L, (int)loose.size(), 0);
+    int i = 1; for (uint32_t p : loose) { lua_pushstring(L, HexPtr(p).c_str()); lua_rawseti(L, -2, i++); }
+    lua_setfield(L, -2, "units");
+    SetNum(L, "groups", groups);
+    return 1;
+}
+int l_order_move(lua_State* L) {
+    uint32_t unit = 0; std::string why, info;
+    if (!UnitRef(L, 1, unit, why)) return Fail(L, why.c_str());
+    if (lua_type(L, 2) != LUA_TNUMBER || lua_type(L, 3) != LUA_TNUMBER) return Fail(L, "expected (unit, x, z, [facing], [width], [run], [queue])");
+    MoveArgs a; a.x = (float)lua_tonumber(L, 2); a.z = (float)lua_tonumber(L, 3);
+    if (lua_type(L, 4) == LUA_TNUMBER) { a.hasFacing = true; a.facing = lua_tonumber(L, 4); }
+    if (lua_type(L, 5) == LUA_TNUMBER) { a.hasWidth = true; a.width = (float)lua_tonumber(L, 5); }
+    a.run = lua_toboolean(L, 6) != 0; a.queue = lua_toboolean(L, 7) != 0;
+    if (!OrdersMove(unit, a, info, why)) return Fail(L, why.c_str());
+    lua_pushboolean(L, 1); lua_pushstring(L, info.c_str());
+    return 2;
+}
+int l_peek(lua_State* L) {
+    uint32_t a = 0; std::string why, hex;
+    if (!UnitRef(L, 1, a, why)) return Fail(L, why.c_str());
+    const int n = lua_type(L, 2) == LUA_TNUMBER ? (int)lua_tonumber(L, 2) : 64;
+    if (!OrdersPeek(a, (size_t)(n < 0 ? 0 : n), hex, why)) return Fail(L, why.c_str());
+    lua_pushstring(L, hex.c_str());
+    return 1;
+}
+int l_orders_info(lua_State* L) { lua_pushstring(L, OrdersInfo().c_str()); return 1; }
+
 const luaL_Reg s_funcs[] = {
     { "log", l_log }, { "version", l_version }, { "poll", l_poll }, { "result", l_result }, { "dev_config", l_dev_config },
-    { "dev_state", l_dev_state }, { "report", l_report }, { "vanilla", l_vanilla }, { "cam_set", l_cam_set }, { nullptr, nullptr }
+    { "dev_state", l_dev_state }, { "report", l_report }, { "vanilla", l_vanilla }, { "cam_set", l_cam_set },
+    { "unit_state", l_unit_state }, { "unit_list", l_unit_list }, { "selection", l_selection }, { "order_move", l_order_move },
+    { "peek", l_peek }, { "orders_info", l_orders_info }, { nullptr, nullptr }
 };
 } // namespace
 
@@ -175,7 +267,7 @@ extern "C" __declspec(dllexport) int luaopen_wsp(lua_State* L) {
     const bool first = InterlockedExchange(&wsp::s_loaded, 1) == 0;
     LOGI("luaopen_wsp: engine lua_State %p, global state %p (thread %lu)%s", (void*)L, (void*)G(L), GetCurrentThreadId(), first ? "" : " (again)");
     if (first) wsp::TlMark("lua_bridge_loaded");
-    lua_createtable(L, 0, 12);
+    lua_createtable(L, 0, 18);
     for (const luaL_Reg* f = wsp::s_funcs; f->name; ++f) { lua_pushcclosure(L, f->func, 0); lua_setfield(L, -2, f->name); }
     lua_pushvalue(L, -1);
     lua_setfield(L, LUA_GLOBALSINDEX, "wsp");

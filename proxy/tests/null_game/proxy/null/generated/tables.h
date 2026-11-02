@@ -17,7 +17,7 @@ static const SiteDef kSites[kSiteCount + 1] = {   // id, kind, rva, anchorLen, a
     { nullptr, 0, 0, 0, { 0 }, 0, { 0 }, { 0 }, nullptr }   // sentinel (keeps the array non-empty)
 };
 
-static const size_t kKeyCount = 30;
+static const size_t kKeyCount = 31;
 static const KeySpec kKeys[kKeyCount + 1] = {
     { "dev.autostart", kStr, "" },
     { "dev.autostart_delay_ms", kInt, "1500" },
@@ -30,6 +30,7 @@ static const KeySpec kKeys[kKeyCount + 1] = {
     { "dev.file_rules", kStr, "" },
     { "dev.log_files", kBool, "0" },
     { "dev.lua_bridge", kBool, "0" },
+    { "dev.orders", kBool, "0" },
     { "dev.perf", kBool, "0" },
     { "dev.skip_intro", kBool, "0" },
     { "dev.state_json", kBool, "0" },

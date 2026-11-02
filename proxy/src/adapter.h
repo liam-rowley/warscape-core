@@ -8,6 +8,7 @@
 #include "config.h"
 #include "console.h"
 #include "camera.h"
+#include "orders.h"
 
 namespace wsp {
 
@@ -32,6 +33,7 @@ struct GameAdapter {
     const DevAdapter* dev;                   // proxy/<game>/adapter.cpp
     const ConsoleAdapter* console;           // proxy/<game>/adapter.cpp (J15); nullptr = no campaign console
     const CameraAdapter* camera;             // proxy/<game>/adapter.cpp (J43); nullptr = no battle camera setter
+    const OrdersAdapter* orders;             // proxy/<game>/adapter.cpp (J28); nullptr = no battle unit orders
 };
 
 const GameAdapter& Adapter();   // defined by the game's adapter.cpp
