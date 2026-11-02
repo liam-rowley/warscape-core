@@ -1,0 +1,45 @@
+# The fixture game of the job-pipeline host tests (tests/test_fixture_game.py): a second consumer of `wsc jobs`, `wsc policy` and `wsc ci`
+# with ids F<n>, decisions X<n>, a different trailer, one input set and one hook module. Copied into a throwaway git repo by the tests.
+registries_dir = "registries"
+
+[registries]
+jobs = "core:jobs"
+
+[storage]
+dir = ["jobs"]
+
+[views]
+commit = false
+
+[jobs]
+id_prefix = "F"
+hooks = ["hooks/rules.py"]
+legacy = "jobs/legacy.json"
+
+[jobs.text]
+wsc = "python3 core/wsc.py"
+review_doc = "docs/REVIEW.md"
+owner = "the maintainer"
+ref_merge = "X7"
+brief_notes = "Fixture rule: every brief says so."
+
+[policy]
+decisions = "docs/DECISIONS.md"
+decision_prefix = "X"
+session_trailer = "Agent-Session"
+plan = ["docs/**", "jobs/*/brief.md", "registries/jobs/*"]
+meta = ["docs/**", "jobs/*/brief.md", "registries/jobs/*", "ci/**", ".github/**", "wsc.toml"]
+
+[ci]
+workflows = ["gates.yml", "policy.yml"]
+core = "core"
+token_secret = "CORE_TOKEN"
+artifacts = { lib = "lib-build" }
+notice = "Fixture notice."
+
+[ci.inputs]
+lib = '^\.github/workflows/|^lib/'
+
+[ci.hints]
+gates = "fixture: run the gates"
+"*" = "fixture: see the log"

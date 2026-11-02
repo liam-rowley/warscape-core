@@ -1,0 +1,13 @@
+{
+  "id": "F1",
+  "description": "The first fixture job, done.",
+  "title": "Fixture first job",
+  "phase": 1,
+  "status": "done",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "brief": "jobs/F1/brief.md",
+  "report": "jobs/F1/report.md",
+  "review": "jobs/F1/review.md"
+}

@@ -119,6 +119,45 @@ commit = false              # views go to the git-ignored dir (default "_scratch
   registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
   either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
 
+## The job pipeline (0.9.0, napoleon J62, C18)
+The queue, the pull-request policy and the CI helpers are core verbs (`wsc jobs`, `wsc policy`, `wsc ci`) that a repo configures; a repo with none of the
+tables below behaves as a plain queue. Defaults and the exact keys: `warscape/repo.py` `DEFAULTS` (the loader refuses a key it does not know, so a new table
+reaches a game only with a core release). Procedure for a reviewer: `docs/REVIEW.md`. The core itself is the reference consumer (`wsc.toml`, `ci/`,
+`registries/jobs/`) and `tests/fixture_game/` is a second, minimal one that the host tests drive.
+
+```toml
+[registries]
+jobs = "core:jobs"                 # the schema; ids are one capital letter and a number
+[storage]
+dir = ["jobs"]                     # one file per row: two job branches never conflict on the registry
+[jobs]
+id_prefix = "J"                    # job ids J<n>, branches job/J<n> and brief/J<n>
+dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
+models = ["sonnet", "opus"]        # the Model line of a brief; models after the first need a stated reason
+legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
+hooks = ["tools/jobs_hooks.py"]    # Python files with the hook names below
+ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
+[jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
+[policy]
+decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
+decision_prefix = "D"
+session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
+plan = [...]                       # globs a plan/* branch may touch; meta = [...] for a meta/* branch
+[ci]
+inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
+workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
+```
+- **Hook points** (`warscape/hooks.py`, listed in `[jobs] hooks`; all optional): `brief_problems(ctx, jid, row, text)`, `queue_problems(ctx, rows, files)`,
+  `policy_problems(ctx, facts)`, `view_panel(ctx)` and `summary(ctx, rows, read)`. Five names and no more; general game gates are B1 (B46).
+- **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
+  waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
+  `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
+- **Settings only the owner can make** (this changes no repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
+  jobs the repo has) and `policy` on `main`, allow auto-merge, and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
+  Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once.
+- **Upgrading from a repo that has its own pipeline** (napoleon J62): move the texts into `[jobs.text]`, the rules that are not generic into a hook module,
+  turn each workflow into `ci/<name>.in`, run `wsc ci render`, delete the local copies in the same pull request as the pin bump (B9: the pin and `wsc.toml` version in one commit).
+
 ## The proxy, the harness and the save tools (0.4.0)
 From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
 watcher kit (`harness/`) and the ESF save tools (`saves/`). A game keeps its adapters: `proxy/<game>/` (adapter.cpp, identity.json,

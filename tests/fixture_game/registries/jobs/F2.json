@@ -1,0 +1,13 @@
+{
+  "id": "F2",
+  "description": "The second fixture job, queued.",
+  "title": "Fixture second job",
+  "phase": 1,
+  "status": "queued",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [
+    "F1"
+  ],
+  "brief": "jobs/F2/brief.md"
+}

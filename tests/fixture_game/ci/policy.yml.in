@@ -1,0 +1,9 @@
+name: policy
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+{{wsc policy}}
+{{wsc notify policy}}
