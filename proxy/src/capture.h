@@ -3,7 +3,8 @@
 //   - the shader hash convention, fixed once: canonical FNV-1a-64 over the whole bytecode up to and including the real end token,
 //     found by walking the instruction stream (ShaderLength), never by the first 0x0000FFFF DWORD: a D3DX CTAB comment can hold that
 //     DWORD (an older proxy's trap: a dropped digit in the basis and a cut inside the CTAB gave ~50 % "unknown" shaders)
-//   - the capture name rule and the `capture` record line format (one call per line, documented in the game repo's proxy README)
+//   - the capture name rule and the `capture` record line format (one call per line, documented in the core's docs/PROXY_CAPTURE.md)
+//   - the capture state machine (W19, B32): Idle, Armed, Recording, Done, Abandoned, every transition a compare-and-swap
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

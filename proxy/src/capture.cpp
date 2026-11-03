@@ -11,8 +11,10 @@
 //   - Calls the runtime makes to itself through the vtable while a hook runs are not recorded twice (s_depth).
 //   - The vtable of a device survives Reset, so the hooks stay armed across a device reset; a new device of the same class shares the
 //     vtable (VtableHook keeps the first original); a device of another class gets its own hooks at its CreateDevice.
-// Threads: the hooks and CapturePresent run on the render thread; CaptureRun (the ctl thread) arms a request and waits for its event.
-// Record lines (one call per line, numbers decimal unless named; ptr and hash hex): see the game repo's proxy README "Frame capture".
+//   - State blocks (W19, B34): CreateStateBlock and IDirect3DStateBlock9 Capture/Apply are hooked; after an Apply the state is read back.
+// Threads (W19, B32, B33): CaptureRun (the ctl thread) arms and waits; the thread whose Present takes the arm records, every other thread
+// is forwarded and counted. The state moves only through capture.h's compare-and-swap transitions.
+// The contract (keys, ctl result, state machine, every record line): the core's docs/PROXY_CAPTURE.md.
 #include "dev.h"
 #include "capture.h"
 #include <map>
