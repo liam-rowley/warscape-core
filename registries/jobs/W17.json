@@ -3,10 +3,11 @@
   "description": "Covers B25, B40. The proxy drops ctl requests older than its launch (B40); a read-only peek <site>+<off> <len> ctl verb, or a watch site kind that logs a function's return value, behind the same key and exe-identity guard as the other sites (B25).",
   "title": "Dev channel: stale ctl requests and a read-only peek",
   "phase": 1,
-  "status": "review",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
   "brief": "jobs/W17/brief.md",
-  "report": "jobs/W17/report.md"
+  "report": "jobs/W17/report.md",
+  "review": "jobs/W17/review.md"
 }
