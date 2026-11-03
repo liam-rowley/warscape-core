@@ -171,7 +171,7 @@ def core_tag_problems(version, head_tags):
 
 
 def gate_core_pin(ctx):
-    want, have = ctx.config['core']['version'], core_version()
+    want, have = ctx.config['core']['version'], core_version(ctx.core_root)   # the checkout being checked, not the running core (B7)
     if ctx.is_core:
         det = core_tag_problems(have, _git(ctx.root, 'tag', '--points-at', 'HEAD') or [])
         return Result('core_pin', 'error' if det else 'ok', 'core VERSION or tag malformed' if det else f'this is the core ({have})', det)
