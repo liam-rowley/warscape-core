@@ -83,7 +83,8 @@ cmd="${1:-}"
 case "$cmd" in
   root) printf '%s\n' "$ROOT"; exit 0;;
   ctl)
-    # The proxy's dev control channel (dev.ctl=1): <state>/ctl/<id>.cmd -> <id>.done (proxy/README.md "Dev control channel").
+    # The proxy's dev control channel (dev.ctl=1): <state>/ctl/<id>.cmd -> <id>.done (the game's proxy/README.md "Dev control channel";
+    # core rules, the stale refusal and peek: docs/PROXY_CTL.md).
     # Blocks inside this one call until the result; exit 0 ok, 1 failed, 3 timeout (the proxy's own), 2 refused, 124 no answer.
     owner="${2:?ctl <owner> '<verb args>' [wait_s]}"; line="${3:?ctl <owner> '<verb args>' [wait_s]}"; w="${4:-170}"
     C="$(ctl_dir)" || exit 64; mkdir -p "$C"

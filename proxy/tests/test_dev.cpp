@@ -7,6 +7,7 @@
 #include "devcore.h"
 #include "generated/tables.h"
 #include <cmath>
+#include <map>
 #include <regex>
 #include <set>
 
@@ -167,6 +168,110 @@ int main(int argc, char** argv) {
             CHECK(!ParseCtl(std::string("gesture ") + bad).error.empty());
         }
         CHECK(std::string(CtlVerbs()).find("gesture") != std::string::npos);
+    }
+    {   // stale requests (W17, B40): a request written before this process was created is refused, never run
+        const int64_t start = 1700000000123;
+        CHECK(CtlStale(start - 1, start));            // one millisecond before the launch
+        CHECK(CtlStale(0, start));
+        CHECK(!CtlStale(start, start));               // equal: accepted (no slack, strictly before)
+        CHECK(!CtlStale(start + 1, start));
+        CHECK(!CtlStale(start - 86400000, -1));       // process start unknown: fail open
+        CHECK(!CtlStale(-1, -1));
+        const std::string why = CtlStaleReason(start - 60000, start);
+        CHECK(why.rfind("stale: written 2023-11-14T22:12:20.123Z, before this launch started 2023-11-14T22:13:20.123Z", 0) == 0);
+        CHECK(why.find("resend it") != std::string::npos);
+    }
+    {   // peek grammar (W17, B25): peek <site>[+|-<off>] [*[+|-<off>] ...] <len>, every read starts at an accepted engine site
+        PeekArgs a = ParsePeekArgs("game.some_site 4");
+        CHECK(a.error.empty() && a.site == "game.some_site" && a.siteOff == 0 && a.hops.empty() && a.len == 4);
+        a = ParsePeekArgs("game.some_site+0x10 16");
+        CHECK(a.error.empty() && a.site == "game.some_site" && a.siteOff == 0x10 && a.len == 16);
+        a = ParsePeekArgs("game.some_site-8 1");
+        CHECK(a.error.empty() && a.site == "game.some_site" && a.siteOff == -8 && a.len == 1);
+        a = ParsePeekArgs("game.some_site+24 512");
+        CHECK(a.error.empty() && a.siteOff == 24 && a.len == 512);
+        a = ParsePeekArgs("battle.cmd_queue * 8");
+        CHECK(a.error.empty() && a.hops.size() == 1 && a.hops[0] == 0 && a.len == 8);
+        a = ParsePeekArgs("battle.cmd_queue+2 *+0x1c *-4 * 0x20");
+        CHECK(a.error.empty() && a.siteOff == 2 && a.hops.size() == 3 && a.hops[0] == 0x1c && a.hops[1] == -4 && a.hops[2] == 0 && a.len == 32);
+        a = ParsePeekArgs("site * * * * * * * * 4");   // 8 hops: the most
+        CHECK(a.error.empty() && a.hops.size() == 8);
+        a = ParsePeekArgs("site * * * * * * * * * 4");   // 9 hops
+        CHECK(a.error.find("at most 8") != std::string::npos);
+        // a '-' may be part of an id: only a number after the last '+' or '-' is an offset; '+0' keeps a trailing -<n> in the id
+        a = ParsePeekArgs("ui.list-entry 4"); CHECK(a.error.empty() && a.site == "ui.list-entry" && a.siteOff == 0);
+        a = ParsePeekArgs("ui.slot-2+0 4"); CHECK(a.error.empty() && a.site == "ui.slot-2" && a.siteOff == 0);
+        a = ParsePeekArgs("ui.slot-2 4"); CHECK(a.error.empty() && a.site == "ui.slot" && a.siteOff == -2);
+        a = ParsePeekArgs("a:b/c#d.e_f 4"); CHECK(a.error.empty() && a.site == "a:b/c#d.e_f");
+        a = ParsePeekArgs("  site   *+4   2  "); CHECK(a.error.empty() && a.site == "site" && a.hops.size() == 1 && a.hops[0] == 4 && a.len == 2);
+        CHECK(ParsePeekArgs("site 0").error.find("1 to 512") != std::string::npos);
+        CHECK(ParsePeekArgs("site 513").error.find("1 to 512") != std::string::npos);
+        CHECK(ParsePeekArgs("0x401000 4").error.find("raw address") != std::string::npos);   // never a raw address
+        CHECK(ParsePeekArgs("0x401000+4 4").error.find("raw address") != std::string::npos);
+        CHECK(ParsePeekArgs("4198400 4").error.find("raw address") != std::string::npos);
+        for (const char* bad : { "", "site", "4", "site 4 4", "site x", "site *x 4", "site ** 4", "site *+ 4", "site *+0xg 4", "site+ 4", "site+x 4",
+                                 "site+0x100000000 4", "-site 4", ".site 4", "si te 4", "si\"te 4", "site *4 4", "site 4 *", "site -4", "site 0x 4",
+                                 "+4 4", "site+1+2 4" }) {
+            const PeekArgs b = ParsePeekArgs(bad);
+            if (b.error.empty()) printf("    peek '%s' was accepted\n", bad);
+            CHECK(!b.error.empty());
+            CHECK(!ParseCtl(std::string("peek ") + bad).error.empty());
+        }
+        CHECK(ParseCtl("peek").error.find("peek needs") != std::string::npos);
+        CtlRequest r = ParseCtl("peek game.some_site+0x10 * 8");
+        CHECK(r.error.empty() && r.verb == "peek" && r.arg == "game.some_site+0x10 * 8" && r.timeoutS == 0);
+        r = ParseCtl("peek game.some_site 8 30");   // no trailing timeout: 30 would be the length after a stray 8
+        CHECK(!r.error.empty());
+        CHECK_EQ(CtlDefaultTimeout("peek"), 10.0);
+        CHECK(std::string(CtlVerbs()).find("peek <site>") != std::string::npos);
+    }
+    {   // peek resolution on a fake memory (W17): hops read a 4-byte pointer, refuse null, then add their offset; 32-bit wrap
+        std::map<uint32_t, uint32_t> mem = { { 0x00401010, 0x02000000 }, { 0x0200001c, 0x03000000 }, { 0x02000020, 0 }, { 0x03000000, 0x00000004 } };
+        auto rd = [&](uint32_t at, uint32_t& v) { auto it = mem.find(at); if (it == mem.end()) return false; v = it->second; return true; };
+        PeekPath p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+0x1c *+8 4"), rd);   // two hops
+        CHECK(p.error.empty() && p.hops.size() == 2 && p.failedHop == 0);
+        CHECK(p.hops[0].at == 0x00401010 && p.hops[0].ptr == 0x02000000 && p.hops[1].at == 0x0200001c && p.hops[1].ptr == 0x03000000);
+        CHECK_EQ(p.addr, 0x03000008u);
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s 4"), rd);   // no hop: the site's address plus nothing
+        CHECK(p.error.empty() && p.hops.empty() && p.addr == 0x00401000);
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s-0x1000 4"), rd);
+        CHECK(p.error.empty() && p.addr == 0x00400000);
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+0x20 * 4"), rd);   // hop 2 reads a null pointer: stops there
+        CHECK(p.failedHop == 2 && p.hops.size() == 2 && p.hops[1].at == 0x02000020 && p.hops[1].ptr == 0);
+        CHECK(p.error.find("hop 2") != std::string::npos && p.error.find("null pointer") != std::string::npos && p.error.find("0x02000020") != std::string::npos);
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+4 * 4"), rd);   // hop 2 is not readable (0x02000004 is not in the fake memory)
+        CHECK(p.failedHop == 2 && p.hops.size() == 1 && p.error.find("hop 2") != std::string::npos && p.error.find("not readable") != std::string::npos);
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s * 4"), rd);   // hop 1 at the site itself, unreadable
+        CHECK(p.failedHop == 1 && p.hops.empty() && p.error.find("0x00401000") != std::string::npos);
+        // negative offsets wrap in 32 bits: a pointer 4 minus 8 is 0xfffffffc, and that range runs past 4 GB
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+0x1c *-8 4"), rd);
+        CHECK(p.hops.size() == 2 && p.addr == 0x02fffff8u && p.error.empty());
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+0x1c *+0 *-8 4"), rd);
+        CHECK(p.hops.size() == 3 && p.hops[2].ptr == 4 && p.addr == 0xfffffffcu && p.error.empty());
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+0x1c *+0 *-8 8"), rd);   // 0xfffffffc + 8 bytes wraps: refused
+        CHECK(p.error.find("wraps") != std::string::npos);
+        p = ResolvePeek(0x00000010, ParsePeekArgs("s-0x20 4"), rd);
+        CHECK(p.addr == 0xfffffff0u);
+        // the result members: hops, addresses as 0x%08x strings, hex, and the u32 / f32 views of the whole dwords
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 * 6"), rd);
+        const uint8_t bytes[6] = { 0x00, 0x00, 0x80, 0x3f, 0xab, 0xcd };
+        std::string j = PeekResultJson("s", 0x00401000, p, 6, bytes);
+        CHECK(j.find("\"site\": \"s\", \"site_addr\": \"0x00401000\"") != std::string::npos);
+        CHECK(j.find("\"hops\": [{\"at\": \"0x00401010\", \"ptr\": \"0x02000000\"}]") != std::string::npos);
+        CHECK(j.find("\"addr\": \"0x02000000\", \"len\": 6") != std::string::npos);
+        CHECK(j.find("\"hex\": \"00 00 80 3f ab cd\"") != std::string::npos);
+        CHECK(j.find("\"u32\": [1065353216]") != std::string::npos && j.find("\"f32\": [1]") != std::string::npos);
+        const uint8_t odd[8] = { 0x00, 0x00, 0xc0, 0x7f, 0x00, 0x00, 0x80, 0xff };   // NaN, -inf: strings
+        j = PeekResultJson("s", 0x00401000, ResolvePeek(0x00401000, ParsePeekArgs("s 8"), rd), 8, odd);
+        CHECK(j.find("\"f32\": [\"nan\", \"-inf\"]") != std::string::npos && j.find("\"hops\": []") != std::string::npos);
+        const uint8_t pi[4] = { 0xdb, 0x0f, 0x49, 0x40 };
+        CHECK(PeekResultJson("s", 0x00401000, ResolvePeek(0x00401000, ParsePeekArgs("s 4"), rd), 4, pi).find("\"f32\": [3.14159274]") != std::string::npos);
+        j = PeekResultJson("s", 0x00401000, ResolvePeek(0x00401000, ParsePeekArgs("s 3"), rd), 3, pi);   // under a dword: no views
+        CHECK(j.find("\"hex\": \"db 0f 49\"") != std::string::npos && j.find("u32") == std::string::npos && j.find("f32") == std::string::npos);
+        // a stopped resolution: the hops so far and the hop that failed, no bytes
+        p = ResolvePeek(0x00401000, ParsePeekArgs("s+0x10 *+0x20 * 4"), rd);
+        j = PeekResultJson("s", 0x00401000, p, 4, nullptr);
+        CHECK(j.find("\"failed_hop\": 2") != std::string::npos && j.find("hex") == std::string::npos && j.find("\"ptr\": \"0x00000000\"") != std::string::npos);
     }
     {   // source lints
         // the dev side starts after the plan, and only runs when the plan allows hooks (pass-through: nothing)

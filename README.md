@@ -64,8 +64,9 @@ merged at load; canonical key order is then the core's fields first, then the ga
 
 `wsc gates` runs, deterministically and without network: `schemas`, `registries`, `tools` (header and row for every tool), `json`
 (strict JSON and JSONL), `windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
-`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the pin is a `vX.Y.Z` tag on
-the core checkout; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone) and `tests`
+`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
+unmodified, its `VERSION` is the pinned `vX.Y.Z`, and HEAD is that tag whenever the tag is in the checkout; a shallow checkout without
+it is compared by `VERSION` only, C21; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.
 
 ## Layout

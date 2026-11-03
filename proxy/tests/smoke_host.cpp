@@ -3,6 +3,8 @@
 // The script then checks the proxy's log: launch line, guard verdict, plan, backend, a clean detach.
 // Args: `crash` = an access violation after Direct3DCreate9 (the in-process dump must appear and the log name it);
 // `replace crash` = install the host's own top-level filter first, as a game may (the log must say the filter was replaced).
+// `wait <file>` = after Direct3DCreate9, wait up to 60 s for <file> to exist (the control channel's answer, W17), then exit without
+// FreeLibrary (the ctl thread is still inside the DLL; the process exit ends it, as a game's exit does).
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
@@ -13,7 +15,11 @@ static LONG WINAPI HostFilter(EXCEPTION_POINTERS*) { return EXCEPTION_EXECUTE_HA
 
 int main(int argc, char** argv) {
     bool crash = false, replace = false;
-    for (int i = 1; i < argc; ++i) { crash |= !strcmp(argv[i], "crash"); replace |= !strcmp(argv[i], "replace"); }
+    const char* waitFor = nullptr;
+    for (int i = 1; i < argc; ++i) {
+        crash |= !strcmp(argv[i], "crash"); replace |= !strcmp(argv[i], "replace");
+        if (!strcmp(argv[i], "wait") && i + 1 < argc) waitFor = argv[++i];
+    }
     HMODULE h = LoadLibraryW(L".\\d3d9.dll");
     if (!h) { printf("smoke: LoadLibrary failed %lu\n", GetLastError()); return 2; }
     Begin b = (Begin)(void*)GetProcAddress(h, "D3DPERF_BeginEvent"); End e = (End)(void*)GetProcAddress(h, "D3DPERF_EndEvent");
@@ -25,6 +31,13 @@ int main(int argc, char** argv) {
     printf("smoke: Direct3DCreate9 -> %p\n", d3d);
     if (crash) { fflush(stdout); *(volatile int*)0x10 = 1; }   // access violation, writing
     if (d3d) { typedef ULONG (WINAPI* Rel)(void*); ((Rel)(*(void***)d3d)[2])(d3d); }
+    if (waitFor) {
+        for (int i = 0; i < 600 && GetFileAttributesA(waitFor) == INVALID_FILE_ATTRIBUTES; ++i) Sleep(100);
+        const bool got = GetFileAttributesA(waitFor) != INVALID_FILE_ATTRIBUTES;
+        printf("smoke: %s %s\n", waitFor, got ? "appeared" : "did not appear in 60 s");
+        fflush(stdout);
+        return got ? 0 : 4;
+    }
     FreeLibrary(h);
     return 0;
 }
