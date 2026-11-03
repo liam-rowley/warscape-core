@@ -4,8 +4,8 @@ in CI's harness-windows job with a real Git Bash.
 
 Ported from the first consumer's `tests/test_job_sh.py` at 6cbb9e9 (B17). The bash comes from `warscape.gitbash.bash_for_tests()`; the game
 repo job.sh finds without --adapter (its harness adapter and its registered dev.ctl_dir default) is the null game (proxy/tests/null_game,
-through $WSP_GAME_ROOT). job.sh reads JSON with python3, so every case skips where python3 is not on PATH (CI's gates job on Windows), and fails there instead
-under $WSC_REQUIRE_BASH (CI's harness-windows job)."""
+through $WSP_GAME_ROOT). job.sh reads JSON with python3, so every case skips where python3 (or Git Bash) is not on PATH, and fails instead under
+$WSC_REQUIRE_BASH (CI's harness-windows job)."""
 import json
 import os
 import subprocess
