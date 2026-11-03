@@ -137,7 +137,6 @@ id_prefix = "J"                    # job ids J<n>, branches job/J<n> and brief/J
 dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
 models = ["sonnet", "opus"]        # the Model line of a brief; models after the first need a stated reason
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
-hooks = ["tools/jobs_hooks.py"]    # Python files with the hook names below
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
@@ -154,16 +153,59 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. Nothing refuses the combination yet (B49), so a repo would find out at its first brief.
-- **Hook points** (`warscape/hooks.py`, listed in `[jobs] hooks`; all optional): `brief_problems(ctx, jid, row, text)`, `queue_problems(ctx, rows, files)`,
-  `policy_problems(ctx, facts)`, `view_panel(ctx)` and `summary(ctx, rows, read)`. Five names and no more; general game gates are B1 (B46).
+- **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.18.0).
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
 - **Settings only the owner can make** (this changes no repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
   jobs the repo has) and `policy` on `main`, allow auto-merge, and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
   Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once.
-- **Upgrading from a repo that has its own pipeline** (napoleon J62): move the texts into `[jobs.text]`, the rules that are not generic into a hook module,
+- **Upgrading from a repo that has its own pipeline** (napoleon J62): move the texts into `[jobs.text]`, the rules that are not generic into a gate module,
   turn each workflow into `ci/<name>.in`, run `wsc ci render`, delete the local copies in the same pull request as the pin bump (B9: the pin and `wsc.toml` version in one commit).
+
+## Game gates (0.18.0, core W13, C21)
+A game adds its own checks as **gate modules**: `wsc.toml` `[gates] dirs = ["tools/gates"]` (repo-relative folders), and every `*.py` in a listed folder whose
+name does not start with `_` is loaded, in folder order, then file-name order. The contract is one docstring, `warscape/gatemods.py`; in short:
+
+```python
+"""<what it checks>
+purpose: ...  usage: ...  when: ...
+not-a-verb: a gate module, run by wsc gates
+"""
+NAME = 'no_todo'                        # [a-z][a-z0-9_]*; never a core gate's name nor another module's
+STAGES = ('gates',)                     # optional, default ('gates',): any of gates, jobs, policy, view
+FAST = True                             # optional: a gates-stage module is in --fast (or name it in [gates] fast)
+
+def run(ctx):                           # ctx: the repo context, plus ctx.stage and that stage's inputs
+    from warscape.gates import Result   # inside run if the game's own tests import the file without core/ on sys.path
+    bad = [p for p in ctx.files() if p.startswith('docs/') and 'TODO' in (ctx.root / p).read_text(encoding='utf-8')]
+    return Result(NAME, 'error' if bad else 'ok', f'{len(bad)} docs say TODO', bad)   # level ok | warn | error
+```
+- **Stages.** `gates`: its own line in `wsc gates`, after the core gates (`[gates] skip`, `fast` and `--only` take its name). `jobs`: the `jobs` gate and
+  `wsc jobs check`, with `ctx.rows`, `ctx.read(path)` and `ctx.briefs()` (`(jid, row, text)` per brief, minus the legacy file's `brief_hooks` ids); an `error`
+  Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, with `ctx.facts`
+  (branch, kind, jid, changed, the merge base; the module runs from the branch's own head); an `error` Result's details are policy errors. `view`: `wsc jobs view`,
+  with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
+- A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
+  `run`, and a module that still defines one of the old hook names are load errors (`wsc` exits 2 naming the file).
+- **Moving off `[jobs] hooks`** (removed in 0.18.0 with no shim: the loader refuses the key and names this section). In the pin-bump commit itself (B9), because the
+  new core refuses the old key; for napoleon-remastered (rehearsed on a copy, W13 report):
+  1. `wsc.toml`: delete `hooks = [...]` from `[jobs]`; add `[gates]` with `dirs = ["tools/gates"]`.
+  2. `git mv tools/jobs_hooks.py tools/gates/pipeline.py` (a folder of its own: every `*.py` in it is loaded). Rename the five old functions (napoleon:
+     `brief_rule`, `gap_summary`, `queue_rule`, `policy_rule`; `view_panel` goes) and add `NAME = 'pipeline'`, `STAGES = ('jobs', 'policy', 'view')` and a `run(ctx)`
+     that dispatches on `ctx.stage`: `jobs` returns the found-path problems from `ctx.briefs()` with the prefix the core used to add (`f'{jid}: brief: {e}'`) plus
+     `queue_rule(ctx, ctx.rows, ctx.files())`, summary `gap_summary(ctx, ctx.rows, ctx.read)`, level `error` when any; `policy` returns `policy_rule(ctx, ctx.facts)`;
+     `view` returns `Result('pipeline', 'ok', 'PC state' if pc else '', html=pc_block(pc))` with `pc = pc_state(ctx.root)` (an empty Result draws nothing off the PC).
+     Paths relative to the file move one folder down: `_usage_reader`'s folder is `parents[1]` (tools/), `acceptance_active`'s default root `parents[2]`; the
+     rule 76 message names `tools/gates/pipeline.py`.
+  3. `python3 core/wsc.py reg add tools tools/gates/pipeline.py --id tools.jobs_hooks` (the row keeps its id) after updating the header (`[gates] dirs`, `not-a-verb:
+     a gate module, run by wsc gates`), then `reg add tools` for the two headers that name the file (`tools/usage_reader.py`, `discovery/core/briefpaths.py`).
+  4. Tests that load the file by path or call the old names: `tests/test_jobs_hooks.py` (module path, the three source-text reads, the renamed functions),
+     `tests/test_build_id.py`, `tests/test_registry_merge.py`, `tests/test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `tests/test_usage_reader.py`
+     (`sys.path` gains `tools/gates`, `import pipeline as hk`), `tests/test_proxy_host.py`.
+  5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside dated job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
+     `docs/plans/PLAN.md`, the `wsc.toml` comments).
+  6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
 
 ## The proxy, the harness and the save tools (0.4.0)
 From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
