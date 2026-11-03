@@ -119,6 +119,19 @@ commit = false              # views go to the git-ignored dir (default "_scratch
   registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
   either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
 
+## Extending a core schema (0.17.0)
+A game that needs a field a core schema lacks does not copy the schema (its copy would miss every later core change): its own schema
+names the core one in `x-extends` and holds only what it adds, and `wsc.toml` points the registry at it.
+```json
+{"x-extends": "core:hotkeys", "required": ["owner"], "properties": {"owner": {"type": "string", "minLength": 1}}}
+```
+`hotkeys = "schemas/hotkeys.schema.json"` in `[registries]` then validates rows against the merged document: every core rule still
+applies, `additionalProperties: false` now covers `owner` too, and `wsc reg render` writes `owner` after the core fields. The document
+may add `properties`, `required`, `allOf` entries (to narrow a core property), `$defs` and `x-unique` tuples, and replace `title`,
+`description`, `$id` and `x-view`; any other key, a core property redefined or a `$defs` name clash is a load error (merge rules:
+`warscape/registry.py` docstring). A game that already copied a core schema can switch; its rows' key order may change once
+(`wsc reg render`, a one-off diff).
+
 ## The job pipeline (0.9.0, napoleon J62, C18)
 The queue, the pull-request policy and the CI helpers are core verbs (`wsc jobs`, `wsc policy`, `wsc ci`) that a repo configures; a repo with none of the
 tables below behaves as a plain queue. Defaults and the exact keys: `warscape/repo.py` `DEFAULTS` (the loader refuses a key it does not know, so a new table

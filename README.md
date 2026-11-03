@@ -50,11 +50,15 @@ A repo declares its registries in `wsc.toml`; the core ships these schemas (`sch
 | `ui_elements` | screen, vanilla source, data contract, interactions, pipeline status |
 | `engine_sites` | RVA, anchor and stock bytes, patch or hook, config key, `verified` (date, run) |
 | `config_keys` | default, release value, owner, what it does |
-| `hotkeys` | binding, action, context, source; clashes fail the gate |
+| `hotkeys` | binding, action, context, source, how a bare key fires (`fires_with`); clashes fail the gate |
 | `engine_facts` | claim, state (`verified`, `open`, `refuted`), evidence run, date |
 
-The schema subset and the registry extensions (`x-view`, `x-unique`, `x-ref`, `x-source`) are documented in the docstrings of
-`warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
+The schema subset and the registry extensions (`x-view`, `x-unique`, `x-wildcard`, `x-chord`, `x-ref`, `x-source`, `x-extends`) are
+documented in the docstrings of `warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
+Two of them in a sentence each: `x-chord` makes the `x-unique` check read a field as `Ctrl+Alt+Shift+Key` chords, so a bare key flagged
+to fire with any modifier (or alone or with Shift) clashes with the chords it fires for (`hotkeys`: vanilla `Space` with
+`fires_with: any_modifier` takes a mod `Alt+Space`). `x-extends: "core:<name>"` lets a game schema add fields to a core schema,
+merged at load; canonical key order is then the core's fields first, then the game's (`docs/CONSUMING.md`, "Extending a core schema").
 
 ## Gates
 
