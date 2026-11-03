@@ -509,6 +509,23 @@ int main(int argc, char** argv) {
     PlannerCases();
     PlanCases();
     GroupFeed();
+    {   // the ordering with the RmlUi host (W2): one subclass, RmlUi decides first, then the gesture stage, then the game; in Present the
+        // gesture preview before the RmlUi pass; the layer installs no hook of its own
+        const std::string host = tk::ReadFile("core/ui_host.cpp"), drv = tk::ReadFile("core/gesture.cpp");
+        size_t n = 0; for (size_t p = host.find("SetWindowLong"); p != std::string::npos; p = host.find("SetWindowLong", p + 1)) ++n;
+        Check(n == 2 && host.find("s_wide ? SetWindowLongW(w, GWL_WNDPROC") != std::string::npos, "order: the host subclasses once (one statement, W or A)");
+        Check(!drv.empty() && drv.find("SetWindowLong") == std::string::npos && drv.find("VtableHook") == std::string::npos && drv.find("IatHook") == std::string::npos,
+              "order: gesture.cpp installs no subclass and no hook of its own");
+        const size_t wp = host.find("LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {"), decide = host.find("r = UiDecide(", wp),
+                     stage = host.find("GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, (r.to & kToEngine) != 0)", wp),
+                     engine = host.find("return Engine(h, msg, (WPARAM)g.wp, lp);", wp);
+        Check(wp != std::string::npos && decide != std::string::npos && stage != std::string::npos && engine != std::string::npos && decide < stage && stage < engine,
+              "order: in the window procedure UiDecide, then the gesture stage (mouse only when routed to the engine), then the game");
+        const size_t pr = host.find("HRESULT WINAPI hk_Present("), gp = host.find("GesturePresent(dev, s_bbW, s_bbH);", pr), fr = host.find("Frame(dev);", pr);
+        Check(pr != std::string::npos && gp != std::string::npos && fr != std::string::npos && gp < fr, "order: Present draws the gesture preview before the RmlUi panels");
+        const size_t init = host.find("void UiInit() {");
+        Check(init != std::string::npos && host.find("if (!K.enabled) return;", init) != std::string::npos, "order: W2's ui.enabled=0 early return is untouched");
+    }
     // the headers carry no Windows types (they build here, on the host, without windows.h) and no game names
     for (const char* h : { "core/gesture_math.h", "core/gesture_sm.h", "core/gesture_feed.h", "core/gesture_plan.h", "core/gesture_group.h" }) {
         const std::string s = tk::ReadFile(h);

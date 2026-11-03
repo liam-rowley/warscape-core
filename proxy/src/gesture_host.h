@@ -1,8 +1,8 @@
 #pragma once
 // gesture_host.h - the gesture layer's entry points (W6) for the rest of the proxy. The layer has no hook of its own: it is a stage in the
 // RmlUi host's window subclass and Present chain (ui_host.cpp: RmlUi panels first, then gestures, then the game), so it needs
-// ui.enabled=1 as well as controls.gestures=1 (with ui.enabled=0 the host hooks nothing, W2's rule, and the layer is inert). Pure decisions in gesture_*.h (host-tested); the driver is gesture.cpp; contract in
-// docs/PROXY_GESTURES.md.
+// ui.enabled=1 as well as controls.gestures=1 (with ui.enabled=0 the host hooks nothing, W2's rule, and the layer is inert).
+// Pure decisions in gesture_*.h (host-tested); the driver is gesture.cpp; contract in docs/PROXY_GESTURES.md.
 #include <cstdint>
 #include <string>
 
