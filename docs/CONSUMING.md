@@ -162,6 +162,7 @@ plan = [...]                       # globs a plan/* branch may touch; meta = [..
 [ci]
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
 workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
+required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.21.0)
 ```
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
@@ -171,10 +172,15 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
   `policy_problems(ctx, facts)`, `view_panel(ctx)` and `summary(ctx, rows, read)`. Five names and no more; general game gates are B1 (B46).
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
-  `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
-- **Settings only the owner can make** (this changes no repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
-  jobs the repo has) and `policy` on `main`, allow auto-merge, and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
-  Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once.
+  `{{wsc fetch_cache}}`, `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
+- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.21.0): the fetchers run through
+  `proxy/tools/netfetch.py prefetch` with a retry on network flakes, and their raw downloads are cached by the pins (`ci-cache`), so a warm cache
+  makes the build offline. The fetchers' sha256 checks still judge every byte; a cache fault never fails the job.
+- **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
+  jobs the repo has) and `policy` on `main`, allow auto-merge, require no approving review (one account cannot approve its own pull request), and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
+  Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once. `wsc ci check-settings [--repo owner/name]` reads them
+  (`gh api` GETs only) against the workflows and `[ci] required_checks` and names each one missing (exit 1; 2 when it cannot read them). A matrix job's
+  checks are named per value (`gates (ubuntu-latest)`): list those in `required_checks`.
 - **Upgrading from a repo that has its own pipeline** (napoleon J62): move the texts into `[jobs.text]`, the rules that are not generic into a hook module,
   turn each workflow into `ci/<name>.in`, run `wsc ci render`, delete the local copies in the same pull request as the pin bump (B9: the pin and `wsc.toml` version in one commit).
 
