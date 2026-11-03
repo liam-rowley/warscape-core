@@ -49,6 +49,7 @@ void GuardRun();               // sets Rt().engineOk and writes or removes the n
 // patch_driver.cpp
 void PatchesRun();             // only when Rt().plan.patches
 uintptr_t SiteAddress(const char* id);   // a checked site's address (hooks: the entry or instruction), 0 = not accepted
+bool MemReadable(const void* p, size_t n);   // every page committed, not PAGE_NOACCESS / PAGE_GUARD (VirtualQuery; the ctl peek uses it)
 
 // capture.cpp (J8): the D3DPERF exports report the engine's named events to a running frame capture (a flag test otherwise)
 void CaptureEvent(int kind, const wchar_t* name);   // 0 BeginEvent, 1 EndEvent, 2 SetMarker

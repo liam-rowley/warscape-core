@@ -5,11 +5,13 @@
 //   - the phase timeline (one per launch: logs\timeline.json)
 //   - the scene tracker (intro | frontend | loading | campaign | battle_deploy | battle | naval), fed by the Lua pumps, the battle
 //     probe, load requests and the movie events; ported from empire-remastered rml_mod/src/devspeed.cpp ComputeScene
-//   - the control channel grammar: request ids, verbs, autostart/reset targets, the result JSON
+//   - the control channel grammar: request ids, verbs, autostart/reset targets, the result JSON, stale requests, the peek probe
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 #include "capture.h"
@@ -238,6 +240,132 @@ inline FrameStats ComputeFrameStats(std::vector<double> d) {
     return s;
 }
 
+// ---- stale requests (W17, B40) --------------------------------------------------------------------------------------------
+// A request whose file was last written before this process was created comes from an earlier launch (a driver killed while it
+// waited leaves its .cmd behind): it is taken and refused, never run. No slack: process creation precedes the DLL's load, and no
+// core driver writes a request before its launch returns. An unknown start (< 0, GetProcessTimes failed) accepts everything.
+inline bool CtlStale(int64_t writeUnixMs, int64_t processStartMs) { return processStartMs >= 0 && writeUnixMs < processStartMs; }
+inline std::string CtlStaleReason(int64_t writeUnixMs, int64_t processStartMs) {
+    return "stale: written " + UtcIso(writeUnixMs) + ", before this launch started " + UtcIso(processStartMs) + ": a request from an earlier launch (resend it)";
+}
+
+// ---- peek (W17, B25): a read-only probe from an accepted engine site ------------------------------------------------------
+//   peek <site>[+|-<off>] [*[+|-<off>] ...] <len>
+// <site> an engine_sites id (letters, digits, ._:/#-; never a number: no raw address is accepted), its address the patch engine's
+// checked one (SiteAddress: rva + anchor). <off> decimal or 0x hex. A '-' may be part of an id: the offset is the number after the
+// last '+' or '-' (write +0 to keep a trailing -<n> in the id). Each `*` reads the 4-byte pointer at the current address, refuses a
+// null one, then adds its offset; at most 8. <len> 1 to 512 bytes. All arithmetic is 32-bit and wraps.
+struct PeekArgs { std::string site; int64_t siteOff = 0; std::vector<int64_t> hops; uint32_t len = 0; std::string error; };
+inline const char* PeekGrammar() { return "peek <site>[+|-<off>] [*[+|-<off>] ...] <len>"; }
+inline bool ParsePeekNum(const std::string& s, uint64_t& v) {   // decimal or 0x hex, at most 0xffffffff
+    v = 0;
+    const bool hex = s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X');
+    const size_t from = hex ? 2 : 0;
+    if (s.size() <= from || s.size() - from > (hex ? 8u : 10u)) return false;
+    for (size_t i = from; i < s.size(); ++i) {
+        const char c = s[i]; int d;
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (hex && c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (hex && c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else return false;
+        v = v * (hex ? 16 : 10) + (uint64_t)d;
+    }
+    return v <= 0xffffffffull;
+}
+inline bool ParsePeekOff(const std::string& s, int64_t& off) {   // "" (0), "+N", "-N"
+    off = 0;
+    if (s.empty()) return true;
+    uint64_t v = 0;
+    if ((s[0] != '+' && s[0] != '-') || !ParsePeekNum(s.substr(1), v)) return false;
+    off = s[0] == '-' ? -(int64_t)v : (int64_t)v;
+    return true;
+}
+inline bool PeekSiteId(const std::string& s) {
+    if (s.empty() || s.size() > 120 || !((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= '0' && s[0] <= '9'))) return false;
+    for (char c : s)
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == ':' || c == '/' || c == '#' || c == '-')) return false;
+    return true;
+}
+inline PeekArgs ParsePeekArgs(const std::string& arg) {
+    PeekArgs a;
+    std::vector<std::string> t; std::string cur;
+    for (char c : arg) { if (c == ' ' || c == '\t') { if (!cur.empty()) t.push_back(cur); cur.clear(); } else cur += c; }
+    if (!cur.empty()) t.push_back(cur);
+    if (t.size() < 2) { a.error = std::string("peek needs ") + PeekGrammar(); return a; }
+    uint64_t n = 0;
+    if (!ParsePeekNum(t.back(), n) || n < 1 || n > 512) { a.error = "peek: the length is 1 to 512 bytes (got '" + t.back() + "'; " + PeekGrammar() + ")"; return a; }
+    a.len = (uint32_t)n;
+    // the site and its offset
+    std::string site = t[0];
+    const size_t k = site.find_last_of("+-");
+    if (k != std::string::npos && k > 0) {
+        int64_t off = 0;
+        if (ParsePeekOff(site.substr(k), off)) { a.siteOff = off; site = site.substr(0, k); }
+        else if (site[k] == '+') { a.error = "peek: bad offset '" + site.substr(k) + "' (decimal or 0x hex)"; return a; }
+    }
+    if (ParsePeekNum(site, n)) { a.error = "peek reads from an engine site, never a raw address ('" + site + "'): " + PeekGrammar(); return a; }
+    if (!PeekSiteId(site)) { a.error = "peek: bad site id '" + site + "' (an engine_sites id: letters, digits, ._:/#-)"; return a; }
+    a.site = site;
+    for (size_t i = 1; i + 1 < t.size(); ++i) {
+        int64_t off = 0;
+        if (t[i][0] != '*' || !ParsePeekOff(t[i].substr(1), off)) { a.error = "peek: bad hop '" + t[i] + "' (*, *+<off> or *-<off>; " + PeekGrammar() + ")"; return a; }
+        a.hops.push_back(off);
+    }
+    if (a.hops.size() > 8) { a.error = "peek: at most 8 * hops (got " + std::to_string(a.hops.size()) + ")"; return a; }
+    return a;
+}
+inline std::string Hex32(uint32_t v) { char b[16]; snprintf(b, sizeof b, "0x%08x", v); return b; }
+struct PeekHop { uint32_t at = 0, ptr = 0; };
+struct PeekPath {
+    std::vector<PeekHop> hops;   // every pointer read, in order (a failed null read included)
+    uint32_t addr = 0;           // the final address (or where the resolution stopped)
+    int failedHop = 0;           // 1-based hop that stopped it, 0 = none
+    std::string error;
+};
+// readU32(uint32_t at, uint32_t& out) -> bool: false = not readable. The final range's readability is the driver's check.
+template <class ReadU32>
+PeekPath ResolvePeek(uint32_t siteAddr, const PeekArgs& a, ReadU32 readU32) {
+    PeekPath p;
+    uint32_t cur = siteAddr + (uint32_t)a.siteOff;
+    for (size_t i = 0; i < a.hops.size(); ++i) {
+        const std::string hop = "hop " + std::to_string(i + 1) + " of " + std::to_string(a.hops.size());
+        uint32_t v = 0;
+        if (!readU32(cur, v)) { p.addr = cur; p.failedHop = (int)i + 1; p.error = hop + ": the pointer at " + Hex32(cur) + " is not readable"; return p; }
+        p.hops.push_back({ cur, v });
+        if (!v) { p.addr = cur; p.failedHop = (int)i + 1; p.error = hop + ": null pointer at " + Hex32(cur); return p; }
+        cur = v + (uint32_t)a.hops[i];
+    }
+    p.addr = cur;
+    if ((uint64_t)cur + a.len > 0x100000000ull) p.error = "the range " + Hex32(cur) + " + " + std::to_string(a.len) + " wraps past 4 GB";
+    return p;
+}
+// The result's members (ctl .done): bytes = the len bytes read, or nullptr when nothing was read (a stopped resolution).
+inline std::string PeekResultJson(const std::string& site, uint32_t siteAddr, const PeekPath& p, uint32_t len, const uint8_t* bytes) {
+    std::string j = "\"site\": " + JStr(site) + ", \"site_addr\": " + JStr(Hex32(siteAddr)) + ", \"hops\": [";
+    for (size_t i = 0; i < p.hops.size(); ++i) j += std::string(i ? ", " : "") + "{\"at\": " + JStr(Hex32(p.hops[i].at)) + ", \"ptr\": " + JStr(Hex32(p.hops[i].ptr)) + "}";
+    j += "], \"addr\": " + JStr(Hex32(p.addr)) + ", \"len\": " + std::to_string(len);
+    if (p.failedHop) j += ", \"failed_hop\": " + std::to_string(p.failedHop);
+    if (!bytes) return j;
+    std::string hex; char b[40];
+    for (uint32_t i = 0; i < len; ++i) { snprintf(b, sizeof b, i ? " %02x" : "%02x", bytes[i]); hex += b; }
+    j += ", \"hex\": " + JStr(hex);
+    if (len >= 4) {   // the whole dwords, little-endian
+        std::string u = ", \"u32\": [", f = ", \"f32\": [";
+        for (uint32_t i = 0; i + 4 <= len; i += 4) {
+            uint32_t v; memcpy(&v, bytes + i, 4);
+            float x; memcpy(&x, bytes + i, 4);
+            const char* sep = i ? ", " : "";
+            u += sep + std::to_string(v);
+            if (std::isnan(x)) snprintf(b, sizeof b, "\"nan\"");
+            else if (std::isinf(x)) snprintf(b, sizeof b, x > 0 ? "\"inf\"" : "\"-inf\"");
+            else snprintf(b, sizeof b, "%.9g", (double)x);
+            f += sep; f += b;
+        }
+        j += u + "]" + f + "]";
+    }
+    return j;
+}
+
 struct CtlRequest {
     std::string verb, arg;     // arg = the rest of the line (log text, file, scenes, target)
     double timeoutS = 0;       // 0 = the verb's default
@@ -246,7 +374,7 @@ struct CtlRequest {
     std::vector<std::string> scenes;   // waitfor
     std::string luaArgs;       // lua: the text after " -- ", read by the chunk as wsp.dev_config("lua_args") (J4)
 };
-inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], ui show|hide|reload|scale|click|wheel|dump|state ..., gesture press|move|release|cancel|plan|info ..., exit"; }
+inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], ui show|hide|reload|scale|click|wheel|dump|state ..., gesture press|move|release|cancel|plan|info ..., peek <site>[+|-<off>] [*[+|-<off>] ...] <len>, exit"; }
 inline double CtlDefaultTimeout(const std::string& verb) {
     return verb == "lua" || verb == "console" ? 30 : verb == "perf" ? 70 : verb == "capture" ? 60 : verb == "ui" || verb == "gesture" ? 30 : verb == "waitfor" ? 180 : (verb == "autostart" || verb == "reset") ? 240 : 10;
 }
@@ -325,6 +453,11 @@ inline CtlRequest ParseCtl(const std::string& lineIn) {
     }
     if (v == "gesture") {   // the gesture layer (W6): grammar in gesture_feed.h ParseGestureArgs; no trailing timeout (numbers are pixels)
         const gest::GestureArgs a = gest::ParseGestureArgs(r.arg);
+        if (!a.error.empty()) r.error = a.error;
+        return r;
+    }
+    if (v == "peek") {   // the read-only probe (W17): grammar above (ParsePeekArgs); default timeout 10 s, no trailing timeout (numbers are offsets)
+        const PeekArgs a = ParsePeekArgs(r.arg);
         if (!a.error.empty()) r.error = a.error;
         return r;
     }
