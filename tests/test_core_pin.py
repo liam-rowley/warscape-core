@@ -1,4 +1,4 @@
-"""The `core_pin` gate against throwaway git repositories (core W11: backlog B7, B11, B12; decisions C10, C12 and the W11 row).
+"""The `core_pin` gate against throwaway git repositories (core W11: backlog B7, B11, B12; decisions C10, C12, C21).
 
 A fake core is a temp git repository with a `VERSION`, commits and `vX.Y.Z` tags; a fake game pins it, either beside it (B7) or as a real
 `core/` submodule (B11, B12). The gate runs in-process with `Ctx(root=game, core_root=fake core)`, so every case, the failing ones too, is seen.
