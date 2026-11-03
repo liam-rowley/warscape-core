@@ -32,9 +32,12 @@ struct Viewport { uint32_t x, y, w, h; float minZ, maxZ; };            // D3DVIE
 const GUID kIidTexture9 = { 0x85C31227, 0x3DE5, 0x4f00, { 0x9B, 0x3A, 0xF1, 0x1A, 0xC3, 0x8C, 0x18, 0xB5 } };
 const GUID kIidCubeTexture9 = { 0xFFF32F81, 0xD953, 0x473a, { 0x92, 0x23, 0x93, 0xD6, 0x52, 0xAB, 0xA9, 0x3F } };
 
-enum : LONG { kIdle = 0, kArmed = 1, kRecording = 2, kDone = 3 };
-volatile LONG s_state = kIdle;
-volatile bool s_rec = false;     // the render thread records (kRecording)
+volatile LONG s_state = kCapIdle;   // capture.h's state machine: every transition through s_cell (a compare-and-swap), never a plain store
+struct StateCell {
+    long Load() const { return s_state; }
+    long Cas(long expected, long desired) { return InterlockedCompareExchange(&s_state, desired, expected); }
+} s_cell;
+volatile bool s_rec = false;     // the render thread records (Recording, and Abandoned until it closes the file)
 int s_depth = 0;                 // > 0 inside a recorded call (render thread only)
 bool s_hooked = false;
 std::wstring s_root, s_dir;      // dev.capture_dir, <root>\<name>
@@ -376,22 +379,30 @@ void CaptureInit() {   // the folder sits outside the game folder (D25: the unin
     s_root = r;
 }
 
-// The render thread, every Present (before the real Present): closes a recorded frame, starts the next, or arms a waiting request.
+// The render thread, every Present (before the real Present): closes a recorded frame, starts the next, closes an abandoned capture,
+// or takes a waiting arm (capture.h CapOnPresent: Armed -> Recording by CAS before anything else).
 void CapturePresent(void* dev) {
-    const LONG st = s_state;
-    if (st == kRecording) {
-        Line("PRESENT");
-        if (++s_frame < s_frames) { Line("FRAME " + std::to_string(s_frame + 1)); return; }
+    if (!dev) return;
+    switch (CapOnPresent(s_cell, s_frame, s_frames)) {
+    case CapStep::none: return;
+    case CapStep::next_frame: Line("PRESENT"); ++s_frame; Line("FRAME " + std::to_string(s_frame + 1)); return;
+    case CapStep::finish:
+        Line("PRESENT"); ++s_frame;
         s_rec = false;
         { std::set<uint64_t> u; for (auto& kv : s_shaderHash) if (kv.second) u.insert(kv.second); s_capShaders = u.size(); }
         Close();
-        InterlockedExchange(&s_state, kDone);
-        SetEvent(s_doneEv);
+        if (CapFinish(s_cell)) SetEvent(s_doneEv);   // false: the ctl abandoned it meanwhile, now Idle and nobody waits
         return;
+    case CapStep::close_abandoned:   // the ctl gave up (CaptureRun returned failed): a bounded file, kept as evidence
+        Line("ABANDONED frame " + std::to_string(s_frame + 1) + " of " + std::to_string(s_frames));
+        s_rec = false;
+        Close();
+        CapClosed(s_cell);
+        return;
+    case CapStep::start: break;
     }
-    if (st != kArmed || !dev) return;
     s_file = CreateFileW((s_dir + L"frame.txt").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (s_file == INVALID_HANDLE_VALUE) { s_err = "cannot create frame.txt (" + std::to_string(GetLastError()) + ")"; InterlockedExchange(&s_state, kDone); SetEvent(s_doneEv); return; }
+    if (s_file == INVALID_HANDLE_VALUE) { s_err = "cannot create frame.txt (" + std::to_string(GetLastError()) + ")"; if (CapFinish(s_cell)) SetEvent(s_doneEv); return; }
     s_buf.reserve(5u << 20);
     s_bytes = s_lines = s_draws = 0; s_shadersNew = s_walkBad = s_sizeMismatch = 0; s_frame = 0;
     char h[400];
@@ -402,14 +413,31 @@ void CapturePresent(void* dev) {
     Line("FRAME 1");
     s_t0 = MonoS();
     s_rec = true;
-    InterlockedExchange(&s_state, kRecording);
 }
+
+namespace {
+// The ctl thread waits for Done. The event only wakes it; the state decides, so a late SetEvent of an earlier capture cannot end this one
+// (the render thread sets Done before the event, and the event is reset before the state is read again).
+bool WaitDone(double seconds) {
+    const double end = MonoS() + seconds;
+    for (;;) {
+        if (s_cell.Load() == kCapDone) return true;
+        const double left = end - MonoS();
+        if (left <= 0) return false;
+        WaitForSingleObject(s_doneEv, (DWORD)(left * 1000) + 1);
+        if (s_cell.Load() == kCapDone) return true;
+        ResetEvent(s_doneEv);
+    }
+}
+} // namespace
 
 // The ctl thread: `capture <name> [frames]`. ok + the result members, or false + why.
 bool CaptureRun(const std::string& name, int frames, double timeoutS, std::string& result, std::string& why) {
     if (!Dk().capture) { why = "dev.capture=0"; return false; }
     if (!s_hooked) { why = "the device is not hooked (no device created yet, or a slot failed: see the log)"; return false; }
-    if (s_state != kIdle) { why = "a capture is running"; return false; }
+    // Only this (the one ctl) thread leaves Idle, so Idle here stays Idle until the arm below: nothing the render thread reads (s_dir,
+    // s_frames, s_err) is written while it may still be closing an abandoned capture.
+    if (const long st = s_cell.Load(); st != kCapIdle) { why = CapRefusal(st == kCapAbandoned ? CapArm::closing : CapArm::running); return false; }
     if (s_root.empty()) { why = "dev.capture_dir is empty (a folder outside the game folder)"; return false; }
     CreateDirectoryW(s_root.c_str(), nullptr);
     CreateDirectoryW((s_root + L"shaders").c_str(), nullptr);
@@ -419,10 +447,21 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
     s_name = name; s_frames = frames; s_err.clear();
     ResetEvent(s_doneEv);
     const double t0 = MonoS();
-    InterlockedExchange(&s_state, kArmed);
-    if (WaitForSingleObject(s_doneEv, (DWORD)(timeoutS * 1000)) != WAIT_OBJECT_0) {
-        if (InterlockedCompareExchange(&s_state, kIdle, kArmed) == kArmed) { why = "no Present within the timeout: nothing recorded"; return false; }
-        WaitForSingleObject(s_doneEv, 30000);   // recording: it ends at the next Present(s)
+    if (const CapArm a = CapArmFromCtl(s_cell); a != CapArm::ok) { why = CapRefusal(a); return false; }   // Idle -> Armed
+    CapEnd end = WaitDone(timeoutS) ? CapEnd::done : CapOnTimeout(s_cell, false);   // Armed -> Idle, or the render thread owns it
+    if (end == CapEnd::wait_more) end = WaitDone(30) ? CapEnd::done : CapOnTimeout(s_cell, true);   // Recording -> Abandoned, or Done just in time
+    if (end != CapEnd::done) {   // failed; none of the render thread's counters is read (it may still be writing them)
+        const bool abandoned = end == CapEnd::abandoned;
+        char b[400];
+        snprintf(b, sizeof b, "\"state\": %s, \"dir\": %s, \"wait_s\": %.3f", abandoned ? "\"abandoned\"" : "\"nothing recorded\"", JStr(Narrow(s_dir)).c_str(),
+                 MonoS() - t0);
+        result = b;
+        if (abandoned) result += ", \"file\": " + JStr(Narrow(s_dir) + "frame.txt");
+        if (abandoned) {
+            snprintf(b, sizeof b, "recording did not finish within %.0f s: abandoned; the render thread closes frame.txt at its next Present", MonoS() - t0);
+            why = b;
+        } else why = "no Present within the timeout: nothing recorded";
+        return false;
     }
     const double recS = MonoS() - s_t0;
     char b[700];
@@ -433,7 +472,7 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
     result = b;
     const bool ok = s_err.empty();
     if (!ok) why = s_err;
-    InterlockedExchange(&s_state, kIdle);
+    CapRelease(s_cell);   // Done -> Idle: the only way the ctl sets Idle after a recording
     return ok;
 }
 
