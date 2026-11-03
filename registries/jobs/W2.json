@@ -3,10 +3,11 @@
   "description": "The RmlUi host in the proxy: the game-agnostic half of napoleon-remastered J30 (render interface, input routing, scale model, the host's own Lua, ctl ui verbs, build and host tests); 0.10.0.",
   "title": "RmlUi host in the proxy",
   "phase": 1,
-  "status": "review",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "depends_on": [],
   "brief": "jobs/W2/brief.md",
-  "report": "jobs/W2/report.md"
+  "report": "jobs/W2/report.md",
+  "review": "jobs/W2/review.md"
 }
