@@ -217,5 +217,12 @@ if [[ "$WHAT" == smoke ]]; then
   printf '[proxy]\r\nbackend=system\r\nminidump=2\r\n' > "$G/$INI"
   run replace crash || true
   check "top-level filter at first Direct3DCreate9: REPLACED by $EXE"; check "minidump (first-chance) written"
-  echo "build.sh smoke: passed (5 launches under wine, 2 dumps)"
+  # 6) the gesture layer (W6) with the RmlUi host it rides on: the null adapter's GestureAdapter is accepted and the layer starts
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[controls]\r\ngestures=1\r\n[ui]\r\nenabled=1\r\n' > "$G/$INI"
+  run; check "gesture: on: drag 6 px"; check "ui: enabled"; check "process detach"
+  # 7) gestures without the host: inert, said so, nothing hooked for them (W2's "ui.enabled=0: nothing hooked" holds)
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[controls]\r\ngestures=1\r\n' > "$G/$INI"
+  run; check "gesture: the RmlUi host is off (ui.enabled=0)"; check "process detach"
+  if grep -q "IDirect3D9::CreateDevice (ui)" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: a UI hook went in with ui.enabled=0"; exit 1; fi
+  echo "build.sh smoke: passed (7 launches under wine, 2 dumps)"
 fi
