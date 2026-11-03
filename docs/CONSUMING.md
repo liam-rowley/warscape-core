@@ -176,4 +176,9 @@ prints what they will use. The DLL build id hashes the inputs' content under rol
 the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
 (`proxy/tests/null_game/README.md`).
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
-(watcher 1.3.0, 0.11.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+(watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+
+Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
+([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
+([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
+`GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).

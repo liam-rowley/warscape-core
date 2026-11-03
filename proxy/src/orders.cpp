@@ -314,6 +314,28 @@ bool OrdersPeek(uint32_t a, size_t n, std::string& hex, std::string& why) {
     return true;
 }
 
+// W6: the ground height the move order would use at (x, z): the same projector call as MoveLocked, nothing else. It calls engine code,
+// so only on the thread that runs the Lua pump or Present (one thread in the games proven so far; a gesture press arrives on it).
+bool OrdersGroundAt(float x, float z, float& y, std::string& why) {
+    Lock l;
+    if (!s_key) { why = "dev.orders=0"; return false; }
+    if (!s_installed) { why = "orders not installed: " + s_sitesWhy; return false; }
+    const DWORD tid = GetCurrentThreadId();
+    if (tid != s_engineTid && tid != s_presentTid) { why = "not the engine or Present thread"; return false; }
+    if (!std::isfinite(x) || !std::isfinite(z)) { why = "a ground point has finite numbers only"; return false; }
+    uint32_t battle = 0, queue = 0, t1 = 0, terrain = 0;
+    if (!Battle(battle, queue, why)) return false;
+    if (!ReadPtr(battle + s_groundA, t1) || !t1 || !ReadPtr(t1 + s_groundB, terrain) || !terrain || !Readable(terrain, 16)) { why = "the battle has no ground projector"; return false; }
+    if (!Executable(s_groundFn)) { why = "the ground projector is not executable code in the exe"; return false; }
+    uint32_t loc[5] = {};
+    const float xz[2] = { x, z };
+    ((GroundFn)s_groundFn)((void*)(uintptr_t)terrain, loc, xz, 0, 1, 0);
+    float lx, ly, lz; memcpy(&lx, &loc[0], 4); memcpy(&ly, &loc[1], 4); memcpy(&lz, &loc[2], 4);
+    if (!std::isfinite(ly) || std::fabs(lx - x) > 0.01f || std::fabs(lz - z) > 0.01f) { why = "no ground there (the projection moved the point)"; return false; }
+    y = ly;
+    return true;
+}
+
 std::string OrdersInfo() {
     Lock l;
     char b[512];

@@ -23,7 +23,7 @@ report file, so the parent writes it. Same Claude-Session as the build.
   - The refusal text for exits 5, 6 and 7 names the file and the one safe fix (move it to `_to_delete\`; the display keeps its mode).
 - Tests: `harness/tests/Test-Unit.ps1`, 3 new cases and the fixture `harness/tests/fixtures/vdisplay_restore_20261030_j44.json` (the 2026-10-30
   record); `harness/tests/Test-Integration.ps1`, 1 new case.
-- `docs/CONSUMING.md`: 2 lines in the harness section. `VERSION` 0.11.0.
+- `docs/CONSUMING.md`: 2 lines in the harness section. `VERSION` 0.11.0, then 0.14.0 when `main` was merged in after W6 (0.13.0) merged first (2026-11-03).
 
 ## Evidence
 - The failure as found (from the consumer's J48 brief; the original watcher log was not re-checked here): the record was x=3839, y=2160,
