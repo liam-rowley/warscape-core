@@ -43,7 +43,7 @@ class Flaky:
 
 
 def http_error(code):
-    return urllib.error.HTTPError('https://x.invalid/f', code, 'msg', {}, None)
+    return urllib.error.HTTPError('https://x.invalid/f', code, 'msg', {}, io.BytesIO(b''))
 
 
 class Retry(unittest.TestCase):
