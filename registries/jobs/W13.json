@@ -1,0 +1,10 @@
+{
+  "id": "W13",
+  "description": "Covers B1, B46. wsc.toml [gates] dirs and game gate modules with the verb contract (NAME, run(ctx) -> Result) run by wsc gates (B1); then move brief_problems, queue_problems, policy_problems, view_panel and summary (warscape/hooks.py) onto that contract, with a migration path for napoleon's hook module (B46). Opus: a new extension point every game builds on, plus a migration of the pipeline's live hooks (C18).",
+  "title": "Game-specific gates, and the five hook names as gate modules",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": []
+}

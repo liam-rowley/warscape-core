@@ -1,0 +1,10 @@
+{
+  "id": "W11",
+  "description": "Covers B7, B11, B12. core_pin reads VERSION from ctx.core_root and gets the failing-fixture test on a throwaway dirty core (B7); it resolves the core's git status with the core's own GIT_DIR, not one leaked from a superproject hook in a linked worktree (B11); on a shallow submodule it compares against the pinned tag's commit instead of failing on \"tags exist, none on HEAD\" (B12).",
+  "title": "core_pin: testable, worktree-safe, shallow-safe",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": []
+}
