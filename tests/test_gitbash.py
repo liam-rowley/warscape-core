@@ -89,6 +89,29 @@ class BashForTests(unittest.TestCase):
         self.assertEqual(gb.bash_for_tests(nt=False, find=lambda nt: '/usr/bin/bash'), ('/usr/bin/bash', None))
 
 
+class BashOrSkip(unittest.TestCase):
+    class Case:
+        def skipTest(self, why):
+            raise unittest.SkipTest(why)
+
+        def fail(self, why):
+            raise AssertionError(why)
+
+    def test_a_found_bash_is_returned(self):
+        self.assertEqual(gb.bash_or_skip(self.Case(), found=('b', None), which=lambda n: 'py', environ={}), 'b')
+
+    def test_no_bash_or_no_python3_skips(self):
+        with self.assertRaisesRegex(unittest.SkipTest, 'no Git Bash'):
+            gb.bash_or_skip(self.Case(), found=(None, 'no Git Bash found'), environ={})
+        with self.assertRaisesRegex(unittest.SkipTest, 'python3'):
+            gb.bash_or_skip(self.Case(), found=('b', None), which=lambda n: None, environ={})
+        self.assertEqual(gb.bash_or_skip(self.Case(), python3=False, found=('b', None), which=lambda n: None, environ={}), 'b')
+
+    def test_failing_fixture_the_required_bash_fails_instead_of_skipping(self):
+        with self.assertRaisesRegex(AssertionError, 'WSC_REQUIRE_BASH is set: .*python3'):
+            gb.bash_or_skip(self.Case(), found=('b', None), which=lambda n: None, environ={'WSC_REQUIRE_BASH': '1'})
+
+
 class CtlBash(unittest.TestCase):
     """`ctl.bash()` takes the core's finder and opens nothing under the game root (B18: it loaded the game's tools/verbs/setup.py)."""
     def setUp(self):

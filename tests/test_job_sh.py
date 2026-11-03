@@ -4,10 +4,10 @@ in CI's harness-windows job with a real Git Bash.
 
 Ported from the first consumer's `tests/test_job_sh.py` at 6cbb9e9 (B17). The bash comes from `warscape.gitbash.bash_for_tests()`; the game
 repo job.sh finds without --adapter (its harness adapter and its registered dev.ctl_dir default) is the null game (proxy/tests/null_game,
-through $WSP_GAME_ROOT). job.sh reads JSON with python3, so every case skips where python3 is not on PATH (CI's gates job on Windows)."""
+through $WSP_GAME_ROOT). job.sh reads JSON with python3, so every case skips where python3 is not on PATH (CI's gates job on Windows), and fails there instead
+under $WSC_REQUIRE_BASH (CI's harness-windows job)."""
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,13 +19,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from warscape.gitbash import bash_for_tests  # noqa: E402
+from warscape.gitbash import bash_for_tests, bash_or_skip  # noqa: E402
 
 JOB = ROOT / 'harness' / 'job.sh'
 NULL_GAME = ROOT / 'proxy' / 'tests' / 'null_game'
-BASH, NO_BASH = bash_for_tests()   # Git Bash on Windows, never the WSL launcher on PATH (J22)
-if not NO_BASH and not shutil.which('python3'):
-    NO_BASH = 'job.sh calls python3, which is not on PATH here'
+FOUND = bash_for_tests()   # Git Bash on Windows, never the WSL launcher on PATH (J22)
+BASH = FOUND[0]
 
 
 def job_env():
@@ -72,8 +71,7 @@ class FakeWatcher(threading.Thread):
 
 class JobSh(unittest.TestCase):
     def setUp(self):
-        if NO_BASH:
-            self.skipTest(NO_BASH)
+        bash_or_skip(self, found=FOUND)   # skips without bash or python3; fails instead under $WSC_REQUIRE_BASH (harness-windows)
         self.tmp = tempfile.TemporaryDirectory()
         t = Path(self.tmp.name)
         self.state = t / 'nullgame_pc'

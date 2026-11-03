@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -126,11 +125,7 @@ class BuildId(Env):
 
 class GameLock(Env):
     def test_failing_fixture_of_racing_takers_exactly_one_wins(self):
-        bash, no_bash = gitbash.bash_for_tests()
-        if no_bash:
-            self.skipTest(no_bash)
-        if not shutil.which('python3'):
-            self.skipTest('job.sh calls python3, which is not on PATH here')
+        bash = gitbash.bash_or_skip(self)
         state = self.t / 'state'
         (state / 'watcher').mkdir(parents=True)
         ad = self.t / 'adapter.json'

@@ -76,3 +76,21 @@ def bash_for_tests(nt=os.name == 'nt', find=None, environ=None):
         return b or 'bash', None
     looked = ['bash on PATH (when it is Git\'s)', 'git --exec-path'] + [f'{r}/bin/bash.exe' for r in roots('', environ)]
     return None, f'no Git Bash found (looked in: {", ".join(looked)}); the WSL bash on PATH is never used'
+
+
+REQUIRE_ENV = 'WSC_REQUIRE_BASH'
+
+
+def bash_or_skip(test, python3=True, found=None, which=shutil.which, environ=None):
+    """The bash for a unittest case that runs a shell script; without one (or without python3 on PATH when the script reads JSON with it,
+    as harness/job.sh does) the case is skipped with the reason. With $WSC_REQUIRE_BASH set (CI's harness-windows job) it fails instead,
+    so a job that must run the scripts cannot pass on a skip. `found` is a (bash, reason) pair, default bash_for_tests()."""
+    env = os.environ if environ is None else environ
+    bash, why = found or bash_for_tests()
+    if not why and python3 and not which('python3'):
+        why = 'the script calls python3, which is not on PATH here'
+    if why:
+        if env.get(REQUIRE_ENV):
+            test.fail(f'${REQUIRE_ENV} is set: {why}')
+        test.skipTest(why)
+    return bash
