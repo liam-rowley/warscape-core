@@ -176,6 +176,8 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
 - **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.21.0): the fetchers run through
   `proxy/tools/netfetch.py prefetch` with a retry on network flakes, and their raw downloads are cached by the pins (`ci-cache`), so a warm cache
   makes the build offline. The fetchers' sha256 checks still judge every byte; a cache fault never fails the job.
+  Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
+  elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
 - **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
   jobs the repo has) and `policy` on `main`, allow auto-merge, require no approving review (one account cannot approve its own pull request), and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
   Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once. `wsc ci check-settings [--repo owner/name]` reads them
