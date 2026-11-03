@@ -184,8 +184,9 @@ inline std::vector<Unit> BlockRotate(const std::vector<Unit>& u, double thetaDeg
     for (Unit& a : o) { const V2 r = RotateXZ(a.x - c.x, a.z - c.z, thetaDeg); a.x = c.x + r.x; a.z = c.z + r.z; a.bearing = PyMod(a.bearing + thetaDeg, 360.0); }
     return o;
 }
-// A unit's block depth for drawing and for its centre: its own depth, else max(4, width / 4) (the provenance's rule).
-inline double FootDepth(const Unit& u) { return u.depth > 0 ? u.depth : std::max(4.0, u.width * 0.25); }
+// A unit's block depth for drawing and for its centre: max(4, its own depth, else width / 4), the provenance's rule (block_math.py
+// footprint; the 4 m floor holds for a given depth too: gesture_vectors.txt line 53, depth 3.03, is drawn 4 deep).
+inline double FootDepth(const Unit& u) { return std::max(4.0, u.depth > 0 ? u.depth : u.width * 0.25); }
 // The centre of a unit's block on the ground: (x, z) itself, or for a front-referenced unit half the depth behind it.
 inline V2 UnitCentre(const Unit& u) {
     if (!u.frontRef) return V2{ u.x, u.z };
