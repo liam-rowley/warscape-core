@@ -975,7 +975,7 @@ def build_steps(r):
 
 def brief_steps(r, root, lead='needs a brief (nothing queued is ready)'):
     jd, T = S.jobs_dir, S.text
-    owed = [f'{p.relative_to(root).as_posix()} {w}' for p in sorted(root.glob(S.ledgers)) if p.is_file() and S.ledgers
+    owed = [f'{p.relative_to(root).as_posix()} {w}' for p in (sorted(root.glob(S.ledgers)) if S.ledgers else []) if p.is_file()
             for w in waiting_rules(p.read_text(encoding='utf-8'), r['id'])]
     return (f'{r["id"]}: {r["title"]} {lead}.\n'
             f'Write {jd}/{r["id"]}/brief.md on branch brief/{r["id"]} from the row, {T["plan_doc"]} and the reports of '
