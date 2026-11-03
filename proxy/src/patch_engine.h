@@ -12,7 +12,11 @@
 // executable one); anchor and stock compare equal after taking the load delta off every relocated dword (ReadUnrelocated); a
 // patch's changing bytes carry no relocation. A patch site whose bytes already equal patch_bytes counts as done. ANY bad site ->
 // nothing is written (all-or-nothing), and every site is still checked and logged. Disabled sites (their config key is off) are
-// checked (they are part of the exe's identity) but never written.
+// checked (they are part of the exe's identity) but never written. A value row (valueKey, W7) takes its bytes from a numeric config
+// key: patch_value.h resolves the table into an effective copy first (the key at 0 or a refused value = the site disabled, i.e. checked,
+// left stock), so these checks hold for value rows exactly as for fixed rows. An absolute address inside the anchor (c7 05 <abs32>
+// <imm32>) is compared unrelocated, and its relocation ends where the value starts, so it does not count against the value (B41).
+// docs/PROXY_SITES.md is the overview.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -24,6 +28,7 @@ namespace wsp {
 
 constexpr unsigned kMaxSiteBytes = 32;
 enum SiteKind : uint8_t { kPatch = 0, kHook = 1 };
+enum SiteValueType : uint8_t { kValueNone = 0, kValueF32 = 1, kValueI32 = 2 };   // a value row's encoding (its key's type)
 
 struct SiteDef {
     const char* id;          // engine_sites id
@@ -33,6 +38,12 @@ struct SiteDef {
     uint8_t len;       uint8_t stock[kMaxSiteBytes];
     uint8_t patch[kMaxSiteBytes];   // kind == kPatch: len bytes
     const char* configKey;   // nullptr = always on
+    // W7 value rows (appended with defaults: a table without value rows omits them). The bytes come from a numeric config key, resolved
+    // into an effective copy of the table before the plan (patch_value.h ResolveSites); MakePatchPlan never reads these fields.
+    const char* valueKey = nullptr;     // nullptr = fixed patch bytes
+    uint8_t valueType = kValueNone;     // SiteValueType: little-endian float32 or int32, len == 4
+    uint8_t valueFloorStock = 0;        // 1 = never write below the stock value
+    double valueScale = 1.0;            // written = configured x scale
 };
 
 enum class SiteState : uint8_t { Stock, Done, BadEntry, Unmapped, NotCode, Relocated, BadAnchor, BadStock, Overlap };
