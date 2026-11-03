@@ -26,6 +26,23 @@
     },
     "owner": {
       "$ref": "#/$defs/text"
+    },
+    "type": {
+      "enum": [
+        "bool",
+        "int",
+        "float",
+        "string"
+      ],
+      "description": "the key's type; without it the type is inferred from default (JSON 0 is an int, so a float key with default 0 needs type float; a key named by an engine_sites value_key must carry it)"
+    },
+    "min": {
+      "type": "number",
+      "description": "numeric keys only: a value below it is clamped to it (with a warning)"
+    },
+    "max": {
+      "type": "number",
+      "description": "numeric keys only: a value above it is clamped to it (with a warning); for a value_key, the tested ceiling"
     }
   },
   "x-view": {
@@ -37,6 +54,37 @@
       "description"
     ]
   },
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "min"
+            ]
+          },
+          {
+            "required": [
+              "max"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "int",
+              "float"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "id": {
       "type": "string",

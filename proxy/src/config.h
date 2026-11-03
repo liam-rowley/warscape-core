@@ -2,7 +2,13 @@
 // Config file parsing: pure core (host tests in proxy/tests/test_config.cpp). One INI file next to the exe; `[section]` + `key`
 // maps to the config_keys registry id `section.key` (lowercase). The key table (id, type, default) is GENERATED from the registry
 // (proxy/tools/gen_tables.py), so the DLL knows exactly the registered keys. Unknown keys, bad values, duplicates and stray lines
-// are collected as warnings for the log, never fatal: a bad value falls back to the registry default.
+// are collected as warnings for the log, never fatal: a bad value falls back to the registry default (the warning names the key's type).
+// Numeric keys (W7): an int must fit int32; a float is [+-]digits[.digits][e[+-]digits], checked by hand and converted with
+// from_chars, so the C locale never changes the result ("1,5" is refused), and nan, inf and anything beyond float32 are refused.
+// A numeric key may carry a range (min/max, from the registry): a file value outside it is clamped to the nearer bound, with a warning.
+#include <cfloat>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <map>
@@ -11,8 +17,18 @@
 
 namespace wsp {
 
-enum KeyType : uint8_t { kBool = 0, kInt = 1, kStr = 2 };
-struct KeySpec { const char* id; uint8_t type; const char* def; };
+enum KeyType : uint8_t { kBool = 0, kInt = 1, kStr = 2, kFloat = 3 };
+// min/max: numeric keys only, nullptr = no bound. Appended with defaults, so a table that omits them still compiles (and -Wextra is quiet).
+struct KeySpec { const char* id; uint8_t type; const char* def; const char* min = nullptr; const char* max = nullptr; };
+
+// The number in a valid numeric text (Normalise checked it); false = not a number.
+inline bool NumberOf(const std::string& s, double& v) {
+    const char* b = s.c_str(); const char* e = b + s.size();
+    if (b != e && *b == '+') ++b;
+    if (b == e) return false;
+    const auto r = std::from_chars(b, e, v);
+    return r.ec == std::errc() && r.ptr == e;
+}
 
 struct Config {
     std::map<std::string, std::string> values;   // every registered key: the file's valid value or the default
@@ -23,6 +39,7 @@ struct Config {
 
     const std::string& Str(const std::string& id) const { static const std::string e; auto it = values.find(id); return it == values.end() ? e : it->second; }
     long Int(const std::string& id) const { return strtol(Str(id).c_str(), nullptr, 10); }
+    double Float(const std::string& id) const { double v = 0; return NumberOf(Str(id), v) ? v : 0.0; }
     bool Bool(const std::string& id) const { const std::string& s = Str(id); return s == "1" || s == "true"; }
 };
 
@@ -45,10 +62,40 @@ inline bool Normalise(uint8_t type, const std::string& in, std::string& out) {
     }
     if (in.empty()) return false;
     size_t i = (in[0] == '-' || in[0] == '+') ? 1 : 0;
+    auto digits = [&](size_t& k) { const size_t s = k; while (k < in.size() && in[k] >= '0' && in[k] <= '9') ++k; return k > s; };
+    if (type == kFloat) {   // [+-]digits[.digits][e[+-]digits], by hand: no locale, no hex, no nan/inf words
+        if (!digits(i)) return false;
+        if (i < in.size() && in[i] == '.') { ++i; if (!digits(i)) return false; }
+        if (i < in.size() && (in[i] == 'e' || in[i] == 'E')) { ++i; if (i < in.size() && (in[i] == '+' || in[i] == '-')) ++i; if (!digits(i)) return false; }
+        double v = 0;
+        if (i != in.size() || !NumberOf(in, v) || !std::isfinite(v) || std::fabs(v) > FLT_MAX) return false;
+        out = in[0] == '+' ? in.substr(1) : in;
+        return true;
+    }
     if (i == in.size() || in.size() > 11) return false;
     for (; i < in.size(); ++i) if (in[i] < '0' || in[i] > '9') return false;
-    out = std::to_string(strtol(in.c_str(), nullptr, 10));
+    const long long v = strtoll(in.c_str(), nullptr, 10);
+    if (v < -2147483648LL || v > 2147483647LL) return false;   // int32
+    out = std::to_string(v);
     return true;
+}
+
+inline const char* KeyTypeName(uint8_t type) {
+    return type == kBool ? "0/1" : type == kInt ? "integer (int32)" : type == kFloat ? "number" : "string";
+}
+
+// A numeric value outside the key's [min, max] becomes the nearer bound; returns the warning ("" = in range or not numeric).
+inline std::string ClampToRange(const KeySpec& k, std::string& value) {
+    if (k.type != kInt && k.type != kFloat) return "";
+    double v = 0, lo = 0, hi = 0;
+    if (!NumberOf(value, v)) return "";
+    const char* bound = nullptr; const char* what = nullptr;
+    if (k.min && NumberOf(k.min, lo) && v < lo) { bound = k.min; what = "below the minimum"; }
+    else if (k.max && NumberOf(k.max, hi) && v > hi) { bound = k.max; what = "above the maximum"; }
+    if (!bound) return "";
+    const std::string w = std::string(k.id) + "=" + value + " is " + what + " " + bound + ", clamped to " + bound;
+    value = bound;
+    return w;
 }
 
 // text = the whole file ("" with fileRead=false when it is missing: every key takes its default, no warning).
@@ -81,9 +128,13 @@ inline Config ParseConfig(const std::string& text, bool fileRead, const KeySpec*
                 else {
                     std::string norm;
                     if (c.fromFile[id]) c.warnings.push_back("line " + std::to_string(lineNo) + ": " + id + " set again, the later value wins");
-                    if (Normalise(it->second->type, val, norm)) { c.values[id] = norm; c.fromFile[id] = true; }
+                    if (Normalise(it->second->type, val, norm)) {
+                        const std::string w = ClampToRange(*it->second, norm);
+                        if (!w.empty()) c.warnings.push_back("line " + std::to_string(lineNo) + ": " + w);
+                        c.values[id] = norm; c.fromFile[id] = true;
+                    }
                     else c.warnings.push_back("line " + std::to_string(lineNo) + ": " + id + "='" + val + "' is not a valid " +
-                                              (it->second->type == kBool ? "0/1" : "integer") + ", using the default " + it->second->def);
+                                              KeyTypeName(it->second->type) + ", using the default " + it->second->def);
                 }
             }
         }

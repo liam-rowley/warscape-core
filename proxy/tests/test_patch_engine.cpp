@@ -143,6 +143,35 @@ int main(int argc, char** argv) {
         CHECK(gen::kSites[gen::kSiteCount].id == nullptr);   // sentinel
         for (size_t i = 0; i < gen::kSiteCount; ++i) { CHECK(gen::kSites[i].anchorLen > 0); CHECK(gen::kSites[i].len > 0); }
     }
+    {   // B41: an immediate right after an ABSOLUTE address, `mov dword [abs32], <float>` (c7 05 <abs32> <f32>), with a relocation
+        // on the address. The anchor holds the address as the FILE holds it (ReadUnrelocated takes the delta off), and the relocation
+        // ends where the value starts, so RelocsInRange does not count it against the value: no value_offset is needed.
+        tk::Image b = im;
+        b.Put(0x1200, { 0xC7, 0x05, 0x00, 0xB0, 0x40, 0x00, 0x00, 0x00, 0x80, 0x3E, 0x90 });   // mov dword [0x40b000], 0.25f ; nop
+        b.relocs.push_back(0x1202); b.BuildRelocs();
+        std::vector<SiteDef> x = s;
+        x.push_back(Patch("frame.time", 0x1200, { 0xC7, 0x05, 0x00, 0xB0, 0x40, 0x00 }, { 0x00, 0x00, 0x80, 0x3E }, { 0x00, 0x00, 0x00, 0x3F }));   // -> 0.5f
+        const bool on4[4] = { true, true, true, true };
+        for (uint32_t base : { 0x400000u, 0x01230000u, 0x7ff00000u }) {
+            std::vector<uint8_t> m = b.Mapped(base);
+            PeInfo pe; ImageView v = tk::MappedView(m, pe);
+            PatchPlan pl = MakePatchPlan(v, base - 0x400000u, x.data(), x.size(), on4);
+            if (pl.verdict != PlanVerdict::Apply) printf("    B41 at 0x%08x: %s\n", (unsigned)base, pl.reason.c_str());
+            CHECK(pl.verdict == PlanVerdict::Apply); CHECK(pl.sites[3].state == SiteState::Stock); CHECK_EQ(pl.sites[3].valueRva, 0x1206u);
+            CHECK_EQ(pl.nWrite, 3);
+            CHECK_EQ(Rd32(&m[0x1202]), 0x40B000u + (base - 0x400000u));   // the address really is relocated in memory
+            std::vector<uint8_t> before = m; FakeMem f;
+            CHECK(WritePlanAtomic(m.data(), pl, x.data(), f).ok);
+            size_t diff = 0; for (size_t i = 0x1200; i < 0x1210; ++i) diff += m[i] != before[i];
+            CHECK_EQ(diff, (size_t)2); CHECK(m[0x1208] == 0x00 && m[0x1209] == 0x3F);   // only the float's two changing bytes; the address untouched
+            CHECK_EQ(Rd32(&m[0x1202]), Rd32(&before[0x1202]));
+            PeInfo pe2; ImageView v2 = tk::MappedView(m, pe2);
+            CHECK(MakePatchPlan(v2, base - 0x400000u, x.data(), x.size(), on4).sites[3].state == SiteState::Done);
+            // an anchor that names the address as relocated in memory (not as the file holds it) fails under ASLR
+            std::vector<SiteDef> y = x; if (base != 0x400000u) { Wr32(&y[3].anchor[2], 0x40B000u + (base - 0x400000u));
+                CHECK(MakePatchPlan(tk::MappedView(before, pe), base - 0x400000u, y.data(), y.size(), on4).sites[3].state == SiteState::BadAnchor); }
+        }
+    }
     {   // all-or-nothing at WRITE time (J1 review finding 4): one Unprotect failure writes nothing and restores the others
         std::vector<uint8_t> m = im.Mapped(0x00610000u);
         PeInfo pe; ImageView v = tk::MappedView(m, pe);

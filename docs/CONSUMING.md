@@ -195,6 +195,9 @@ Proxy features a game turns on through its adapter and its config_keys rows each
 ([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
 ([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
 `GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).
+Engine sites and their config keys ([PROXY_SITES.md](PROXY_SITES.md)): from 0.16.0 a `patch` row may take its value from a numeric key
+(`value_key`, `value_scale`, `value_floor_stock`) and a key may carry `type`, `min` and `max`. Nothing changes for existing rows (their
+generated tables are byte-identical); after the pin bump run `python3 core/proxy/tools/gen_tables.py --check`.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
