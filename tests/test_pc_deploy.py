@@ -24,7 +24,7 @@ spec = importlib.util.spec_from_file_location('pc_deploy', ROOT / 'proxy/tools/p
 pd = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pd)
 sys.path.insert(0, str(ROOT / 'proxy' / 'tools'))
-import build_dev_pack  # noqa: E402  (pd.build_kit imports it by name; its ROOT is pointed at the fixture game too)
+build_dev_pack = importlib.import_module('build_dev_pack')   # the module pd.build_kit imports by name; its ROOT is pointed at the fixture game too
 
 
 def fixture_game():

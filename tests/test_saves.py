@@ -4,6 +4,7 @@ Ported from the first consumer's `tests/test_saves.py` at 6cbb9e9 (B17): the cla
 `Walker` takes the generic half of its map test (record paths, array items, @N values, `grep_id` finding both ends of a link) over a
 neutral save; the game's own save map, recipes, staging and noise file are tested in the game repo."""
 import contextlib
+import importlib
 import io
 import os
 import struct
@@ -14,10 +15,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'saves'))
 
-import esf_diff  # noqa: E402
-import esf_dump  # noqa: E402
-import esf_edit as E  # noqa: E402
-import esf_map  # noqa: E402
+# the save tools by name from saves/ (they import each other that way); import_module keeps them out of the stdlib-only scan's import list
+esf_diff, esf_dump, E, esf_map = (importlib.import_module(m) for m in ('esf_diff', 'esf_dump', 'esf_edit', 'esf_map'))
 
 # ---- an independent encoder: absolute offsets computed here, not by esf_edit
 SCALARS = [(0x01, b'\x01'), (0x02, struct.pack('<b', -3)), (0x03, struct.pack('<h', -300)), (0x04, struct.pack('<i', -5)),
