@@ -591,6 +591,59 @@ Test-Case 'display tool: -Origin plans refuse any rect that overlaps another dis
     Assert-Eq @(Get-OtherChanges $topoA $topoA '\\.\DISPLAY10').Count 0 'no change = nothing reported'
     Assert-Eq (Parse-Size '3840x2160').w 3840 'Parse-Size'; Assert-True ($null -eq (Parse-Size '3840')) 'bad size'; Assert-True ($null -eq (Parse-Size '1x1')) 'too small'
 }
+# ---- the restore planner (W5): a saved position that cannot apply must not keep the mode from coming back ------------------
+# The record is the real one from 2026-10-30 (a game left it pending; the 4K primary it touched was gone, the restore failed for 24 minutes).
+# The topology after that is not recorded anywhere: it is built from $topoA without the 4K primary, the Dell as primary and the virtual display
+# where the watcher log put it when the restore finally worked (2560,1440).
+$recJ44 = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixtures\vdisplay_restore_20261030_j44.json')) | ConvertFrom-Json
+$topoGone = @((FD '\\.\DISPLAY2' 'NVIDIA GeForce RTX 4090' 'Dell S2721DGF (HDMI2)' $true 2560 1440 0 0 144), (FD '\\.\DISPLAY11' $VDD 'Generic PnP Monitor' $false 3840 2160 2560 1440))
+Test-Case 'restore planner: the 2026-10-30 record (origin 3839,2160, the 4K primary gone) restores at the current origin, with the reason' {
+    $sel = Select-VirtualDisplay $topoGone $VDD
+    $pl = Get-RestorePlan $topoGone $sel $recJ44
+    Assert-Eq $pl.step 'current' 'the saved origin touches no display any more'
+    Assert-Match $pl.reason 'touches no other display' 'says why'
+    Assert-Eq $pl.x 2560 'keeps the current x'; Assert-Eq $pl.y 1440 'keeps the current y'
+}
+Test-Case 'restore planner: already back, a legal origin, an overlapping origin, a floating origin and a missing display' {
+    $sel = Select-VirtualDisplay $topoA $VDD
+    $back = [pscustomobject]@{ w = 3840; h = 2160; hz = 60; x = 3839; y = 2160 }
+    Assert-Eq (Get-RestorePlan $topoA $sel $back).step 'already' 'same mode and origin: nothing to do'
+    $other = [pscustomobject]@{ w = 1920; h = 1080; hz = 60; x = 3839; y = 2160 }
+    Assert-Eq (Get-RestorePlan $topoA $sel $other).step 'saved' 'another mode at an origin that touches the 4K primary: the saved origin is tried'
+    $ovl = [pscustomobject]@{ w = 3840; h = 2160; hz = 60; x = -2000; y = 400 }
+    $po = Get-RestorePlan $topoA $sel $ovl
+    Assert-Eq $po.step 'current' 'on top of the Dell'; Assert-Match $po.reason 'overlaps .*DISPLAY' 'names the display it would cover'
+    $far = [pscustomobject]@{ w = 3840; h = 2160; hz = 60; x = 12000; y = 12000 }
+    Assert-Eq (Get-RestorePlan $topoA $sel $far).step 'current' 'far outside the desktop: not contiguous'
+    $none = Select-VirtualDisplay @($topoA[0], $topoA[1]) $VDD
+    $pd = Get-RestorePlan @($topoA[0], $topoA[1]) $none $recJ44
+    Assert-Eq $pd.step 'drop' 'no virtual display: nothing to restore'; Assert-Match $pd.reason 'no attached display' 'the selection reason is passed through'
+    $solo = Select-VirtualDisplay @($topoA[0], (FD '\\.\DISPLAY3' $VDD 'x' $false 1920 1080 5000 5000)) $VDD
+    Assert-Eq (Get-RestorePlan @($topoA[0], (FD '\\.\DISPLAY3' $VDD 'x' $false 1920 1080 5000 5000)) $solo $far).step 'current' 'a floating display is moved back too'
+}
+Test-Case 'restore apply: first apply fails then the current origin succeeds; both fail; a legal first apply is the only call' {
+    $sel = Select-VirtualDisplay $topoGone $VDD
+    $calls = New-Object Collections.Generic.List[string]
+    $cur = { return @{ x = 2560; y = 1440 } }
+    $pl = Get-RestorePlan $topoA (Select-VirtualDisplay $topoA $VDD) ([pscustomobject]@{ w = 1920; h = 1080; hz = 60; x = 3839; y = 2160 })
+    Assert-Eq $pl.step 'saved' 'precondition: the saved origin looks legal'
+    $r = Invoke-RestoreApply $pl $recJ44 { param($w, $h, $hz, $x, $y) $calls.Add("$w,$h,$hz,$x,$y"); return @{ ok = ($x -eq 2560); exit = 5 } } $cur
+    Assert-True $r.ok 'the fallback worked'; Assert-Eq $r.used 'current' 'at the current origin'
+    Assert-Eq ($calls -join ' ') '3840,2160,60,3839,2160 3840,2160,60,2560,1440' 'saved origin first, then the current one, same mode'
+    $calls.Clear()
+    $r2 = Invoke-RestoreApply $pl $recJ44 { param($w, $h, $hz, $x, $y) $calls.Add("$x,$y"); return @{ ok = $false; exit = 5 } } $cur
+    Assert-True (-not $r2.ok) 'both failed'; Assert-Eq $r2.exit 5 'exit 5: the mode cannot be applied'; Assert-Eq $calls.Count 2 'two tries, no more'
+    $calls.Clear()
+    $r3 = Invoke-RestoreApply $pl $recJ44 { param($w, $h, $hz, $x, $y) $calls.Add("$x,$y"); return @{ ok = $true; exit = 0 } } $cur
+    Assert-Eq $r3.used 'saved' 'the saved origin applied'; Assert-Eq $calls.Count 1 'one call'
+    $plc = Get-RestorePlan $topoGone $sel $recJ44
+    $calls.Clear()
+    $r4 = Invoke-RestoreApply $plc $recJ44 { param($w, $h, $hz, $x, $y) $calls.Add("$x,$y"); return @{ ok = $true; exit = 0 } } $cur
+    Assert-Eq $calls.Count 1 'a plan that already says current applies once'; Assert-Eq $calls[0] '2560,1440' 'at the current origin'
+    Assert-Match $r4.reason 'touches no other display' 'the reason travels to the output line'
+    $r5 = Invoke-RestoreApply $pl $recJ44 { param($w, $h, $hz, $x, $y) return @{ ok = $false; exit = 6 } } { return $null }
+    Assert-True (-not $r5.ok) 'the display vanished between the tries'; Assert-Eq $r5.exit 5 'reported as an apply failure'
+}
 Test-Case 'display tool: -Check/-Set/-Origin/-Restore all select by name and refuse without a selection (static)' {
     $t = [IO.File]::ReadAllText((Join-Path $core 'vdisplay_probe.ps1'))
     foreach ($mode in 'if ($Check)', 'if ($Set)', 'if ($Origin)', 'if ($Restore)') {
