@@ -3,9 +3,10 @@
   "description": "The core half of napoleon-remastered J48: a virtual display restore whose saved origin cannot apply restores the mode at the current origin, a missing display drops the record, with host tests first.",
   "title": "Watcher virtual display restore whose position is gone",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W5/brief.md"
+  "brief": "jobs/W5/brief.md",
+  "report": "jobs/W5/report.md"
 }
