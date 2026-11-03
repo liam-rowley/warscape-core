@@ -3,9 +3,10 @@
   "description": "Covers B2, B3. A game schema with \"x-extends\": \"core:<name>\" plus extra properties, merged at load, so one extra field no longer means replacing a core schema (B2); a fires_with_any_modifier field on vanilla rows of the hotkeys schema, and the clash check compares the bare key for those (B3).",
   "title": "Core schema extension and modifier-agnostic hotkeys",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W14/brief.md"
+  "brief": "jobs/W14/brief.md",
+  "report": "jobs/W14/report.md"
 }
