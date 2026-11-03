@@ -1,5 +1,5 @@
-"""The second consumer: a minimal game repo (tests/fixture_game: ids F<n>, decisions X<n>, trailer Agent-Session, one input set, one hook module)
-copied into a throwaway git repo and driven through the real verbs. It proves the job pipeline is configuration plus hooks, not napoleon: no
+"""The second consumer: a minimal game repo (tests/fixture_game: ids F<n>, decisions X<n>, trailer Agent-Session, one input set, two game gate
+modules) copied into a throwaway git repo and driven through the real verbs. It proves the job pipeline is configuration plus gate modules, not napoleon: no
 napoleon wording, id or path is needed to run `jobs check|next|review|fix|view`, `policy`, `ci inputs|render`, or one dry autopilot tick. Real git,
 no network; `claude` and `gh` are fakes (napoleon J62).
 """
@@ -51,12 +51,12 @@ class Fixture(unittest.TestCase):
 
 
 class Verbs(Fixture):
-    def test_check_runs_the_core_rules_and_every_hook(self):
+    def test_check_runs_the_core_rules_and_the_jobs_stage(self):
         rc, out, err = self.wsc('jobs', 'check')
         self.assertEqual(rc, 0, err)
-        self.assertEqual(out.strip(), 'jobs check: 3 rows, ok, 2 fixture briefs')   # F1 is legacy for the brief hook, F2 passes it
+        self.assertEqual(out.strip(), 'jobs check: 3 rows, ok, 2 fixture briefs')   # F1 is legacy for the brief rule, F2 passes it
 
-    def test_a_brief_the_hook_refuses_and_a_blocked_row_fail_check(self):
+    def test_a_brief_the_jobs_stage_refuses_and_a_blocked_row_fail_check(self):
         with tempfile.TemporaryDirectory() as t:
             g = Path(t) / 'g'
             shutil.copytree(self.d, g, ignore=shutil.ignore_patterns('.git'))
@@ -180,7 +180,7 @@ class Policy(Fixture):
         rc, out, err = self.policy('foo/bar')
         self.assertIn('is not job/F<n>, brief/F<n>, plan/* or meta/*', err)
 
-    def test_the_fixtures_own_decision_prefix_and_its_hook_apply(self):
+    def test_the_fixtures_own_decision_prefix_and_its_policy_stage_apply(self):
         text = (FIXTURE / 'docs' / 'DECISIONS.md').read_text(encoding='utf-8')
         self.branch('plan/d', {'docs/DECISIONS.md': text + '| X4 | 2026-11-02 | Liam | skipped X3. | yes |\n'})
         rc, out, err = self.policy('plan/d')
@@ -267,6 +267,19 @@ class Ci(Fixture):
         self.assertEqual(rc, 0, out + err)
         self.assertIn('queue ok', out)
         self.assertIn('2 workflows match their render', out)
+
+    def test_the_fixtures_gates_stage_module_is_a_gate_line(self):
+        rc, out, err = self.wsc('gates', '--only', 'no_todo')
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn('ok   no_todo', out)
+        self.assertNotIn('fixture_rules', out)   # a jobs, policy and view module is no gates line
+        (self.d / 'docs' / 'todo.md').write_text('TODO\n', encoding='utf-8')
+        try:
+            rc, out, err = self.wsc('gates', '--only', 'no_todo')
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn('docs/todo.md', out)
+        finally:
+            (self.d / 'docs' / 'todo.md').unlink()
 
 
 if __name__ == '__main__':
