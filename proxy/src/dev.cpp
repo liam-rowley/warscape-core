@@ -5,7 +5,8 @@
 //
 // Threads: the engine thread (Lua pumps, Present: one thread, empire-remastered fact), the state thread (state.json ~2/s, scene
 // updates, the config autostart), the control thread (one request at a time, FIFO by file time). Shared state is under s_cs.
-// Control protocol (proxy/README.md "Dev control channel"): <ctl_dir>\<id>.cmd -> <ctl_dir>\<id>.done (JSON, written last).
+// Control protocol (proxy/README.md "Dev control channel"; the core's rules: docs/PROXY_CTL.md): <ctl_dir>\<id>.cmd -> <ctl_dir>\<id>.done
+// (JSON, written last). A request written before this process started is refused as stale, never run (W17).
 #include "dev.h"
 #include "capture.h"
 #include "ui_host.h"
@@ -343,6 +344,38 @@ Outcome Console(const std::string& id, const CtlRequest& r, double timeout) {
     return o;
 }
 
+// peek <site>[+|-<off>] [*[+|-<off>] ...] <len> (W17): reads, never writes. The base is an accepted engine site (SiteAddress: the
+// exe-identity guard passed and the patch engine accepted every site); every hop and the final range are checked readable first.
+// The reads run on this (the ctl) thread while the game runs: a value the game writes at the same time may come back torn.
+Outcome Peek(const CtlRequest& r) {
+    Outcome o;
+    const PeekArgs a = ParsePeekArgs(r.arg);   // ParseCtl accepted it
+    const GameAdapter& ad = Adapter();
+    bool known = false;
+    for (size_t i = 0; i < ad.nSites && !known; ++i) known = a.site == ad.sites[i].id;
+    if (!known) { o.status = "refused"; o.reason = "unknown site '" + a.site + "' (not in this game's engine_sites)"; return o; }
+    const uintptr_t site = SiteAddress(a.site.c_str());
+    if (!site) {
+        const std::string why = Rt().sitesWhy.empty() ? "the patch engine did not accept them" : Rt().sitesWhy;
+        o.status = "refused"; o.reason = Rt().sitesAccepted ? "site '" + a.site + "' was not checked ok" : "sites not accepted by the patch engine: " + why;
+        o.result = "\"site\": " + JStr(a.site);
+        return o;
+    }
+    auto readU32 = [](uint32_t at, uint32_t& v) {
+        if (!MemReadable((const void*)(uintptr_t)at, 4)) return false;
+        memcpy(&v, (const void*)(uintptr_t)at, 4);
+        return true;
+    };
+    PeekPath p = ResolvePeek((uint32_t)site, a, readU32);
+    uint8_t buf[512];
+    const bool read = p.error.empty() && MemReadable((const void*)(uintptr_t)p.addr, a.len);
+    if (p.error.empty() && !read) p.error = "the range " + Hex32(p.addr) + " + " + std::to_string(a.len) + " is not readable";
+    if (read) memcpy(buf, (const void*)(uintptr_t)p.addr, a.len);
+    o.result = PeekResultJson(a.site, (uint32_t)site, p, a.len, read ? buf : nullptr);
+    if (!read) { o.status = "failed"; o.reason = p.error; }
+    return o;
+}
+
 Outcome Execute(const std::string& id, const CtlRequest& r) {
     Outcome o; char b[300];
     const double timeout = r.timeoutS > 0 ? r.timeoutS : CtlDefaultTimeout(r.verb);
@@ -403,6 +436,7 @@ Outcome Execute(const std::string& id, const CtlRequest& r) {
         if (!GestureCtl(r.arg, timeout, o.result, why, refused)) { o.status = refused ? "refused" : "failed"; o.reason = why; }
         return o;
     }
+    if (r.verb == "peek") return Peek(r);
     if (r.verb == "exit") return o;   // the caller exits after writing the result
     o.status = "failed"; o.reason = "unknown verb"; return o;
 }
@@ -418,7 +452,7 @@ std::string ResultJson(const std::string& id, const std::string& line, const Out
     return j;
 }
 
-void HandleRequest(const std::wstring& dir, const std::wstring& file) {
+void HandleRequest(const std::wstring& dir, const std::wstring& file, int64_t writeMs) {   // writeMs: the .cmd's last write time
     const std::wstring stem = file.substr(0, file.size() - 4);   // without ".cmd"
     const std::string id = Narrow(stem);
     const std::wstring cmd = dir + file, taken = dir + stem + L".cmd.taken", done = dir + stem + L".done";
@@ -435,7 +469,9 @@ void HandleRequest(const std::wstring& dir, const std::wstring& file) {
         std::string idl = id + "\r\n"; HANDLE f = CreateFileW((dir + L"_ids.txt").c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (f != INVALID_HANDLE_VALUE) { DWORD wr; WriteFile(f, idl.data(), (DWORD)idl.size(), &wr, nullptr); CloseHandle(f); }
         r = ParseCtl(text);
-        if (!r.error.empty()) { o.status = "failed"; o.reason = r.error; }
+        // a request from an earlier launch (B40): taken, its id used, answered refused (a driver still waiting gets exit 2), never run
+        if (CtlStale(writeMs, s_tl.processStartMs)) { o.status = "refused"; o.reason = CtlStaleReason(writeMs, s_tl.processStartMs); }
+        else if (!r.error.empty()) { o.status = "failed"; o.reason = r.error; }
         else {
             LOGI("ctl: %s: %s", id.c_str(), TrimS(text).c_str());
             LogCaptureBegin();
@@ -457,6 +493,7 @@ DWORD WINAPI CtlThread(LPVOID) {
     CreateDirectoryW(dir.c_str(), nullptr);
     { std::string ids; if (ReadFileBytes(dir + L"_ids.txt", ids)) { size_t p = 0; while (p < ids.size()) { size_t e = ids.find('\n', p); if (e == std::string::npos) e = ids.size(); std::string s = TrimS(ids.substr(p, e - p)); if (!s.empty()) s_ids.insert(s); p = e + 1; } } }
     LOGI("ctl: watching %ls (%zu ids already used)", dir.c_str(), s_ids.size());
+    if (s_tl.processStartMs < 0) LOGW("ctl: the process start time is unknown (GetProcessTimes failed): stale requests from an earlier launch are not refused");
     for (;;) {
         WaitForSingleObject(s_ctlWake, 100);
         // the config autostart runs here too (one thing at a time)
@@ -480,7 +517,10 @@ DWORD WINAPI CtlThread(LPVOID) {
         } while (FindNextFileW(h, &fd));
         FindClose(h);
         std::sort(files.begin(), files.end());
-        for (auto& f : files) HandleRequest(dir, f.second);
+        for (auto& f : files) {
+            FILETIME ft; ft.dwLowDateTime = (DWORD)f.first; ft.dwHighDateTime = (DWORD)(f.first >> 32);
+            HandleRequest(dir, f.second, FileTimeToUnixMs(ft));
+        }
     }
 }
 
