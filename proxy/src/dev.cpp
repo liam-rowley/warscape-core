@@ -9,6 +9,7 @@
 #include "dev.h"
 #include "capture.h"
 #include "ui_host.h"
+#include "gesture_host.h"
 #ifndef PSAPI_VERSION
 #define PSAPI_VERSION 2
 #endif
@@ -395,6 +396,11 @@ Outcome Execute(const std::string& id, const CtlRequest& r) {
     if (r.verb == "ui") {   // ui ... (J30): ui_host.cpp; refused when ui.enabled is off
         std::string why;
         if (!UiCtl(r.arg, timeout, o.result, why)) { o.status = UiEnabled() ? "failed" : "refused"; o.reason = why; }
+        return o;
+    }
+    if (r.verb == "gesture") {   // gesture ... (W6): gesture.cpp; info answers even when the layer is inert (it says why)
+        std::string why; bool refused = false;
+        if (!GestureCtl(r.arg, timeout, o.result, why, refused)) { o.status = refused ? "refused" : "failed"; o.reason = why; }
         return o;
     }
     if (r.verb == "exit") return o;   // the caller exits after writing the result

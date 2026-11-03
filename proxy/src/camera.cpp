@@ -7,6 +7,7 @@
 #include "runtime.h"
 #include "dev.h"
 #include "camera.h"
+#include <cstring>
 
 namespace wsp {
 namespace {
@@ -73,6 +74,22 @@ void CameraInstall() {
     s_installed = true; s_sitesWhy.clear();
     LOGI("camera: install: owner global %p, battle +0x%x, controller +0x%x, mode +0x%x, SetTargetAndPosition %p (slot %d); sites %s %s %s",
          (void*)s_global, s_battleOff, s_ctrlOff, s_modeOff, (void*)s_setFn, s_ad->setSlot, s_ad->chainSite, s_ad->modeSite, s_ad->setSite);
+}
+
+// The read beside the set (W6, for a game's gesture adapter): the active mode found by the same chain and the same vtable check as
+// CameraSet, then its position and target, three floats each at the game's offsets inside the mode object. Reads only; any thread.
+bool CameraRead(int posOff, int targetOff, float pos[3], float target[3], std::string& why) {
+    Lock l;
+    if (!s_key) { why = "dev.camera=0"; return false; }
+    if (!s_installed) { why = "camera not installed: " + s_sitesWhy; return false; }
+    if (posOff < 0 || targetOff < 0 || posOff > 0x1000 || targetOff > 0x1000) { why = "camera read offsets out of range"; return false; }
+    uintptr_t mode = 0;
+    if (!Mode(mode, why)) return false;
+    if (!Readable(mode + (uintptr_t)posOff, 12) || !Readable(mode + (uintptr_t)targetOff, 12)) { why = "the camera mode's pose is not readable"; return false; }
+    memcpy(pos, (const void*)(mode + (uintptr_t)posOff), 12);
+    memcpy(target, (const void*)(mode + (uintptr_t)targetOff), 12);
+    for (int i = 0; i < 3; ++i) if (!std::isfinite(pos[i]) || !std::isfinite(target[i])) { why = "the camera mode's pose is not finite"; return false; }
+    return true;
 }
 
 bool CameraSet(const CamPose& p, std::string& why) {
