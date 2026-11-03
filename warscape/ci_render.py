@@ -10,6 +10,9 @@ text, which carries its own indentation). Blocks:
   if <set> [dispatch]          the `if:` line of a slow job: runs whenever `changes` failed, else when the set changed and has no pass marker
                                (`dispatch`: also on every workflow_dispatch run)
   pass_marker <set> [shell=S]  the last two steps of a slow job: write and save the pass marker for the set's input tree
+  fetch_cache                  three steps of a job that builds the proxy, before the build: the fetch cache key from the pins
+                               (proxy/tools/netfetch.py ci-cache), actions/cache of the raw downloads (continue-on-error: a cache
+                               fault never fails the job), then `netfetch.py prefetch` (the fetchers with a retry on network flakes)
   policy                       the `policy` job (pull requests; skips drafts); [ci] policy_extra_steps are inserted before the command
   notify gates needs=a,b,c     the failure-comment job of a push workflow, after the jobs a, b, c
   notify policy                the failure-comment job of the policy workflow
@@ -94,6 +97,18 @@ def block_pass_marker(cfg, name, shell=''):
     return '\n'.join(out)
 
 
+def block_fetch_cache(cfg):
+    tool = f"python3 {cfg['core'] + '/' if cfg['core'] else ''}proxy/tools/netfetch.py"
+    return '\n'.join([
+        '      # fetch cache (W21): the raw downloads (tarballs, RmlUi and FreeType checkouts), keyed by the pins and [ci] salt, never the patched',
+        "      # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte.",
+        '      - id: fetch_key', f'        run: {tool} ci-cache >> "$GITHUB_OUTPUT"',
+        '      - uses: actions/cache@v5', '        continue-on-error: true', '        with:', '          path: ${{ steps.fetch_key.outputs.paths }}',
+        f"          key: fetch-{cfg['salt']}-${{{{ steps.fetch_key.outputs.key }}}}",
+        '      # every source build.sh compiles, each fetcher retried on a network flake (build.sh then makes no network call)',
+        f'      - run: {tool} prefetch'])
+
+
 def block_policy(cfg):
     wsc = _wsc(cfg).replace('python3', 'python')
     out = ['  policy:', '    # Every pull request must be a reviewed job, a brief, a planning change or an infrastructure change (`wsc policy`).',
@@ -141,6 +156,8 @@ def expand(line, cfg):
         return block_if(cfg, pos[0], 'dispatch' in pos[1:])
     if name == 'pass_marker':
         return block_pass_marker(cfg, pos[0], kw.get('shell', ''))
+    if name == 'fetch_cache':
+        return block_fetch_cache(cfg)
     if name == 'policy':
         return block_policy(cfg)
     if name == 'notify':

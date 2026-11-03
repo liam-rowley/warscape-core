@@ -302,6 +302,213 @@ class Render(unittest.TestCase):
         from warscape.repo import Ctx
         self.assertEqual(ci_render.problems(Ctx.load(ROOT)), [])
 
+    # W21: a game renders the same blocks; a byte that changes fails its `ci_render` gate after a pin bump. Hashes taken on main before W21.
+    ALL_BLOCKS = ('jobs:\n{{wsc changes}}\n  a:\n{{wsc if native}}\n  b:\n{{wsc if host dispatch}}\n{{wsc pass_marker native}}\n'
+                  '{{wsc pass_marker host shell=bash}}\n{{wsc policy}}\n{{wsc notify gates needs=changes,a,b}}\n{{wsc notify policy}}\n')
+    GOLDEN = {'fixture_game gates.yml': '08df5d836f17dae07ffcb1e3a08ef17e152d82904397c44d679e9886d04855af',
+              'fixture_game policy.yml': 'fd4af2f072285b78862fec6b164003a5b6ce92d04b1cb56d82264c3fb5afbe9d',
+              'all blocks, a game': '53e941b58805bea2d3973ce0f5914ef85cfa2e8b0f472bf9fdcbc7fd294f8f7c',
+              'all blocks, the core': '7349ba6580dc6921190139b1257c028e9dbab54f3e8e64bc38a7d545483c7e15'}
+
+    def test_the_existing_blocks_render_byte_for_byte_as_before(self):
+        import hashlib
+        from warscape.repo import Ctx
+        fx = ROOT / 'tests' / 'fixture_game'
+        cfg = Ctx.load(fx).config['ci']
+        got = {f'fixture_game {n}': ci_render.render_text((fx / 'ci' / f'{n}.in').read_text(encoding='utf-8'), cfg, f'ci/{n}.in')
+               for n in ('gates.yml', 'policy.yml')}
+        got['all blocks, a game'] = self.render(self.ALL_BLOCKS)
+        got['all blocks, the core'] = self.render(self.ALL_BLOCKS, {**self.CFGR, 'core': '', 'token_secret': '', 'policy_extra_steps': ''})
+        self.assertEqual({k: hashlib.sha256(v.encode()).hexdigest() for k, v in got.items()}, self.GOLDEN)
+
+    def test_fetch_cache_keys_on_the_pins_and_never_fails_the_job(self):
+        for core, prefix in (('core', 'core/'), ('', '')):
+            text = self.render('    steps:\n{{wsc fetch_cache}}\n', {**self.CFGR, 'core': core, 'salt': '3'})
+            steps = re.split(r'^      - ', text, flags=re.M)[1:]
+            self.assertEqual(len(steps), 3, text)
+            key, cache, pre = steps
+            self.assertIn('id: fetch_key', key)
+            self.assertIn(f'run: python3 {prefix}proxy/tools/netfetch.py ci-cache >> "$GITHUB_OUTPUT"', key)
+            self.assertIn('uses: actions/cache@v5', cache)
+            self.assertIn('continue-on-error: true', cache)
+            self.assertIn('path: ${{ steps.fetch_key.outputs.paths }}', cache)
+            self.assertIn('key: fetch-3-${{ steps.fetch_key.outputs.key }}', cache)
+            self.assertIn(f'run: python3 {prefix}proxy/tools/netfetch.py prefetch', pre)
+            self.assertNotIn('continue-on-error', key + pre)   # a failed prefetch fails the job: the fetchers' sha checks judge every byte
+
+
+class CoreConfig(unittest.TestCase):
+    """The core's own [ci] (W21): which slow job a path runs, and the checks main must require."""
+    @classmethod
+    def setUpClass(cls):
+        from warscape.repo import Ctx
+        cls.cfg = Ctx.load(ROOT).config['ci']
+        cls.sets = ci.input_sets(cls.cfg)
+
+    def test_input_sets(self):
+        cases = {'docs/BACKLOG.md': set(), 'jobs/W21/report.md': set(), 'registries/jobs/W21.json': set(), 'README.md': set(),
+                 'proxy/src/x.cpp': {'proxy'}, 'proxy/tools/build.sh': {'proxy', 'harness'}, 'proxy/tests/null_game/proxy/null/adapter.cpp': {'proxy', 'harness'},
+                 'proxy/tests/host/t.cpp': {'proxy'}, 'harness/watcher.ps1': {'harness'}, 'tests/test_moved_tools.py': {'harness'},
+                 'warscape/ci.py': {'harness'}, 'ci/gates.yml.in': {'proxy', 'harness'}, '.github/workflows/gates.yml': {'proxy', 'harness'},
+                 'wsc.toml': {'proxy', 'harness'}}
+        for path, want in cases.items():
+            got = {k for k, v in ci.classify([path], self.sets).items() if v}
+            self.assertEqual(got, want, path)
+
+    def test_required_checks_and_no_artifacts(self):
+        self.assertEqual(self.cfg['required_checks'], ['gates (ubuntu-latest)', 'gates (windows-latest)', 'policy', 'proxy', 'harness-windows'])
+        self.assertEqual(self.cfg['artifacts'], {})
+        self.assertEqual(DEFAULTS['ci']['required_checks'], [])
+
+
+# ------------------------------------------------------------------ check-settings (W21, backlog B47): recorded `gh api` answers, 2026-11-03
+def rule_checks(*names, strict=False):
+    return {'type': 'required_status_checks', 'parameters': {'strict_required_status_checks_policy': strict, 'do_not_enforce_on_create': False,
+            'required_status_checks': [{'context': n, 'integration_id': 15368} for n in names]}, 'ruleset_source_type': 'Repository', 'ruleset_id': 1}
+
+
+def rule_pr(approvals):
+    return {'type': 'pull_request', 'parameters': {'required_approving_review_count': approvals, 'dismiss_stale_reviews_on_push': False,
+            'require_code_owner_review': False, 'require_last_push_approval': False, 'allowed_merge_methods': ['squash']}, 'ruleset_id': 1}
+
+
+BASIC = [{'type': 'deletion', 'ruleset_id': 1}, {'type': 'non_fast_forward', 'ruleset_id': 1}]
+NOT_PROTECTED = (1, '{"message":"Branch not protected","status":"404"}', 'gh: Branch not protected (HTTP 404)')
+CORE_ANSWERS = {'repos/o/core': (0, json.dumps({'allow_auto_merge': False}), ''),
+                'repos/o/core/rules/branches/main': (0, json.dumps(BASIC + [rule_checks('gates (ubuntu-latest)', 'gates (windows-latest)')]), ''),
+                'repos/o/core/branches/main/protection': NOT_PROTECTED}
+GAME_ANSWERS = {'repos/o/game': (0, json.dumps({'allow_auto_merge': True}), ''),
+                'repos/o/game/rules/branches/main': (0, json.dumps(BASIC + [rule_pr(0), rule_checks('gates', 'policy', 'proxy', 'harness-windows')]), ''),
+                'repos/o/game/branches/main/protection': NOT_PROTECTED}
+CORE_WF = {'gates.yml': 'name: gates\non:\n  push:\njobs:\n  changes:\n    runs-on: x\n  gates:\n    strategy:\n      matrix:\n        os: [a, b]\n'
+                        '    runs-on: x\n  proxy:\n    needs: changes\n  harness-windows:\n    needs: changes\n  notify:\n    needs: [gates]\n',
+           'policy.yml': 'name: policy\njobs:\n  policy:\n    runs-on: x\n  notify:\n    needs: [policy]\n'}
+GAME_WF = {'gates.yml': 'name: gates\njobs:\n  changes:\n    runs-on: x\n  gates:\n    runs-on: x\n  proxy:\n    runs-on: x\n  viewer:\n    runs-on: x\n'
+                        '  harness-windows:\n    runs-on: x\n  notify:\n    runs-on: x\n',
+           'policy.yml': CORE_WF['policy.yml']}
+CORE_REQUIRED = ['gates (ubuntu-latest)', 'gates (windows-latest)', 'policy', 'proxy', 'harness-windows']
+
+
+class FakeApi:
+    def __init__(self, answers, repo='o/core'):
+        self.answers, self.repo, self.calls = answers, repo, []
+
+    def __call__(self, argv, **kw):
+        self.calls.append(argv)
+        a = argv[1:]
+        if a[:2] == ['repo', 'view']:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'nameWithOwner': self.repo}), '')
+        if a[0] == 'api' and a[-1] in self.answers:
+            rc, out, err = self.answers[a[-1]]
+            return subprocess.CompletedProcess(argv, rc, out, err)
+        return subprocess.CompletedProcess(argv, 1, '', f'gh: Not Found (HTTP 404) {a}')
+
+
+class CheckSettings(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def go(self, answers, workflows, required=(), repo='', **kw):
+        from warscape import ci_settings
+        wf = self.root / '.github' / 'workflows'
+        wf.mkdir(parents=True, exist_ok=True)
+        for n, text in workflows.items():
+            (wf / n).write_text(text, encoding='utf-8')
+        cfg = {**DEFAULTS['ci'], 'workflows': list(workflows), 'required_checks': list(required)}
+        lines = []
+        gh = answers if callable(answers) else FakeApi(answers, kw.pop('default_repo', 'o/core'))
+        rc = ci_settings.check(cfg, self.root, repo=repo, branch='main', run=gh, out=lines.append)
+        self.gh = gh
+        return rc, '\n'.join(lines)
+
+    def problems(self, text):
+        return [l for l in text.splitlines() if l.startswith('problem:')]
+
+    def test_the_core_today_lacks_three_checks_and_auto_merge(self):
+        rc, out = self.go(CORE_ANSWERS, CORE_WF, CORE_REQUIRED)
+        self.assertEqual(rc, 1, out)
+        probs = self.problems(out)
+        self.assertEqual(len(probs), 4, out)
+        for name in ('`policy`', '`proxy`', '`harness-windows`', 'allow_auto_merge'):
+            self.assertTrue(any(name in p for p in probs), name)
+        self.assertIn('no classic branch protection', out)
+        self.assertIn('repos/o/core', ' '.join(' '.join(c) for c in self.gh.calls))   # the repo came from `gh repo view`
+        self.assertTrue(all(c[1] in ('api', 'repo') for c in self.gh.calls))
+        self.assertTrue(all('-X' not in c and '--method' not in c for c in self.gh.calls))   # read-only: GETs only
+
+    def test_the_core_after_the_owner_fixes_it(self):
+        answers = {**CORE_ANSWERS, 'repos/o/core': (0, json.dumps({'allow_auto_merge': True}), ''),
+                   'repos/o/core/rules/branches/main': (0, json.dumps(BASIC + [rule_checks(*CORE_REQUIRED)]), '')}
+        rc, out = self.go(answers, CORE_WF, CORE_REQUIRED)
+        self.assertEqual((rc, self.problems(out)), (0, []), out)
+
+    def test_the_game_explicit_only_notes_viewer(self):
+        rc, out = self.go(GAME_ANSWERS, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
+        self.assertEqual(rc, 0, out)
+        notes = [l for l in out.splitlines() if l.startswith('note:')]
+        self.assertTrue(any('`viewer`' in n for n in notes), out)
+        self.assertFalse(any('`gates`' in n or '`proxy`' in n for n in notes), out)
+        self.assertEqual(self.gh.calls[0][1], 'api')   # --repo given: no `gh repo view`
+
+    def test_derived_expected_checks_and_a_matrix_job(self):
+        rc, out = self.go(GAME_ANSWERS, GAME_WF, repo='o/game')   # no required_checks: every job but changes and notify is expected
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(len(self.problems(out)), 1)
+        self.assertIn('`viewer`', self.problems(out)[0])
+        rc, out = self.go(CORE_ANSWERS, CORE_WF)
+        self.assertIn('matrix job gates: list its checks in [ci] required_checks', out)
+        self.assertFalse(any('`gates' in p for p in self.problems(out)), out)
+
+    def test_a_renamed_required_check_and_approving_reviews_and_strict(self):
+        answers = {**GAME_ANSWERS, 'repos/o/game/rules/branches/main': (0, json.dumps(
+            BASIC + [rule_pr(1), rule_checks('gates', 'policy', 'proxy', 'harness', strict=True)]), '')}
+        rc, out = self.go(answers, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
+        self.assertEqual(rc, 1, out)
+        probs = '\n'.join(self.problems(out))
+        self.assertIn('`harness` (ruleset) is produced by no workflow job', probs)
+        self.assertIn('`harness-windows`', probs)
+        self.assertIn('1 approving review', probs)
+        self.assertIn('strict', '\n'.join(l for l in out.splitlines() if l.startswith('note:')))
+
+    def test_classic_protection_403_is_said_and_not_fatal_and_classic_checks_count(self):
+        answers = {**CORE_ANSWERS, 'repos/o/core/branches/main/protection': (1, '{"message":"Must have admin rights"}', 'gh: Must have admin rights to Repository. (HTTP 403)')}
+        rc, out = self.go(answers, CORE_WF, CORE_REQUIRED)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('HTTP 403', out)
+        self.assertEqual(len(self.problems(out)), 4, out)
+        classic = {'required_status_checks': {'strict': False, 'contexts': ['policy'], 'checks': [{'context': 'proxy', 'app_id': 1}]},
+                   'required_pull_request_reviews': {'required_approving_review_count': 2}}
+        answers = {**CORE_ANSWERS, 'repos/o/core/branches/main/protection': (0, json.dumps(classic), '')}
+        rc, out = self.go(answers, CORE_WF, CORE_REQUIRED)
+        probs = '\n'.join(self.problems(out))
+        self.assertNotIn('`policy`', probs)
+        self.assertNotIn('`proxy`', probs)
+        self.assertIn('`harness-windows`', probs)
+        self.assertIn('2 approving review', probs)
+
+    def test_cannot_read_exits_2(self):
+        def no_gh(argv, **kw):
+            raise FileNotFoundError('gh')
+        rc, out = self.go(no_gh, CORE_WF, CORE_REQUIRED)
+        self.assertEqual(rc, 2)
+        self.assertIn('gh', out)
+
+        def logged_out(argv, **kw):
+            return subprocess.CompletedProcess(argv, 4, '', 'To get started with GitHub CLI, please run:  gh auth login')
+        rc, out = self.go(logged_out, CORE_WF, CORE_REQUIRED)
+        self.assertEqual(rc, 2)
+        self.assertIn('gh auth login', out)
+        rc, out = self.go({}, CORE_WF, CORE_REQUIRED, repo='o/nope')
+        self.assertEqual(rc, 2, out)
+
+    def test_the_verb_has_the_action(self):
+        out = subprocess.run([sys.executable, str(ROOT / 'wsc.py'), 'ci', '--help'], capture_output=True, text=True, timeout=60)
+        self.assertIn('check-settings', out.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

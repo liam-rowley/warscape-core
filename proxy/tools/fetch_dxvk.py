@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import netfetch  # noqa: E402  (retry on network flakes, W21; a sha mismatch is never retried)
 
 ROOT = layout.game_root()   # downloads and output under the game repo's build/ (J12)
 # Stock DXVK, latest stable release when pinned (2026-10-28: tags v3.0 .. v3.1.1, no newer). Never a fork (proxy job decision).
@@ -49,13 +50,13 @@ def fetch(out):
         print(f'fetch_dxvk: DXVK {PIN["version"]} already in {out} (sha256 ok)')
         return dll, lic
     out.mkdir(parents=True, exist_ok=True)
-    tb = get(PIN['tarball_url'], PIN['tarball_sha256'])
+    tb = netfetch.retry(lambda: get(PIN['tarball_url'], PIN['tarball_sha256']), 'dxvk tarball')
     with tarfile.open(fileobj=io.BytesIO(tb), mode='r:gz') as t:
         b = t.extractfile(PIN['member']).read()
     if sha256(b) != PIN['d3d9_sha256']:
         raise SystemExit(f'fetch_dxvk: {PIN["member"]} has sha256 {sha256(b)}, pinned {PIN["d3d9_sha256"]}: refusing')
     dll.write_bytes(b)
-    lic.write_bytes(get(PIN['license_url'], PIN['license_sha256']))
+    lic.write_bytes(netfetch.retry(lambda: get(PIN['license_url'], PIN['license_sha256']), 'dxvk licence'))
     print(f'fetch_dxvk: DXVK {PIN["version"]} -> {dll} ({len(b)} bytes, sha256 {PIN["d3d9_sha256"][:12]}) + {lic.name}')
     return dll, lic
 

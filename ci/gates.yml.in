@@ -1,18 +1,26 @@
-# purpose: CI gates on every push and pull request: the full `wsc gates` set (schemas, registries, tool rows, strict JSON, Windows paths,
-#          doc size, undated "verified", conflict markers, line endings, host tests), on Linux and Windows.
+# purpose: CI gates on every push: the full `wsc gates` set (schemas, registries, tool rows, strict JSON, Windows paths, doc size, undated
+#          "verified", conflict markers, line endings, host tests) on Linux and Windows, the proxy DLL build and tests, the harness host tests.
 # usage: runs on GitHub Actions; locally: python3 wsc.py gates
-# when: automatic; require the "gates" checks in branch protection for main.
+# when: automatic; main's ruleset should require the checks in wsc.toml [ci] required_checks (`python3 wsc.py ci check-settings` says what is missing).
 # No installs: the core is Python 3.12 standard library only.
+# Generated blocks (`changes`, `notify`, each slow job's `if:` and pass-marker steps, the fetch cache) come from warscape/ci_render.py and
+# wsc.toml [ci]: edit this template, then run `python3 wsc.py ci render` and commit both files (the `ci_render` gate compares them).
+# One run per commit (napoleon J42, W21): push only, never pull_request. Checks attach to the commit, so a pull request shows this push run's
+# checks on its head; `policy` needs the pull request and lives in policy.yml. A newer push cancels an older run on the same branch, never on main.
+# Pass markers (napoleon J54, J57): `proxy` and `harness-windows` run only when their inputs (wsc.toml [ci] inputs) changed and that input tree
+# has not passed already; a skipped job counts as passed for required checks and auto-merge, so a docs-only branch does not wait for them.
+# Fail safe: each slow job's `if:` starts with `!cancelled()` and runs whenever `changes` did not succeed; a cache error, an empty hash or an
+# unreadable marker runs the job.
 name: gates
 on:
   push:
-  pull_request:
 permissions:
   contents: read
 concurrency:
   group: gates-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
+{{wsc changes}}
   gates:
     strategy:
       fail-fast: false
@@ -34,6 +42,8 @@ jobs:
   # prove the DLL does not depend on the checkout path, and smoke it under wine. WSP_BUILD_ID: build_id.py hashes a game repo's inputs,
   # and the null game is a folder inside this repo (backlog B16).
   proxy:
+    needs: changes
+{{wsc if proxy}}
     runs-on: ubuntu-24.04
     timeout-minutes: 30   # J30: RmlUi and FreeType compile twice (mingw for the DLL, g++ for the host tests)
     env:
@@ -44,6 +54,7 @@ jobs:
         with:
           fetch-depth: 1
       - run: sudo apt-get update -q && sudo apt-get install -y -q g++-mingw-w64-i686
+{{wsc fetch_cache}}
       - run: proxy/tools/build.sh all
       - name: the DLL is byte-identical when built from another checkout path
         run: proxy/tools/build.sh repro
@@ -52,10 +63,13 @@ jobs:
           sudo dpkg --add-architecture i386 && sudo apt-get update -q
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends wine wine32:i386
           proxy/tools/build.sh smoke
+{{wsc pass_marker proxy}}
 
   # harness-windows (napoleon J12): the watcher kit moved here. Its unit and integration host tests under Windows PowerShell 5.1 with
   # compiled fake games; the installer case builds a real harness kit from the null game's adapter.
   harness-windows:
+    needs: changes
+{{wsc if harness}}
     runs-on: windows-latest
     timeout-minutes: 25
     env:
@@ -87,7 +101,8 @@ jobs:
         timeout-minutes: 18
         shell: powershell
         run: ./harness/tests/Run-HostTests.ps1 -Suite all
+{{wsc pass_marker harness shell=bash}}
 
   # notify: the last job; a failure in any job above, on a branch with an open pull request, comments once there (a failed check leaves the
   # pull request open: this makes it impossible to miss). The only job with write access, and only to pull requests.
-{{wsc notify gates needs=gates,proxy,harness-windows}}
+{{wsc notify gates needs=changes,gates,proxy,harness-windows}}

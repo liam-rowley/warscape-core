@@ -3,9 +3,11 @@
   "description": "Covers B45, B47 and the fetch flakes found 2026-11-03. Adopt push-only triggers, pass markers and the changes job for the core's proxy and harness-windows jobs in ci/gates.yml.in (B45); a bounded retry and an actions/cache of the pinned downloads through a new proxy/tools/netfetch.py and a {{wsc fetch_cache}} render block, without editing a DLL input; a wsc ci check-settings verb that reads branch protection and rulesets with gh api and names the missing required checks and auto-merge settings (B47).",
   "title": "The core's CI: pipeline economies and a settings check",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W21/brief.md"
+  "brief": "jobs/W21/brief.md",
+  "report": "jobs/W21/report.md",
+  "review": "jobs/W21/review.md"
 }

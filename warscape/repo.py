@@ -92,6 +92,7 @@ DEFAULTS = {
         'workflows': [],                   # workflow file names rendered from <template_dir>/<name>.in (`wsc ci render`, gate `ci_render`)
         'template_dir': 'ci',
         'policy_extra_steps': '',          # YAML steps inserted before the policy command in the rendered `policy` job
+        'required_checks': [],             # checks main must require (`wsc ci check-settings`); [] = the workflows' job ids but changes, notify
     },
 }
 
