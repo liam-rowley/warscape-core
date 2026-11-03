@@ -74,6 +74,14 @@ class Parse(unittest.TestCase):
             self.assertEqual(a['component methods']['not_found'], ['Missing'])
 
 
+class Rel(unittest.TestCase):
+    def test_path_on_another_drive_stays_absolute(self):
+        # CI's Windows runner has the repo on D: and the temp dir on C: (os.path.relpath raises ValueError there)
+        from unittest import mock
+        with mock.patch.object(engine_api.os.path, 'relpath', side_effect=ValueError('other mount')):
+            self.assertTrue(engine_api._rel('x/y.log').endswith('/x/y.log'))
+
+
 class Samples(unittest.TestCase):
     def test_samples_and_impl(self):
         with tempfile.TemporaryDirectory() as d:

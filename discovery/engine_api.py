@@ -222,6 +222,14 @@ def safe_lua(doc):
             'return {\n' + items + '\n}\n')
 
 
+def _rel(p):
+    """A path relative to REPO as the committed outputs name it; a path on another drive (Windows) stays absolute."""
+    try:
+        return os.path.relpath(p, REPO).replace(os.sep, '/')
+    except ValueError:
+        return os.path.abspath(p).replace(os.sep, '/')
+
+
 def build(runs):
     logs = [p for run in runs for p in glob.glob(os.path.join(run, 'raw', '*_proxy.log'))]
     seen, totals, dropped = parse_logs(logs)
