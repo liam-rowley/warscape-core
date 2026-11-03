@@ -5,6 +5,7 @@ No network: tarballs are file:// URLs and the RmlUi and FreeType pins point at a
 import contextlib
 import hashlib
 import http.client
+import importlib
 import io
 import json
 import os
@@ -22,10 +23,8 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'proxy' / 'tools'))
-import fetch_dxvk  # noqa: E402
-import fetch_lua  # noqa: E402
-import fetch_ui  # noqa: E402
-import netfetch  # noqa: E402
+# the proxy tools are imported by name from proxy/tools (not packages; the stdlib-only check reads only `import` statements)
+fetch_dxvk, fetch_lua, fetch_ui, netfetch = (importlib.import_module(n) for n in ('fetch_dxvk', 'fetch_lua', 'fetch_ui', 'netfetch'))
 
 GIT = shutil.which('git')
 

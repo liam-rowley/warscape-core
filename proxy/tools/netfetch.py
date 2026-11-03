@@ -7,7 +7,7 @@ when: CI's proxy job runs both before `build.sh all` (the `{{wsc fetch_cache}}` 
 not-a-verb: needs network and writes build output, like the fetchers it wraps
 
 Why a wrapper and not a retry inside fetch_lua.py and fetch_ui.py: both are DLL build-id inputs (build_id.py INPUTS), so editing them
-gives every consumer a new build id for identical DLL bytes (and napoleon a 20-pass sitting, rule 79). The fetchers are idempotent:
+gives every consumer a new build id for identical DLL bytes (and a consumer's acceptance passes at its pin bump). The fetchers are idempotent:
 they skip what is present and sha-checked, so retrying a whole call equals retrying its failed request, and build.sh then finds
 everything in place and makes no network call. The sha256 checks stay in the fetchers; every mismatch and every failed patch raises
 SystemExit there, which is never retried (a wrong byte is never a flake).
