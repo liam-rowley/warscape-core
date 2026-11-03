@@ -79,10 +79,19 @@ class Rows(RegistryCase):
 
 
 class Rules(RegistryCase):
-    def add_hotkey(self, rid, binding, context='battle', source='mod'):
+    def add_hotkey(self, rid, binding, context='battle', source='mod', **extra):
         reg = self.regs()['hotkeys']
-        reg.add({'id': rid, 'description': 'd', 'binding': binding, 'action': 'act', 'context': context, 'source': source})
+        reg.add({'id': rid, 'description': 'd', 'binding': binding, 'action': 'act', 'context': context, 'source': source, **extra})
         reg.save(); reg.write_view()
+
+    def clash_with(self, binding, context='battle'):
+        """The clash errors once a row `binding` in `context` joins the registry; the row is removed again afterwards."""
+        self.add_hotkey('probe', binding, context)
+        errs = [e for e in self.errors('hotkeys') if "'probe'" in e]
+        reg = self.regs()['hotkeys']
+        reg.rows = [r for r in reg.rows if r['id'] != 'probe']
+        reg.save(); reg.write_view()
+        return errs
 
     def test_hotkey_binding_form_and_reserved_keys(self):
         for b in ('Alt+F4', 'Alt+Ctrl+S', 'ctrl+s', 'Ctrl+Alt+Delete'):
@@ -101,6 +110,45 @@ class Rules(RegistryCase):
         errs = self.errors('hotkeys')
         self.assertEqual(len(errs), 2, errs)
         self.assertTrue(all('clash' in e for e in errs))
+
+    def test_bare_key_that_fires_with_any_modifier(self):
+        self.add_hotkey('v.space', 'Space', source='vanilla', fires_with='any_modifier')
+        self.assertEqual(self.errors('hotkeys'), [])
+        for b in ('Alt+Space', 'Ctrl+Shift+Space', 'Space'):
+            errs = self.clash_with(b)
+            self.assertEqual(len(errs), 1, (b, errs))
+        self.assertIn('Alt+Space reaches Space, which fires with any modifier', self.clash_with('Alt+Space')[0])
+        self.assertEqual(len(self.clash_with('Alt+Space', 'global')), 1)     # through the `global` wildcard
+        self.assertEqual(self.clash_with('Alt+Space', 'campaign'), [])      # another context
+        self.assertEqual(self.clash_with('Alt+S'), [])                       # another key
+        self.assertEqual(self.clash_with('Alt+Spacebar'), [])               # a key is compared whole, not as a prefix
+
+    def test_bare_key_that_fires_alone_or_with_shift(self):
+        self.add_hotkey('v.s', 'S', source='vanilla', fires_with='shift')
+        self.assertEqual(len(self.clash_with('Shift+S')), 1)
+        self.assertIn('Shift+S reaches S, which fires alone or with Shift', self.clash_with('Shift+S')[0])
+        self.assertEqual(len(self.clash_with('S')), 1)
+        self.assertEqual(self.clash_with('Ctrl+S'), [])
+        self.assertEqual(self.clash_with('Ctrl+Shift+S'), [])
+        self.assertEqual(self.clash_with('Alt+S'), [])
+
+    def test_without_the_flag_the_match_stays_exact(self):
+        self.add_hotkey('v.space', 'Space', source='vanilla')
+        self.assertEqual(self.clash_with('Alt+Space'), [])
+        self.assertEqual(len(self.clash_with('Space')), 1)
+
+    def test_fires_with_needs_a_bare_binding(self):
+        for b in ('Alt+Space', 'Shift+S'):
+            with self.assertRaises(RegistryError, msg=b):
+                self.add_hotkey('h', b, fires_with='any_modifier')
+        with self.assertRaises(RegistryError):
+            self.add_hotkey('h', 'Space', fires_with='ctrl')
+        self.add_hotkey('m', 'Insert', source='mod', fires_with='any_modifier')   # any source
+
+    def test_two_flagged_rows_on_one_key_clash(self):
+        self.add_hotkey('a', 'Space', source='vanilla', fires_with='any_modifier')
+        self.add_hotkey('b', 'Space', source='mod', fires_with='shift')
+        self.assertEqual(len(self.errors('hotkeys')), 1)
 
     def test_cross_registry_refs(self):
         sites = self.regs()['engine_sites']

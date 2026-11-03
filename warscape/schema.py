@@ -5,7 +5,7 @@ Why a subset and not a dependency: CI runs with no installs. The subset covers w
 Schemas written against it are plain JSON Schema, so swapping in a full validator later (the smallest candidate is
 `fastjsonschema`, pure Python, no dependencies) needs no schema change.
 
-Keywords prefixed `x-` are registry extensions read by `warscape.registry` (x-view, x-unique, x-ref, x-source); the validator skips them.
+Keywords prefixed `x-` are registry extensions read by `warscape.registry` (x-view, x-unique, x-wildcard, x-chord, x-ref, x-source, x-extends); the validator skips them.
 """
 import datetime
 import json

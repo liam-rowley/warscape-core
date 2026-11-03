@@ -50,18 +50,23 @@ A repo declares its registries in `wsc.toml`; the core ships these schemas (`sch
 | `ui_elements` | screen, vanilla source, data contract, interactions, pipeline status |
 | `engine_sites` | RVA, anchor and stock bytes, patch or hook, config key, `verified` (date, run) |
 | `config_keys` | default, release value, owner, what it does |
-| `hotkeys` | binding, action, context, source; clashes fail the gate |
+| `hotkeys` | binding, action, context, source, how a bare key fires (`fires_with`); clashes fail the gate |
 | `engine_facts` | claim, state (`verified`, `open`, `refuted`), evidence run, date |
 
-The schema subset and the registry extensions (`x-view`, `x-unique`, `x-ref`, `x-source`) are documented in the docstrings of
-`warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
+The schema subset and the registry extensions (`x-view`, `x-unique`, `x-wildcard`, `x-chord`, `x-ref`, `x-source`, `x-extends`) are
+documented in the docstrings of `warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
+Two of them in a sentence each: `x-chord` makes the `x-unique` check read a field as `Ctrl+Alt+Shift+Key` chords, so a bare key flagged
+to fire with any modifier (or alone or with Shift) clashes with the chords it fires for (`hotkeys`: vanilla `Space` with
+`fires_with: any_modifier` takes a mod `Alt+Space`). `x-extends: "core:<name>"` lets a game schema add fields to a core schema,
+merged at load; canonical key order is then the core's fields first, then the game's (`docs/CONSUMING.md`, "Extending a core schema").
 
 ## Gates
 
 `wsc gates` runs, deterministically and without network: `schemas`, `registries`, `tools` (header and row for every tool), `json`
 (strict JSON and JSONL), `windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
-`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the pin is a `vX.Y.Z` tag on
-the core checkout; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone) and `tests`
+`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
+unmodified, its `VERSION` is the pinned `vX.Y.Z`, and HEAD is that tag whenever the tag is in the checkout; a shallow checkout without
+it is compared by `VERSION` only, C21; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.
 
 ## Layout

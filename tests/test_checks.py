@@ -120,17 +120,30 @@ class VerifiedDates(unittest.TestCase):
 
 class CorePin(unittest.TestCase):
     """backlog B5: the pin is checked against the tag, not only VERSION; tags are `vX.Y.Z`, lower-case v."""
+    # pin_problems(want, version, pin_commit, head, shallow, any_tags, head_tags): A and B are commits
     def test_pin_matches_tag_and_version(self):
         from warscape.gates import pin_problems
-        self.assertEqual(pin_problems('v0.1.0', '0.1.0', ['v0.1.0'], True), [])
-        self.assertEqual(pin_problems('v0.1.0', '0.1.0', [], False), [])            # shallow CI checkout: no tags, VERSION only
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', 'A', 'A', False, True, ['v0.1.0']), [])
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', None, 'A', False, False), [])          # no tags at all: VERSION only
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', 'A', 'A', True, True, ['v0.1.0']), [])  # shallow with the tag fetched
 
     def test_bad_pins_fail(self):
         from warscape.gates import pin_problems
-        self.assertTrue(any('lower-case v' in e for e in pin_problems('V0.1.0', '0.1.0', ['V0.1.0'], True)))
-        self.assertTrue(any('not the pinned tag v0.1.0' in e for e in pin_problems('v0.1.0', '0.1.0', ['V0.1.0'], True)))
-        self.assertTrue(any('untagged commit' in e for e in pin_problems('v0.1.0', '0.1.0', [], True)))
-        self.assertTrue(any('checkout is 0.2.0' in e for e in pin_problems('v0.1.0', '0.2.0', ['v0.1.0'], True)))
+        self.assertTrue(any('lower-case v' in e for e in pin_problems('V0.1.0', '0.1.0', 'A', 'A', False, True, ['V0.1.0'])))
+        self.assertTrue(any('not the pinned tag v0.1.0' in e for e in pin_problems('v0.1.0', '0.1.0', 'A', 'B', False, True, ['V0.1.0'])))
+        self.assertTrue(any('untagged commit' in e for e in pin_problems('v0.1.0', '0.1.0', 'A', 'B', False, True)))
+        self.assertTrue(any('checkout is 0.2.0' in e for e in pin_problems('v0.1.0', '0.2.0', 'A', 'A', False, True, ['v0.1.0'])))
+
+    def test_shallow_rule(self):
+        """core W11 (B12): a present tag is always checked against HEAD; a missing one is VERSION only in a shallow checkout and nowhere else."""
+        from warscape.gates import pin_check, pin_problems
+        self.assertEqual([pin_check('A', True, True), pin_check(None, True, True), pin_check(None, False, True), pin_check(None, False, False)],
+                         ['tag', 'shallow', 'missing', 'none'])
+        self.assertEqual(pin_problems('v0.1.0', '0.1.0', None, 'A', True, True, ['v0.2.0']), [])        # depth-1 CI submodule
+        self.assertTrue(any('untagged commit' in e for e in pin_problems('v0.1.0', '0.1.0', 'A', 'B', True, True)))
+        self.assertTrue(any('checkout is 0.2.0' in e for e in pin_problems('v0.1.0', '0.2.0', None, 'A', True, True)))
+        miss = pin_problems('v0.1.0', '0.1.0', None, 'A', False, True, ['v0.2.0'], core_dir='vendor/core')
+        self.assertTrue(any('git -C vendor/core fetch --tags' in e for e in miss), miss)
 
     def test_core_tags_match_version(self):
         from warscape.gates import core_tag_problems
