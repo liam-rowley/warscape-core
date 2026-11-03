@@ -464,6 +464,28 @@ try {
         Clear-Lock
         [IO.File]::WriteAllBytes($prefs, $oddPrefs); Remove-Item -LiteralPath $hdll -Force -ErrorAction SilentlyContinue
     }
+    Test-Case 'headless restore: a pending record whose virtual display is gone (tool exit 3) is moved aside as .dropped, logged, and the next launch is not refused for it (W5)' {
+        $rec = Join-Path $root 'vdisplay_restore.json'
+        $dropped = Join-Path $root '_to_delete'
+        $before = @(Get-ChildItem -LiteralPath $dropped -Filter 'vdisplay_restore_*.json.dropped' -ErrorAction SilentlyContinue).Count
+        Set-Lock 'ci48'; Set-Vd 'none'; Set-Proxy $true; Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
+        [IO.File]::WriteAllText($rec, '{"name":"Virtual Display Driver","w":3840,"h":2160,"hz":60,"x":3839,"y":2160,"saved_utc":"2026-10-30T16:55:49Z"}', $Utf8NoBom)
+        (Get-Item -LiteralPath $rec).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-1)   # left by an earlier lock
+        $mark = Log-Mark
+        $r = Run-Job 'launch owner=ci48' 'hdr' 60
+        Assert-Eq $r.d.status 'refused' "the display is still missing, so -Check refuses ($($r.out))"
+        Assert-NotMatch $r.d.reason 'earlier display mode could not be restored' 'but not because of the stale record'
+        Assert-True (-not (Test-Path -LiteralPath $rec)) 'the record was moved away'
+        Assert-Eq @(Get-ChildItem -LiteralPath $dropped -Filter 'vdisplay_restore_*.json.dropped').Count ($before + 1) 'moved to _to_delete as .dropped'
+        Assert-Match (Get-LogSince $mark) 'vdisplay: pending restore dropped \(no virtual display: .*VIRTUAL MISSING' 'the log says so'
+        Assert-NotMatch (Get-LogSince $mark) 'RESTORE FAILED' 'and does not call it a failure'
+        # the same by housekeeping, with no launch and no lock
+        Clear-Lock
+        [IO.File]::WriteAllText($rec, '{"name":"Virtual Display Driver","w":3840,"h":2160,"hz":60,"x":3839,"y":2160,"saved_utc":"2026-10-30T16:55:49Z"}', $Utf8NoBom)
+        Wait-Until { -not (Test-Path -LiteralPath $rec) } 30 'housekeeping drops the record' | Out-Null
+        Assert-Eq @(Get-ChildItem -LiteralPath $dropped -Filter 'vdisplay_restore_*.json.dropped').Count ($before + 2) 'a second .dropped'
+        Set-Vd '3840x2160'
+    }
     Test-Case 'headless launch: no virtual display, or a proxy without the status-file marker, is refused before the game starts (fail closed)' {
         Set-Lock 'ci11'; Set-Vd 'none'; Set-Proxy $true
         $r = Run-Job 'launch owner=ci11' 'hnv' 60
