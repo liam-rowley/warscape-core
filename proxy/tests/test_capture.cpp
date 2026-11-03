@@ -5,11 +5,148 @@
 #include "testkit.h"
 #include "capture.h"
 #include "devcore.h"
+#include <atomic>
+#include <random>
+#include <thread>
 
 using namespace wsp;
 
+// The capture's state word on the host: std::atomic<long> with InterlockedCompareExchange's contract (Cas returns the value it found).
+struct TestCell {
+    std::atomic<long> v{kCapIdle};
+    long Load() const { return v.load(); }
+    long Cas(long expected, long desired) { long e = expected; v.compare_exchange_strong(e, desired); return e; }
+};
+// A render thread that read the state before the ctl thread changed it: Load gives the stale value, the CAS sees the real one.
+struct StaleCell : TestCell { long stale = kCapArmed; long Load() const { return stale; } };
+
+// W19 (B32): a "render" thread stepping Presents and a "ctl" thread arming and timing out at random, seeded. Returns the number of
+// invariant breaks; the outcome counts say every path was taken.
+struct StressOut { int errors = 0, rounds = 0, done = 0, nothing = 0, abandoned = 0, refused = 0, lateFinish = 0, closedAbandoned = 0; long finalState = -1; };
+static StressOut Stress(unsigned seed, int rounds) {
+    TestCell c;
+    std::atomic<int> errors{0}, waiting{0}, ctlFrames{1}, closedAbandoned{0}, lateFinish{0};
+    std::atomic<long> ctlId{0}, doneId{0};
+    std::atomic<bool> stop{false};
+    std::thread render([&] {
+        std::mt19937 rng(seed * 2 + 1);
+        bool open = false; int frame = 0, frames = 0; long id = 0, idle = 0;
+        while (!(stop.load() && c.Load() == kCapIdle && !open) && idle < 100000) {
+            if (stop.load()) ++idle;
+            switch (CapOnPresent(c, frame, frames)) {
+            case CapStep::start:   // a recording starts only with a waiter and never over another
+                if (open || waiting.load() != 1) ++errors;
+                open = true; frame = 0; frames = ctlFrames.load(); id = ctlId.load();
+                break;
+            case CapStep::next_frame: if (!open) ++errors; ++frame; break;
+            case CapStep::finish:
+                if (!open) ++errors;
+                open = false; doneId.store(id);
+                if (!CapFinish(c)) ++lateFinish;   // the ctl abandoned it meanwhile: the render side closed and left Idle
+                break;
+            case CapStep::close_abandoned:
+                if (!open) ++errors;
+                open = false; ++closedAbandoned;
+                if (!CapClosed(c)) ++errors;
+                break;
+            case CapStep::none: break;
+            }
+            const unsigned r = rng() % 16;
+            for (unsigned i = 0, n = r == 0 ? 200 : r; i < n; ++i) std::this_thread::yield();
+        }
+        if (open || c.Load() != kCapIdle) ++errors;   // a state no one leaves, or a file left open
+    });
+    StressOut o;
+    std::mt19937 rng(seed);
+    auto waitDone = [&](unsigned polls) { for (unsigned i = 0; i < polls; ++i) { if (c.Load() == kCapDone) return true; std::this_thread::yield(); } return c.Load() == kCapDone; };
+    for (int round = 1; round <= rounds; ++round) {
+        if (c.Load() != kCapIdle) { ++o.refused; std::this_thread::yield(); continue; }   // the ctl's early refusal: it writes nothing shared unless Idle
+        ctlFrames.store(1 + (int)(rng() % 3)); ctlId.store(round);
+        waiting.store(1);
+        if (CapArmFromCtl(c) != CapArm::ok) { ++errors; waiting.store(0); continue; }
+        ++o.rounds;
+        CapEnd e = waitDone(rng() % 4 == 0 ? 0 : rng() % 24) ? CapEnd::done : CapOnTimeout(c, false);
+        if (e == CapEnd::wait_more) e = waitDone(rng() % 24) ? CapEnd::done : CapOnTimeout(c, true);
+        if (e == CapEnd::done) {
+            if (doneId.load() != round) ++errors;   // the result read is this capture's
+            waiting.store(0);
+            if (!CapRelease(c)) ++errors;
+            ++o.done;
+        } else if (e == CapEnd::nothing) { waiting.store(0); ++o.nothing; }
+        else if (e == CapEnd::abandoned) { waiting.store(0); ++o.abandoned; }
+        else ++errors;
+    }
+    stop.store(true);
+    render.join();
+    o.errors = errors.load(); o.lateFinish = lateFinish.load(); o.closedAbandoned = closedAbandoned.load(); o.finalState = c.Load();
+    return o;
+}
+
 int main(int argc, char** argv) {
     tk::Args(argc, argv);
+    {   // W19 (B32): every transition of the capture state machine, one thread
+        TestCell c;
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && c.Load() == kCapIdle);           // Idle: a Present does nothing
+        CHECK(CapArmFromCtl(c) == CapArm::ok && c.Load() == kCapArmed);                  // ctl: Idle -> Armed
+        CHECK(CapArmFromCtl(c) == CapArm::running && c.Load() == kCapArmed);
+        CHECK(CapOnPresent(c, 0, 2) == CapStep::start && c.Load() == kCapRecording);     // render: Armed -> Recording first
+        CHECK(CapArmFromCtl(c) == CapArm::running);
+        CHECK(CapOnPresent(c, 0, 2) == CapStep::next_frame && c.Load() == kCapRecording);
+        CHECK(CapOnPresent(c, 1, 2) == CapStep::finish && c.Load() == kCapRecording);    // the file closes before the state moves
+        CHECK(CapFinish(c) && c.Load() == kCapDone);                                     // render: Recording -> Done
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && CapArmFromCtl(c) == CapArm::running && c.Load() == kCapDone);
+        CHECK(CapRelease(c) && c.Load() == kCapIdle);                                    // ctl, after reading the result: Done -> Idle
+        CHECK(!CapRelease(c) && c.Load() == kCapIdle);
+    }
+    {   // the first wait times out with nobody presenting: Armed -> Idle, nothing recorded, and a later Present does nothing
+        TestCell c; CapArmFromCtl(c);
+        CHECK(CapOnTimeout(c, false) == CapEnd::nothing && c.Load() == kCapIdle);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && c.Load() == kCapIdle);
+    }
+    {   // race 1: the render side read Armed, then the ctl withdrew (Armed -> Idle) before its CAS: it does nothing at all
+        StaleCell c; c.v.store(kCapIdle);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && c.v.load() == kCapIdle);
+    }
+    {   // the first timeout lost to the render thread: wait the second; the second times out: Recording -> Abandoned, closed at the next Present
+        TestCell c; CapArmFromCtl(c); CapOnPresent(c, 0, 3);
+        CHECK(CapOnTimeout(c, false) == CapEnd::wait_more && c.Load() == kCapRecording);
+        CHECK(CapOnTimeout(c, true) == CapEnd::abandoned && c.Load() == kCapAbandoned);
+        CHECK(CapArmFromCtl(c) == CapArm::closing && c.Load() == kCapAbandoned);         // refused until the render thread closed it
+        CHECK(CapOnPresent(c, 0, 3) == CapStep::close_abandoned && c.Load() == kCapAbandoned);
+        CHECK(CapClosed(c) && c.Load() == kCapIdle);                                     // render: Abandoned -> Idle, nobody waits
+        CHECK(CapArmFromCtl(c) == CapArm::ok);
+    }
+    {   // race 2, Done against Abandoned: the render finished just before the ctl's timeout: reported normally
+        TestCell c; CapArmFromCtl(c); CapOnPresent(c, 0, 1);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::finish && CapFinish(c));
+        CHECK(CapOnTimeout(c, false) == CapEnd::done && c.Load() == kCapDone);
+        CHECK(CapOnTimeout(c, true) == CapEnd::done && c.Load() == kCapDone);
+        CHECK(CapRelease(c) && c.Load() == kCapIdle);
+    }
+    {   // ... and the other order: the ctl abandoned just before the render's Recording -> Done: the render closes and leaves Idle
+        TestCell c; CapArmFromCtl(c); CapOnPresent(c, 0, 1);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::finish);
+        CHECK(CapOnTimeout(c, true) == CapEnd::abandoned);
+        CHECK(!CapFinish(c) && c.Load() == kCapIdle);
+        CHECK(CapArmFromCtl(c) == CapArm::ok);
+    }
+    {   // the refusals and the state names the results carry
+        CHECK_EQ(std::string(CapRefusal(CapArm::running)), std::string("a capture is running"));
+        CHECK_EQ(std::string(CapRefusal(CapArm::closing)), std::string("the previous capture is still closing: it ends at the next Present"));
+        CHECK_EQ(std::string(CapStateName(kCapAbandoned)), std::string("abandoned"));
+        CHECK_EQ(std::string(CapStateName(kCapIdle)), std::string("idle"));
+    }
+    {   // two threads, seeded: never a state no one leaves, never a recording without a waiter, never two at once, every path taken
+        int errors = 0, rounds = 0, done = 0, nothing = 0, abandoned = 0;
+        for (unsigned seed = 1; seed <= 4; ++seed) {
+            const StressOut o = Stress(seed, 1500);
+            if (o.errors || o.finalState != kCapIdle) printf("  stress seed %u: %d errors, final state %ld\n", seed, o.errors, o.finalState);
+            errors += o.errors + (o.finalState != kCapIdle); rounds += o.rounds; done += o.done; nothing += o.nothing; abandoned += o.abandoned;
+        }
+        printf("  stress: %d captures, %d done, %d nothing recorded, %d abandoned\n", rounds, done, nothing, abandoned);
+        CHECK_EQ(errors, 0);
+        CHECK(done > 0 && nothing > 0 && abandoned > 0);
+    }
     {   // canonical FNV-1a-64 (offset basis 14695981039346656037, not the dropped-digit 1469598103934665603)
         CHECK_EQ(Hex64(Fnv1a64("", 0)), std::string("cbf29ce484222325"));
         CHECK_EQ(Hex64(Fnv1a64("a", 1)), std::string("af63dc4c8601ec8c"));
