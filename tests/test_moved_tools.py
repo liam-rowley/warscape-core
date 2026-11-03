@@ -1,18 +1,24 @@
 """Host tests for the proxy and harness tools that moved here from napoleon-remastered (J12): where they find the game
 (proxy/tools/layout.py), the DLL build id in either layout (proxy/tools/build_id.py), the exclusive game lock (harness/job.sh), and
-that nothing in the moved code names a game. The tools' fuller tests run in the game repo against its real adapter; the proxy's C++ host
-tests and the harness PowerShell tests run in CI's proxy and harness-windows jobs against the null game (proxy/tests/null_game)."""
+that nothing in the moved code names a game. The tools' fuller host tests run here too, one file per tool against the null game or temp
+folders (tests/test_pc_deploy.py, test_ctl.py, test_acceptance.py, test_saves.py, test_job_sh.py, test_gitbash.py; B17); the proxy's C++
+host tests and the harness PowerShell tests run in CI's proxy and harness-windows jobs against the null game (proxy/tests/null_game)."""
 import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from warscape import gitbash  # noqa: E402
 
 
 def _load(name, rel):
@@ -118,22 +124,11 @@ class BuildId(Env):
         self.assertEqual(bi.build_id(g), flat_id + '-dirty')
 
 
-def git_bash():
-    """bash for the job.sh test: Git Bash on Windows (never the WSL launcher in System32), any bash elsewhere."""
-    if os.name != 'nt':
-        return shutil.which('bash')
-    for c in (r'C:\Program Files\Git\bin\bash.exe', r'C:\Program Files\Git\usr\bin\bash.exe'):
-        if Path(c).is_file():
-            return c
-    b = shutil.which('bash')
-    return b if b and 'system32' not in b.lower() else None
-
-
 class GameLock(Env):
     def test_failing_fixture_of_racing_takers_exactly_one_wins(self):
-        bash = git_bash()
-        if not bash:
-            self.skipTest('no bash to run harness/job.sh (Git Bash on Windows)')
+        bash, no_bash = gitbash.bash_for_tests()
+        if no_bash:
+            self.skipTest(no_bash)
         if not shutil.which('python3'):
             self.skipTest('job.sh calls python3, which is not on PATH here')
         state = self.t / 'state'
@@ -151,15 +146,20 @@ class NoGameNames(unittest.TestCase):
     """The code that came from a game repo (proxy/, harness/, saves/; J12; discovery/, W4) names no game: a path, an exe or a mod folder would carry the
     game into the core (CLAUDE.md). Provenance links to the earlier remaster's repository ("empire-remastered ...") are allowed. The
     rest of the core cites its consumer's job ids as provenance in comments, which this does not police. A module that cannot be made name-free gets an entry in ALLOW with its reason and a
-    backlog row, never a blanket exemption (none today)."""
+    backlog row, never a blanket exemption (none today). The moved tools' host tests ported from the game repo (B17, B18) are scanned too:
+    PORTED, never an ALLOW entry for a test file."""
     GAME = re.compile(r'napoleon|empire(?!-remastered)', re.I)
     ALLOW = {}   # tracked path -> why it may name a game (and its backlog row)
+    PORTED = ('tests/test_pc_deploy.py', 'tests/test_ctl.py', 'tests/test_acceptance.py', 'tests/test_saves.py', 'tests/test_job_sh.py',
+              'tests/test_gitbash.py')
 
     def test_no_tracked_file_names_a_game(self):
         files = subprocess.run(['git', '-C', str(ROOT), 'ls-files'], capture_output=True, text=True).stdout.splitlines()
+        self.assertEqual([f for f in self.PORTED if f not in files], [], 'a ported host test is not tracked')
         bad = []
         for f in files:
-            if not f.startswith(('proxy/', 'harness/', 'saves/', 'discovery/')) or f in self.ALLOW or not (ROOT / f).is_file():
+            moved = f.startswith(('proxy/', 'harness/', 'saves/', 'discovery/')) or f in self.PORTED
+            if not moved or f in self.ALLOW or not (ROOT / f).is_file():
                 continue
             for n, line in enumerate((ROOT / f).read_bytes().decode('utf-8', 'replace').splitlines(), 1):
                 if self.GAME.search(line):
