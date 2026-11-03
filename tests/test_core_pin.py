@@ -42,15 +42,23 @@ def run_gate(game, core, pin):
 
 
 class Tmp(unittest.TestCase):
+    """`cls.tmp` holds what a class builds once in `setUpClass` (git is slow on Windows); `self.tmp` is each test's own folder."""
+    @classmethod
+    def setUpClass(cls):
+        cls._ctd = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        cls.ctmp = Path(cls._ctd.name).resolve()
+        cls.addClassCleanup(cls._ctd.cleanup)
+
     def setUp(self):
         self._td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.tmp = Path(self._td.name).resolve()
         self.addCleanup(self._td.cleanup)
 
-    def make_core(self, versions=('0.1.0',)):
-        """A fake core: one commit per version, each tagged v<version>. Returns its path."""
-        core = self.tmp / 'core-src'
-        git(self.tmp, 'init', '-q', str(core))
+    @staticmethod
+    def make_core(where, versions=('0.1.0',)):
+        """A fake core in `where`: one commit per version, each tagged v<version>. Returns its path."""
+        core = where / 'core-src'
+        git(where, 'init', '-q', str(core))
         write(core / 'a.txt', 'a\n')
         for v in versions:
             write(core / 'VERSION', v + '\n')
@@ -70,7 +78,7 @@ class DirtyCore(Tmp):
     """B7: the gate reads VERSION from ctx.core_root, so a throwaway core is checked, and every failure is seen failing."""
     def setUp(self):
         super().setUp()
-        self.core = self.make_core()
+        self.core = self.make_core(self.tmp)
         self.game = self.tmp / 'game'
         self.game.mkdir()
 
@@ -99,31 +107,39 @@ class DirtyCore(Tmp):
 
 class LinkedWorktree(Tmp):
     """B11: pushed from a linked worktree of a game repo, the pre-push hook's GIT_* environment must not make the gate read the
-    superproject. The environment is recorded from a real pre-push hook in that worktree, then the gate runs under it."""
-    def setUp(self):
-        super().setUp()
-        core = self.make_core()
-        self.sup = self.tmp / 'game'
-        git(self.tmp, 'init', '-q', str(self.sup))
-        write(self.sup / 'g.txt', 'game\n')
-        git(self.sup, 'submodule', 'add', '-q', url(core), 'core')
-        git(self.sup, 'add', '-A')
-        git(self.sup, 'commit', '-q', '-m', 'game pins core v0.1.0')
-        self.wt = self.tmp / 'game-wt'
-        git(self.sup, 'worktree', 'add', '-q', '-b', 'wt', str(self.wt))
-        git(self.wt, 'submodule', 'update', '--init', '-q')
-        self.hook_env = self.record_pre_push_env()
+    superproject. The environment is recorded from a real pre-push hook in that worktree, then the gate runs under it. Built once;
+    a test that edits a file restores it."""
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        core = cls.make_core(cls.ctmp)
+        cls.sup = cls.ctmp / 'game'
+        git(cls.ctmp, 'init', '-q', str(cls.sup))
+        write(cls.sup / 'g.txt', 'game\n')
+        git(cls.sup, 'submodule', 'add', '-q', url(core), 'core')
+        git(cls.sup, 'add', '-A')
+        git(cls.sup, 'commit', '-q', '-m', 'game pins core v0.1.0')
+        cls.wt = cls.ctmp / 'game-wt'
+        git(cls.sup, 'worktree', 'add', '-q', '-b', 'wt', str(cls.wt))
+        git(cls.wt, 'submodule', 'update', '--init', '-q')
+        cls.hook_env = cls.record_pre_push_env()
 
-    def record_pre_push_env(self):
-        out = self.tmp / 'hook-env.txt'
-        hooks = self.tmp / 'hooks'
+    @classmethod
+    def record_pre_push_env(cls):
+        out = cls.ctmp / 'hook-env.txt'
+        hooks = cls.ctmp / 'hooks'
         hook = write(hooks / 'pre-push', f'#!/bin/sh\nenv > "{out.as_posix()}"\n')
         hook.chmod(0o755)
-        remote = self.tmp / 'remote.git'
-        git(self.tmp, 'init', '-q', '--bare', str(remote))
-        git(self.wt, '-c', f'core.hooksPath={hooks.as_posix()}', 'push', '-q', url(remote), 'wt')
+        remote = cls.ctmp / 'remote.git'
+        git(cls.ctmp, 'init', '-q', '--bare', str(remote))
+        git(cls.wt, '-c', f'core.hooksPath={hooks.as_posix()}', 'push', '-q', url(remote), 'wt')
         lines = out.read_text(encoding='utf-8').splitlines()
         return dict(l.split('=', 1) for l in lines if l.startswith('GIT_') and '=' in l)
+
+    def edit(self, path, text):
+        old = path.read_bytes()
+        self.addCleanup(path.write_bytes, old)
+        write(path, text)
 
     def gate_in_hook(self):
         """The gate as the worktree's pre-push hook runs it: cwd the worktree, the hook's GIT_* variables set."""
@@ -145,41 +161,42 @@ class LinkedWorktree(Tmp):
         self.assertLevel(self.gate_in_hook(), 'ok', 'tag v0.1.0')
 
     def test_modified_core_in_the_worktree_fails(self):
-        write(self.wt / 'core' / 'a.txt', 'patched in place\n')
+        self.edit(self.wt / 'core' / 'a.txt', 'patched in place\n')
         self.assertLevel(self.gate_in_hook(), 'error', 'local changes', 'a.txt')
 
     def test_modified_superproject_is_not_the_core(self):
-        write(self.wt / 'g.txt', 'changed\n')
-        write(self.sup / 'g.txt', 'changed\n')
+        self.edit(self.wt / 'g.txt', 'changed\n')
+        self.edit(self.sup / 'g.txt', 'changed\n')
         self.assertLevel(self.gate_in_hook(), 'ok')
 
 
 class ShallowSubmodule(Tmp):
     """B12: a depth-1 submodule (as CI checks it out) of a core with a newer tag brings that tag but not the pinned one."""
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        core = cls.make_core(cls.ctmp, ('0.1.0', '0.2.0'))
+        cls.sup = cls.ctmp / 'game-src'
+        git(cls.ctmp, 'init', '-q', str(cls.sup))
+        git(cls.sup, 'submodule', 'add', '-q', url(core), 'core')
+        git(cls.sup / 'core', 'checkout', '-q', 'v0.1.0')
+        git(cls.sup, 'add', '-A')
+        git(cls.sup, 'commit', '-q', '-m', 'game pins core v0.1.0')
+
     def setUp(self):
         super().setUp()
-        core = self.make_core(('0.1.0', '0.2.0'))
-        sup = self.tmp / 'game-src'
-        git(self.tmp, 'init', '-q', str(sup))
-        git(sup, 'submodule', 'add', '-q', url(core), 'core')
-        git(sup / 'core', 'checkout', '-q', 'v0.1.0')
-        git(sup, 'add', '-A')
-        git(sup, 'commit', '-q', '-m', 'game pins core v0.1.0')
         self.game = self.tmp / 'game'
-        git(self.tmp, 'clone', '-q', url(sup), str(self.game))
+        git(self.tmp, 'clone', '-q', url(self.sup), str(self.game))
         git(self.game, 'submodule', 'update', '--init', '--depth', '1', '-q')
         self.core = self.game / 'core'
 
-    def test_checkout_is_shallow_with_only_the_newer_tag(self):
+    def test_missing_pinned_tag_is_version_only(self):
+        # the checkout napoleon's CI got (J41 review): shallow, HEAD at v0.1.0's commit, only the tip's tag v0.2.0 fetched
         self.assertEqual(git(self.core, 'rev-parse', '--is-shallow-repository'), 'true')
         self.assertEqual(git(self.core, 'tag', '--list').split(), ['v0.2.0'])
         self.assertEqual((self.core / 'VERSION').read_text().strip(), '0.1.0')
-
-    def test_missing_pinned_tag_is_version_only(self):
         self.assertLevel(run_gate(self.game, self.core, 'v0.1.0'), 'ok', 'pinned tag v0.1.0 not in this shallow checkout: VERSION only')
-
-    def test_version_still_checked(self):
-        self.assertLevel(run_gate(self.game, self.core, 'v0.2.0'), 'error', 'the core checkout is 0.1.0')
+        self.assertLevel(run_gate(self.game, self.core, 'v0.2.0'), 'error', 'the core checkout is 0.1.0')   # VERSION is still compared
 
     def test_fetched_tag_is_checked_against_head(self):
         git(self.core, 'fetch', '-q', '--depth', '1', 'origin', 'tag', 'v0.1.0')
