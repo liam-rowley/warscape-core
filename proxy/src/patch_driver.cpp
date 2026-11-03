@@ -8,9 +8,11 @@
 #include <vector>
 
 namespace wsp {
-namespace {
-bool Readable(const void* p, size_t n) {
+// Every page of [p, p+n) committed and neither no-access nor guard (VirtualQuery only: safe under the loader lock). Shared through
+// runtime.h (the ctl peek, W17); named MemReadable because guard_driver.cpp keeps an anonymous Readable with the same signature.
+bool MemReadable(const void* p, size_t n) {
     const uint8_t* a = (const uint8_t*)p; const uint8_t* end = a + n;
+    if (end < a) return false;   // the range wraps the address space
     while (a < end) {
         MEMORY_BASIC_INFORMATION mbi{};
         if (!VirtualQuery(a, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) return false;
@@ -18,6 +20,7 @@ bool Readable(const void* p, size_t n) {
     }
     return true;
 }
+namespace {
 std::string Hex(const uint8_t* p, unsigned n) { std::string s; char b[4]; for (unsigned i = 0; i < n; ++i) { snprintf(b, sizeof b, i ? " %02x" : "%02x", p[i]); s += b; } return s; }
 }
 
@@ -27,8 +30,8 @@ void PatchesRun() {
     if (!rt.plan.patches) { LOGI("patch_engine: not run (pass-through)"); rt.sitesWhy = "pass-through (exe guard)"; return; }
     if (!rt.cfg.Bool("proxy.runtime_patches")) { LOGI("patch_engine: off (proxy.runtime_patches=0)"); rt.sitesWhy = "proxy.runtime_patches=0"; return; }
     uint8_t* base = (uint8_t*)GetModuleHandleW(nullptr);
-    PeInfo pe = Readable(base, 0x1000) ? ParsePe(base, 0x1000) : PeInfo{};
-    ImageView v; v.data = base; v.size = pe.ok ? pe.sizeOfImage : 0; v.pe = &pe; v.file = false; v.readable = Readable;
+    PeInfo pe = MemReadable(base, 0x1000) ? ParsePe(base, 0x1000) : PeInfo{};
+    ImageView v; v.data = base; v.size = pe.ok ? pe.sizeOfImage : 0; v.pe = &pe; v.file = false; v.readable = MemReadable;
     uint32_t delta = 0;
     if (!LoadDelta((uintptr_t)base, rt.fileImageBase, delta)) {
         LOGE("patch_engine: refused - the exe file's ImageBase is unknown (0x%08x), so no rebase delta: nothing written", (unsigned)rt.fileImageBase);
