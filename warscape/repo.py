@@ -45,6 +45,8 @@ DEFAULTS = {
     # proxy/*/adapter.cpp folder / the one harness/*/adapter.json in the repo
     'proxy': {'adapter': ''},              # repo-relative folder: adapter.cpp, identity.json, generated/, the config file, lua/
     'harness': {'adapter': ''},            # repo-relative file: the watcher's adapter.json (its profiles/ beside it)
+    # the discovery passes (discovery/, `wsc discovery`; napoleon J64): empty = the one discovery/*/games.json folder in the repo
+    'discovery': {'adapter': ''},          # repo-relative folder: games.json (target, reference, install paths) and the rules the tools read
     # the job queue (napoleon J62; library: warscape/jobq.py, hooks: warscape/hooks.py). The defaults are a plain queue: ids J<n>,
     # sonnet|opus, no game rules, no references in the step texts.
     'jobs': {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Where the game repo and its adapters are, for every proxy and harness tool (J12): one answer before and after the move to warscape-core.
 
-purpose: print (or return) the game repo root, the core's own root, the proxy core sources, and the game's proxy and harness adapters
-usage: python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|all]   (default all: one `name<TAB>path` line each)
+purpose: print (or return) the game repo root, the core's own root, the proxy core sources, and the game's proxy, harness and discovery adapters
+usage: python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|discovery-adapter|all]   (default all: one `name<TAB>path` line each)
 when: every core tool that needs a game path imports it (python) or runs it (bash: build.sh, job.sh, shot.sh); run it by hand to see what a tool will use
 not-a-verb: a path resolver shared by the proxy and harness tools (bash and python), not a registry operation
 
@@ -12,9 +12,10 @@ A tool never finds the game by its own location or a game name. The rules, in or
 - game root: $WSP_GAME_ROOT when set (inside the build container, which has no git), else the superproject of the own root (the game
   repo that pins the core), else the own root (before the move, and the core's own CI with its null adapter).
 - proxy core sources: proxy/src under the own root, else proxy/core (before the move).
-- adapters: the game root's wsc.toml `[proxy] adapter` / `[harness] adapter` (repo-relative) when it names one, else the one
-  proxy/*/adapter.cpp folder / the one harness/*/adapter.json under the game root; none or several is an error that names them.
-$WSP_PROXY_ADAPTER and $HARNESS_ADAPTER override the adapters (tests, the kit). Read-only: nothing here writes.
+- adapters: the game root's wsc.toml `[proxy] adapter` / `[harness] adapter` / `[discovery] adapter` (repo-relative) when it names one, else the one
+  proxy/*/adapter.cpp folder / the one harness/*/adapter.json / the one discovery/*/games.json folder under the game root; none or several is an
+  error that names them.
+$WSP_PROXY_ADAPTER, $HARNESS_ADAPTER and $WSP_DISCOVERY_ADAPTER override the adapters (tests, the kit). Read-only: nothing here writes.
 """
 import os
 import subprocess
@@ -97,8 +98,17 @@ def harness_adapter(game=None):
     return _one(game or game_root(), 'harness', 'harness/*/adapter.json', 'harness adapters (harness/*/adapter.json)')
 
 
+def discovery_adapter(game=None):
+    """The game's discovery adapter folder (games.json, and the rules and tables the discovery tools read; W4)."""
+    env = os.environ.get('WSP_DISCOVERY_ADAPTER')
+    if env:
+        return Path(env).resolve()
+    p = _one(game or game_root(), 'discovery', 'discovery/*/games.json', 'discovery adapters (discovery/*/games.json)')
+    return p.parent if p.is_file() else p
+
+
 NAMES = {'own-root': lambda: own_root(), 'game-root': lambda: game_root(), 'proxy-src': lambda: proxy_src(),
-         'proxy-adapter': lambda: proxy_adapter(), 'harness-adapter': lambda: harness_adapter()}
+         'proxy-adapter': lambda: proxy_adapter(), 'harness-adapter': lambda: harness_adapter(), 'discovery-adapter': lambda: discovery_adapter()}
 
 
 def main(argv=None):
