@@ -88,11 +88,14 @@ jobs:
           $py = (Get-Command python).Source
           $py3 = Join-Path (Split-Path $py) 'python3.exe'
           if (-not (Test-Path $py3)) { Copy-Item $py $py3 }
+      # W8: the job.sh and Git Bash finder tests too; WSC_REQUIRE_BASH turns their "no Git Bash or python3" skip into a failure here
       - name: moved tools host tests that run bash (Git Bash found explicitly)
-        timeout-minutes: 3
+        timeout-minutes: 8
         shell: powershell
+        env:
+          WSC_REQUIRE_BASH: '1'
         run: |
-          python -m unittest tests.test_moved_tools
+          python -m unittest tests.test_moved_tools tests.test_job_sh tests.test_gitbash
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: harness host tests (unit and integration)
         timeout-minutes: 18

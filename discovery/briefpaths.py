@@ -1,7 +1,7 @@
 """The found-path rule for briefs (J5 ledger row 80, D14): a brief names a game-side path only as a registry id, never as a path somebody searched for.
 
 purpose: flag game-side paths in a job brief (the extract store, pack-form paths, paths under a game folder that are not a registry id, layout and script paths a ui_elements unit holds) and parse a brief's `## Registry gaps` section
-usage: from briefpaths import found_path_problems, load_known, registry_gaps   (called by the brief_problems hook in tools/jobs_hooks.py, so `python3 core/wsc.py jobs check` runs it)
+usage: from briefpaths import found_path_problems, load_known, registry_gaps   (called by a game's jobs-stage gate module, e.g. tools/gates/pipeline.py, so `python3 core/wsc.py jobs check` runs it)
 when: before pushing a brief (jobs check), and in the tests gate (CI); the four flagged shapes and the escape hatch are listed in wsc.toml [jobs.text] brief_notes ("How a brief cites"), which every brief writer is shown
 not-a-verb: a library; the verb is `wsc jobs check`
 

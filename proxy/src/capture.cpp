@@ -11,8 +11,10 @@
 //   - Calls the runtime makes to itself through the vtable while a hook runs are not recorded twice (s_depth).
 //   - The vtable of a device survives Reset, so the hooks stay armed across a device reset; a new device of the same class shares the
 //     vtable (VtableHook keeps the first original); a device of another class gets its own hooks at its CreateDevice.
-// Threads: the hooks and CapturePresent run on the render thread; CaptureRun (the ctl thread) arms a request and waits for its event.
-// Record lines (one call per line, numbers decimal unless named; ptr and hash hex): see the game repo's proxy README "Frame capture".
+//   - State blocks (W19, B34): CreateStateBlock and IDirect3DStateBlock9 Capture/Apply are hooked; after an Apply the state is read back.
+// Threads (W19, B32, B33): CaptureRun (the ctl thread) arms and waits; the thread whose Present takes the arm records, every other thread
+// is forwarded and counted. The state moves only through capture.h's compare-and-swap transitions.
+// The contract (keys, ctl result, state machine, every record line): the core's docs/PROXY_CAPTURE.md.
 #include "dev.h"
 #include "capture.h"
 #include <map>
@@ -32,10 +34,16 @@ struct Viewport { uint32_t x, y, w, h; float minZ, maxZ; };            // D3DVIE
 const GUID kIidTexture9 = { 0x85C31227, 0x3DE5, 0x4f00, { 0x9B, 0x3A, 0xF1, 0x1A, 0xC3, 0x8C, 0x18, 0xB5 } };
 const GUID kIidCubeTexture9 = { 0xFFF32F81, 0xD953, 0x473a, { 0x92, 0x23, 0x93, 0xD6, 0x52, 0xAB, 0xA9, 0x3F } };
 
-enum : LONG { kIdle = 0, kArmed = 1, kRecording = 2, kDone = 3 };
-volatile LONG s_state = kIdle;
-volatile bool s_rec = false;     // the render thread records (kRecording)
-int s_depth = 0;                 // > 0 inside a recorded call (render thread only)
+volatile LONG s_state = kCapIdle;   // capture.h's state machine: every transition through s_cell (a compare-and-swap), never a plain store
+struct StateCell {
+    long Load() const { return s_state; }
+    long Cas(long expected, long desired) { return InterlockedCompareExchange(&s_state, desired, expected); }
+} s_cell;
+volatile bool s_rec = false;     // the render thread records (Recording, and Abandoned until it closes the file)
+volatile DWORD s_tid = 0;        // the recording thread: the one whose Present took the arm; set before s_rec (W19, B33)
+volatile LONG s_otherCalls = 0;  // hooked calls and D3DPERF events on any other thread while recording: forwarded, counted, never recorded
+LONG s_otherAtFrame = 0, s_otherTotal = 0;   // the count at the frame's start (OTHERTHREAD lines); the total at the end (the result)
+int s_depth = 0;                 // > 0 inside a recorded call (the recording thread only: Depth never touches it on another thread)
 bool s_hooked = false;
 std::wstring s_root, s_dir;      // dev.capture_dir, <root>\<name>
 std::string s_name, s_err;
@@ -47,6 +55,8 @@ std::map<void*, uint64_t> s_shaderHash;   // this capture's shader objects (poin
 std::set<void*> s_described;              // surfaces, textures and declarations already described in this capture
 std::set<uint64_t> s_written;             // shader files written by this process
 int s_shadersNew = 0, s_walkBad = 0, s_sizeMismatch = 0;
+int s_sbCreated = 0, s_sbCaptured = 0, s_sbApplied = 0;   // this capture's state blocks (B34)
+bool s_sbHooked = false;                  // IDirect3DStateBlock9 Capture and Apply hooked (the throwaway block at install was made)
 size_t s_capShaders = 0;                  // distinct shaders bound in the last capture
 double s_t0 = 0;
 
@@ -142,8 +152,23 @@ void RecStream(UINT s, void* vb, UINT off, UINT stride) { std::string l = "SSRC"
 void RecIdx(void* ib) { std::string l = "IDX"; AppendX(l, P(ib)); Line(l); }
 void AppendRect(std::string& l, const RECT* r) { if (r) { AppendI(l, r->left); AppendI(l, r->top); AppendI(l, r->right); AppendI(l, r->bottom); } else l += " - - - -"; }
 
-// The guard every hook takes: records only the outermost call while a capture runs.
-struct Depth { bool on; Depth() : on(s_rec && s_depth == 0) { ++s_depth; } ~Depth() { --s_depth; } };
+// The guard every hook takes after its `if (!s_rec)` fast path: records only the outermost call, and only on the recording thread.
+// A call on another thread is counted and forwarded; s_depth, s_buf and the describe sets are the recording thread's alone (B33).
+bool OnRecordingThread() {
+    if (GetCurrentThreadId() == s_tid) return true;
+    InterlockedIncrement(&s_otherCalls);
+    return false;
+}
+struct Depth {
+    bool mine, on = false;
+    Depth() : mine(OnRecordingThread()) { if (mine) { on = s_rec && s_depth == 0; ++s_depth; } }
+    ~Depth() { if (mine) --s_depth; }
+};
+void FrameEnd() {   // before each frame's PRESENT (or ABANDONED): other-thread calls of this frame, when there were any
+    const LONG n = s_otherCalls;
+    if (n != s_otherAtFrame) { std::string l = "OTHERTHREAD"; AppendU(l, (unsigned long long)(n - s_otherAtFrame)); Line(l); }
+    s_otherAtFrame = n;
+}
 
 // ---- hooks (IDirect3DDevice9 vtable slots) ---------------------------------------------------------------------------------------
 #define ORIG(name, ...) using T_##name = HRESULT(WINAPI*)(void*, __VA_ARGS__); T_##name o_##name
@@ -158,6 +183,7 @@ ORIG(Clear, DWORD, const void*, DWORD, DWORD, float, DWORD);
 ORIG(SetTransform, DWORD, const float*);
 ORIG(SetViewport, const Viewport*);
 ORIG(SetRenderState, DWORD, DWORD);
+ORIG(CreateStateBlock, DWORD, void**);
 ORIG(EndStateBlock, void**);
 ORIG(SetTexture, DWORD, void*);
 ORIG(SetTextureStageState, DWORD, DWORD, DWORD);
@@ -182,6 +208,8 @@ ORIG(SetPixelShaderConstantI, UINT, const int*, UINT);
 ORIG(SetPixelShaderConstantB, UINT, const BOOL*, UINT);
 using T_NoArg = HRESULT(WINAPI*)(void*);
 T_NoArg o_BeginScene, o_EndScene, o_BeginStateBlock;
+T_NoArg o_SBCapture, o_SBApply;   // IDirect3DStateBlock9 slots 4 and 5 (0-2 IUnknown, 3 GetDevice)
+void WriteState(void* d, bool targets);
 
 HRESULT WINAPI hk_StretchRect(void* d, void* s, const RECT* sr, void* t, const RECT* tr, DWORD f) {
     if (!s_rec) return o_StretchRect(d, s, sr, t, tr, f);
@@ -225,6 +253,28 @@ HRESULT WINAPI hk_EndStateBlock(void* d, void** sb) {
     if (!s_rec) return o_EndStateBlock(d, sb);
     Depth g; const HRESULT hr = o_EndStateBlock(d, sb);
     if (g.on) { std::string l = "SBEND"; AppendX(l, P(sb ? *sb : nullptr)); Line(l); }
+    return hr;
+}
+HRESULT WINAPI hk_CreateStateBlock(void* d, DWORD ty, void** sb) {
+    if (!s_rec) return o_CreateStateBlock(d, ty, sb);
+    Depth g; const HRESULT hr = o_CreateStateBlock(d, ty, sb);
+    if (g.on) { std::string l = "SBCREATE"; AppendU(l, ty); AppendX(l, P(SUCCEEDED(hr) && sb ? *sb : nullptr)); Line(l); ++s_sbCreated; }
+    return hr;
+}
+// IDirect3DStateBlock9 (B34): D3DX effects save and restore state through state blocks, so an Apply changes state no Set* hook sees.
+HRESULT WINAPI hk_SBCapture(void* sb) {
+    if (!s_rec) return o_SBCapture(sb);
+    Depth g; if (g.on) { std::string l = "SBCAPTURE"; AppendX(l, P(sb)); Line(l); ++s_sbCaptured; }
+    return o_SBCapture(sb);
+}
+HRESULT WINAPI hk_SBApply(void* sb) {
+    if (!s_rec) return o_SBApply(sb);
+    Depth g; if (g.on) { std::string l = "SBAPPLY"; AppendX(l, P(sb)); Line(l); ++s_sbApplied; }
+    const HRESULT hr = o_SBApply(sb);
+    if (g.on) {   // what the block may have changed, read back (Get* only; Depth keeps any runtime-internal Set* unrecorded); no targets
+        void* d = nullptr;
+        if (SUCCEEDED(Slot<HRESULT(WINAPI*)(void*, void**)>(sb, 3)(sb, &d)) && d) { WriteState(d, false); Rel(d); }   // GetDevice
+    }
     return hr;
 }
 HRESULT WINAPI hk_Clear(void* d, DWORD n, const void* rects, DWORD flags, DWORD color, float z, DWORD stencil) {
@@ -283,14 +333,18 @@ HRESULT WINAPI hk_SetIndices(void* d, void* ib) { if (!s_rec) return o_SetIndice
 
 // ---- the STATE block: what the previous frame left bound, read back at arm time -------------------------------------------------
 template <typename F> F DevSlot(void* d, int n) { return Slot<F>(d, n); }
-void WriteState(void* d) {
+// targets: the arm-time block (back buffer, render targets, depth surface); the block after an SBAPPLY leaves them out (a state block
+// holds no render target or depth surface, and an RT or DS line would end the reader's pass).
+void WriteState(void* d, bool targets) {
     Line("STATE");
     void* o = nullptr;
-    if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, UINT, UINT, UINT, void**)>(d, 18)(d, 0, 0, 0, &o)) && o) {   // GetBackBuffer
-        DescribeSurface(o); std::string l = "BACKBUFFER"; AppendX(l, P(o)); Line(l); Rel(o);
+    if (targets) {
+        if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, UINT, UINT, UINT, void**)>(d, 18)(d, 0, 0, 0, &o)) && o) {   // GetBackBuffer
+            DescribeSurface(o); std::string l = "BACKBUFFER"; AppendX(l, P(o)); Line(l); Rel(o);
+        }
+        for (DWORD i = 0; i < 4; ++i) { o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, void**)>(d, 38)(d, i, &o))) { RecRT(i, o); Rel(o); } }
+        o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, void**)>(d, 40)(d, &o))) { RecDS(o); Rel(o); }
     }
-    for (DWORD i = 0; i < 4; ++i) { o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, void**)>(d, 38)(d, i, &o))) { RecRT(i, o); Rel(o); } }
-    o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, void**)>(d, 40)(d, &o))) { RecDS(o); Rel(o); }
     Viewport vp{}; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, Viewport*)>(d, 48)(d, &vp))) RecVP(&vp);
     RECT sc{}; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, RECT*)>(d, 76)(d, &sc))) RecScissor(&sc);
     for (DWORD s = 0; s < 256; ++s) { DWORD v = 0; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, DWORD*)>(d, 58)(d, s, &v))) RecRS(s, v); }
@@ -299,6 +353,9 @@ void WriteState(void* d) {
         o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, void**)>(d, 64)(d, sm, &o))) { RecTex(sm, o); Rel(o); }
         for (DWORD ty = 1; ty <= 13; ++ty) { DWORD v = 0; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, DWORD, DWORD*)>(d, 68)(d, sm, ty, &v))) Rec3("SS", sm, ty, v); }
     }
+    const DWORD tss[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 22, 23, 24, 26, 27, 28, 32 };   // D3DTEXTURESTAGESTATETYPE, every defined value
+    for (DWORD st = 0; st < 8; ++st)   // GetTextureStageState
+        for (DWORD ty : tss) { DWORD v = 0; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, DWORD, DWORD*)>(d, 66)(d, st, ty, &v))) Rec3("TSS", st, ty, v); }
     o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, void**)>(d, 88)(d, &o))) { RecDecl(o); Rel(o); }
     for (UINT s = 0; s < 8; ++s) {
         UINT off = 0, stride = 0, f = 0; o = nullptr;
@@ -328,8 +385,10 @@ void Close() {
 
 bool CaptureHooked() { return s_hooked; }
 
-void CaptureEvent(int kind, const wchar_t* name) {   // the engine's D3DPERF events: pass names when the engine emits them
-    if (!s_rec || s_depth) return;
+void CaptureEvent(int kind, const wchar_t* name) {   // the engine's D3DPERF events (any thread): pass names when the engine emits them
+    if (!s_rec) return;
+    if (GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }   // B33: only the recording thread writes
+    if (s_depth) return;
     std::string l = kind == 0 ? "EVENT " : kind == 1 ? "EVENTEND" : "MARKER ";
     if (kind != 1) l += name ? Narrow(name) : std::string("?");
     Line(l);
@@ -346,6 +405,7 @@ void CaptureInstall(void* dev) {
         { 41, (void*)hk_BeginScene, (void**)&o_BeginScene, "BeginScene" }, { 42, (void*)hk_EndScene, (void**)&o_EndScene, "EndScene" },
         { 43, (void*)hk_Clear, (void**)&o_Clear, "Clear" }, { 44, (void*)hk_SetTransform, (void**)&o_SetTransform, "SetTransform" },
         { 47, (void*)hk_SetViewport, (void**)&o_SetViewport, "SetViewport" }, { 57, (void*)hk_SetRenderState, (void**)&o_SetRenderState, "SetRenderState" },
+        { 59, (void*)hk_CreateStateBlock, (void**)&o_CreateStateBlock, "CreateStateBlock" },
         { 60, (void*)hk_BeginStateBlock, (void**)&o_BeginStateBlock, "BeginStateBlock" }, { 61, (void*)hk_EndStateBlock, (void**)&o_EndStateBlock, "EndStateBlock" },
         { 65, (void*)hk_SetTexture, (void**)&o_SetTexture, "SetTexture" }, { 67, (void*)hk_SetTextureStageState, (void**)&o_SetTextureStageState, "SetTextureStageState" },
         { 69, (void*)hk_SetSamplerState, (void**)&o_SetSamplerState, "SetSamplerState" }, { 75, (void*)hk_SetScissorRect, (void**)&o_SetScissorRect, "SetScissorRect" },
@@ -359,6 +419,22 @@ void CaptureInstall(void* dev) {
         { 109, (void*)hk_SetPixelShaderConstantF, (void**)&o_SetPixelShaderConstantF, "SetPixelShaderConstantF" }, { 111, (void*)hk_SetPixelShaderConstantI, (void**)&o_SetPixelShaderConstantI, "SetPixelShaderConstantI" },
         { 113, (void*)hk_SetPixelShaderConstantB, (void**)&o_SetPixelShaderConstantB, "SetPixelShaderConstantB" },
     };
+    // B34: the state-block class's vtable comes from one throwaway D3DSBT_ALL block, made through the original CreateStateBlock before
+    // the slot-59 hook goes in (so it is never recorded) and released at once; nothing is added to the game's own CreateStateBlock path.
+    H ss[] = { { 4, (void*)hk_SBCapture, (void**)&o_SBCapture, "Capture" }, { 5, (void*)hk_SBApply, (void**)&o_SBApply, "Apply" } };
+    int sbOk = 0;
+    void* sb = nullptr;
+    void* create = vt[59] == (void*)hk_CreateStateBlock && o_CreateStateBlock ? (void*)o_CreateStateBlock : vt[59];   // a second device: the original
+    if (SUCCEEDED(reinterpret_cast<HRESULT(WINAPI*)(void*, DWORD, void**)>(create)(dev, 1 /* D3DSBT_ALL */, &sb)) && sb) {
+        void** sv = *(void***)sb;
+        for (const H& h : ss) {
+            char n[64]; snprintf(n, sizeof n, "IDirect3DStateBlock9::%s", h.name);
+            if (sv[h.slot] == h.hk) { ++sbOk; continue; }
+            if (VtableHook(sv, h.slot, h.hk, *h.orig ? nullptr : h.orig, n)) ++sbOk;
+        }
+        Rel(sb);
+    } else LOGW("capture: CreateStateBlock(D3DSBT_ALL) failed at install: state blocks are not hooked (results say \"state_block_hooks\": false)");
+    s_sbHooked = sbOk == (int)(sizeof ss / sizeof ss[0]);
     int ok = 0;
     for (const H& h : hs) {
         char n[64]; snprintf(n, sizeof n, "IDirect3DDevice9::%s", h.name);
@@ -367,7 +443,8 @@ void CaptureInstall(void* dev) {
     }
     s_hooked = ok == (int)(sizeof hs / sizeof hs[0]);
     if (!s_doneEv) s_doneEv = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    LOGI("capture: %d of %d device slots hooked (dev.capture=1, dir '%ls')", ok, (int)(sizeof hs / sizeof hs[0]), s_root.c_str());
+    LOGI("capture: %d of %d device slots, %d of %d state-block slots hooked (dev.capture=1, dir '%ls')", ok, (int)(sizeof hs / sizeof hs[0]), sbOk,
+         (int)(sizeof ss / sizeof ss[0]), s_root.c_str());
 }
 
 void CaptureInit() {   // the folder sits outside the game folder (D25: the uninstall stays byte-exact); empty refuses every capture
@@ -376,40 +453,75 @@ void CaptureInit() {   // the folder sits outside the game folder (D25: the unin
     s_root = r;
 }
 
-// The render thread, every Present (before the real Present): closes a recorded frame, starts the next, or arms a waiting request.
+// The render thread, every Present (before the real Present): closes a recorded frame, starts the next, closes an abandoned capture,
+// or takes a waiting arm (capture.h CapOnPresent: Armed -> Recording by CAS before anything else).
 void CapturePresent(void* dev) {
-    const LONG st = s_state;
-    if (st == kRecording) {
-        Line("PRESENT");
-        if (++s_frame < s_frames) { Line("FRAME " + std::to_string(s_frame + 1)); return; }
+    if (!dev) return;
+    const bool rec = s_rec;   // read before s_tid (the starting thread writes s_tid, then s_rec)
+    if (rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }   // B33: another thread's Present
+    const CapStep step = CapOnPresent(s_cell, s_frame, s_frames);
+    // Recording (or Abandoned) with s_rec still clear: another thread took the arm and is still opening the file and writing its STATE
+    // block; this Present is not the recording thread's and must not write, count frames or close (W19 review round 1).
+    if (!rec && step != CapStep::start && step != CapStep::none) return;
+    switch (step) {
+    case CapStep::none: return;
+    case CapStep::next_frame: FrameEnd(); Line("PRESENT"); ++s_frame; Line("FRAME " + std::to_string(s_frame + 1)); return;
+    case CapStep::finish:
+        FrameEnd(); Line("PRESENT"); ++s_frame;
         s_rec = false;
+        s_otherTotal = s_otherCalls;
         { std::set<uint64_t> u; for (auto& kv : s_shaderHash) if (kv.second) u.insert(kv.second); s_capShaders = u.size(); }
         Close();
-        InterlockedExchange(&s_state, kDone);
-        SetEvent(s_doneEv);
+        if (CapFinish(s_cell)) SetEvent(s_doneEv);   // false: the ctl abandoned it meanwhile, now Idle and nobody waits
         return;
+    case CapStep::close_abandoned:   // the ctl gave up (CaptureRun returned failed): a bounded file, kept as evidence
+        FrameEnd(); Line("ABANDONED frame " + std::to_string(s_frame + 1) + " of " + std::to_string(s_frames));
+        s_rec = false;
+        Close();
+        CapClosed(s_cell);
+        return;
+    case CapStep::start: break;
     }
-    if (st != kArmed || !dev) return;
+    s_tid = GetCurrentThreadId();   // the recording thread, fixed before s_rec is set
+    s_otherCalls = 0; s_otherAtFrame = 0; s_otherTotal = 0;
+    s_bytes = s_lines = s_draws = 0; s_shadersNew = s_walkBad = s_sizeMismatch = 0; s_frame = 0; s_capShaders = 0;   // also for a failed open
+    s_sbCreated = s_sbCaptured = s_sbApplied = 0; s_t0 = MonoS();
     s_file = CreateFileW((s_dir + L"frame.txt").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (s_file == INVALID_HANDLE_VALUE) { s_err = "cannot create frame.txt (" + std::to_string(GetLastError()) + ")"; InterlockedExchange(&s_state, kDone); SetEvent(s_doneEv); return; }
+    if (s_file == INVALID_HANDLE_VALUE) { s_err = "cannot create frame.txt (" + std::to_string(GetLastError()) + ")"; if (CapFinish(s_cell)) SetEvent(s_doneEv); return; }
     s_buf.reserve(5u << 20);
-    s_bytes = s_lines = s_draws = 0; s_shadersNew = s_walkBad = s_sizeMismatch = 0; s_frame = 0;
     char h[400];
     snprintf(h, sizeof h, "CAPTURE %s launch %s build %s frames %d utc %s scene %s", s_name.c_str(), Rt().launchId.c_str(), WSP_BUILD_ID, s_frames,
              UtcIso(UnixMs()).c_str(), DevSceneNow().c_str());
     Line(h);
-    s_depth = 1; WriteState(dev); s_depth = 0;   // the Get* reads call no hook, but a runtime may forward one through its vtable
+    s_depth = 1; WriteState(dev, true); s_depth = 0;   // the Get* reads call no hook, but a runtime may forward one through its vtable
     Line("FRAME 1");
     s_t0 = MonoS();
     s_rec = true;
-    InterlockedExchange(&s_state, kRecording);
 }
+
+namespace {
+// The ctl thread waits for Done. The event only wakes it; the state decides, so a late SetEvent of an earlier capture cannot end this one
+// (the render thread sets Done before the event, and the event is reset before the state is read again).
+bool WaitDone(double seconds) {
+    const double end = MonoS() + seconds;
+    for (;;) {
+        if (s_cell.Load() == kCapDone) return true;
+        const double left = end - MonoS();
+        if (left <= 0) return false;
+        WaitForSingleObject(s_doneEv, (DWORD)(left * 1000) + 1);
+        if (s_cell.Load() == kCapDone) return true;
+        ResetEvent(s_doneEv);
+    }
+}
+} // namespace
 
 // The ctl thread: `capture <name> [frames]`. ok + the result members, or false + why.
 bool CaptureRun(const std::string& name, int frames, double timeoutS, std::string& result, std::string& why) {
     if (!Dk().capture) { why = "dev.capture=0"; return false; }
     if (!s_hooked) { why = "the device is not hooked (no device created yet, or a slot failed: see the log)"; return false; }
-    if (s_state != kIdle) { why = "a capture is running"; return false; }
+    // Only this (the one ctl) thread leaves Idle, so Idle here stays Idle until the arm below: nothing the render thread reads (s_dir,
+    // s_frames, s_err) is written while it may still be closing an abandoned capture.
+    if (const long st = s_cell.Load(); st != kCapIdle) { why = CapRefusal(st == kCapAbandoned ? CapArm::closing : CapArm::running); return false; }
     if (s_root.empty()) { why = "dev.capture_dir is empty (a folder outside the game folder)"; return false; }
     CreateDirectoryW(s_root.c_str(), nullptr);
     CreateDirectoryW((s_root + L"shaders").c_str(), nullptr);
@@ -419,10 +531,22 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
     s_name = name; s_frames = frames; s_err.clear();
     ResetEvent(s_doneEv);
     const double t0 = MonoS();
-    InterlockedExchange(&s_state, kArmed);
-    if (WaitForSingleObject(s_doneEv, (DWORD)(timeoutS * 1000)) != WAIT_OBJECT_0) {
-        if (InterlockedCompareExchange(&s_state, kIdle, kArmed) == kArmed) { why = "no Present within the timeout: nothing recorded"; return false; }
-        WaitForSingleObject(s_doneEv, 30000);   // recording: it ends at the next Present(s)
+    if (const CapArm a = CapArmFromCtl(s_cell); a != CapArm::ok) { why = CapRefusal(a); return false; }   // Idle -> Armed
+    CapEnd end = WaitDone(timeoutS) ? CapEnd::done : CapOnTimeout(s_cell, false);   // Armed -> Idle, or the render thread owns it
+    if (end == CapEnd::wait_more) end = WaitDone(30) ? CapEnd::done : CapOnTimeout(s_cell, true);   // Recording -> Abandoned, or Done just in time
+    if (end != CapEnd::done) {   // failed; none of the render thread's counters is read (it may still be writing them)
+        const bool abandoned = end == CapEnd::abandoned;
+        char b[400];
+        snprintf(b, sizeof b, "\"state\": %s, \"dir\": %s, \"wait_s\": %.3f", abandoned ? "\"abandoned\"" : "\"nothing recorded\"", JStr(Narrow(s_dir)).c_str(),
+                 MonoS() - t0);
+        result = b;
+        if (abandoned) result += ", \"file\": " + JStr(Narrow(s_dir) + "frame.txt");
+        result += std::string(", \"state_block_hooks\": ") + (s_sbHooked ? "true" : "false");
+        if (abandoned) {
+            snprintf(b, sizeof b, "recording did not finish within %.0f s: abandoned; the render thread closes frame.txt at its next Present", MonoS() - t0);
+            why = b;
+        } else why = "no Present within the timeout: nothing recorded";
+        return false;
     }
     const double recS = MonoS() - s_t0;
     char b[700];
@@ -431,9 +555,12 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
              JStr(Narrow(s_dir)).c_str(), JStr(Narrow(s_dir) + "frame.txt").c_str(), JStr(Narrow(s_root) + "shaders\\").c_str(), s_frame, (unsigned long long)s_bytes,
              (unsigned long long)s_lines, (unsigned long long)s_draws, s_capShaders, s_shadersNew, s_walkBad, s_sizeMismatch, recS, MonoS() - t0);
     result = b;
+    snprintf(b, sizeof b, ", \"other_thread_calls\": %ld, \"state_blocks_created\": %d, \"state_blocks_captured\": %d, \"state_blocks_applied\": %d, "
+             "\"state_block_hooks\": %s", (long)s_otherTotal, s_sbCreated, s_sbCaptured, s_sbApplied, s_sbHooked ? "true" : "false");
+    result += b;
     const bool ok = s_err.empty();
     if (!ok) why = s_err;
-    InterlockedExchange(&s_state, kIdle);
+    CapRelease(s_cell);   // Done -> Idle: the only way the ctl sets Idle after a recording
     return ok;
 }
 

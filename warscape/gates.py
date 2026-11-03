@@ -2,6 +2,7 @@
 
 Every gate returns a Result. Level `error` fails the run; `warn` never does. `--fast` runs every gate except `tests`
 (or the list in `wsc.toml` [gates] fast), and is what the pre-push hook runs: well under a minute, no network.
+A game's own gates (`[gates] dirs`, warscape/gatemods.py) run after the core gates, each as its own line.
 """
 import json
 import re
@@ -24,6 +25,7 @@ class Result:
     summary: str
     details: list = field(default_factory=list)
     seconds: float = 0.0
+    html: str = ''      # a `view`-stage game gate's HTML for the status page, drawn as is (warscape/gatemods.py); every other reader ignores it
 
 
 def _read(ctx, p):
@@ -230,7 +232,7 @@ def gate_hooks(ctx):
 
 
 def gate_jobs(ctx):
-    """The job queue (`wsc jobs check`): rows against jobs/, brief shape, review rounds and the repo's own queue hooks. Skipped when the repo declares no jobs registry."""
+    """The job queue (`wsc jobs check`): rows against jobs/, brief shape, review rounds and the repo's `jobs`-stage gate modules. Skipped when the repo declares no jobs registry."""
     if 'jobs' not in ctx.config['registries']:
         return Result('jobs', 'ok', 'no jobs registry declared')
     from . import jobq
@@ -243,8 +245,10 @@ def gate_jobs(ctx):
 
     jd = ctx.root / jobq.S.jobs_dir
     folders = [d.name for d in jd.iterdir() if d.is_dir()] if jd.is_dir() else []
-    errs = jobq.problems(rows, read, folders, ctx) + jobq.call_hooks('queue_problems', ctx, rows, ctx.files())
-    return Result('jobs', 'error' if errs else 'ok', f'{len(errs)} queue problems' if errs else f'{len(rows)} jobs rows, queue ok', errs)
+    errs, warns, _ = jobq.check(ctx, rows, read, folders)
+    if errs:
+        return Result('jobs', 'error', f'{len(errs)} queue problems', errs + warns)
+    return Result('jobs', 'warn' if warns else 'ok', f'{len(rows)} jobs rows, queue ok' + (f'; {len(warns)} warnings' if warns else ''), warns)
 
 
 def gate_ci_render(ctx):
@@ -310,19 +314,30 @@ NAMES = [n for n, _ in GATES]
 
 
 def selected(ctx, fast=False, only=None):
+    """The gate names to run, core gates first, then the repo's `gates`-stage modules in load order. `--fast`: the core gates of
+    `[gates] fast` (default: all but `tests`) plus every game gate whose FAST is true or that `[gates] fast` names."""
+    from . import gatemods
     gc = ctx.config['gates']
-    unknown = [n for n in (only or []) + gc['fast'] + gc['skip'] if n not in NAMES]
+    mods = {m.name: m for m in gatemods.load(ctx) if 'gates' in m.stages}
+    every = NAMES + list(mods)
+    unknown = [n for n in (only or []) + gc['fast'] + gc['skip'] if n not in every]
     if unknown:
-        raise ValueError(f'unknown gate(s) {", ".join(unknown)}; gates are: {", ".join(NAMES)}')
-    names = only or [n for n in NAMES if n not in gc['skip']]
+        raise ValueError(f'unknown gate(s) {", ".join(unknown)}; gates are: {", ".join(every)}')
+    names = only or [n for n in every if n not in gc['skip']]
     if fast and not only:
-        names = [n for n in names if n in gc['fast']] if gc['fast'] else [n for n in names if n != 'tests']
+        core_fast = (lambda n: n in gc['fast']) if gc['fast'] else (lambda n: n != 'tests')
+        names = [n for n in names if ((mods[n].fast or n in gc['fast']) if n in mods else core_fast(n))]
     return names
 
 
 def run(ctx, fast=False, only=None):
+    from . import gatemods
+    mods = {m.name: m for m in gatemods.load(ctx)}
     out = []
     for name in selected(ctx, fast, only):
+        if name in mods:
+            out.append(gatemods.call(mods[name], gatemods.StageCtx(ctx, 'gates', {})))
+            continue
         t0 = time.time()
         try:
             r = dict(GATES)[name](ctx)
