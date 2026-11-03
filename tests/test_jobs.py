@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -134,6 +135,26 @@ class Ledger(unittest.TestCase):
         self.assertEqual(jv.waiting_rules(led, 'J4'), ['row 7: Settle before checking', 'row 8: Poses by id'])
         self.assertEqual(jv.waiting_rules(led, 'J13'), ['row 8: Poses by id'])
         self.assertEqual(jv.waiting_rules(led, 'J5'), [])
+
+    def _brief_steps_with(self, ledgers, files=None):
+        old = jv.S.ledgers
+        self.addCleanup(setattr, jv.S, 'ledgers', old)
+        jv.S.ledgers = ledgers
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in (files or {}).items():
+                (Path(d) / name).write_text(text, encoding='utf-8')
+            return jv.brief_steps(row('J4'), Path(d))
+
+    def test_brief_steps_with_ledgers_unset_does_not_glob(self):
+        out = self._brief_steps_with('')
+        self.assertIn('needs a brief', out)
+        self.assertNotIn('The brief must cover', out)
+
+    def test_brief_steps_with_ledgers_set_lists_owed_rows(self):
+        led = ('| # | Rule | Source | Before | After | Why |\n|---|---|---|---|---|---|\n'
+               '| 7 | Settle before checking | N:PLAN.md:1 | CL | CL | J4 |\n')
+        out = self._brief_steps_with('LEDGER*.md', {'LEDGER.md': led})
+        self.assertIn('The brief must cover LEDGER.md row 7: Settle before checking', out)
 
 
 class View(unittest.TestCase):

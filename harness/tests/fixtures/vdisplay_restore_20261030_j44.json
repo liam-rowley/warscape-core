@@ -1,0 +1,12 @@
+{
+    "name":  "Virtual Display Driver",
+    "device":  "\\\\.\\DISPLAY11",
+    "adapter":  "Virtual Display Driver",
+    "monitor":  "Generic PnP Monitor",
+    "w":  3840,
+    "h":  2160,
+    "hz":  60,
+    "x":  3839,
+    "y":  2160,
+    "saved_utc":  "2026-10-30T16:55:49Z"
+}

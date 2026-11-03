@@ -175,6 +175,8 @@ Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh
 prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
 the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
 (`proxy/tests/null_game/README.md`).
+A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
+(watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
 
 Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
 ([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
