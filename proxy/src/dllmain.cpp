@@ -7,6 +7,7 @@
 //   6. headless runs (headless.cpp), only when headless.enabled; refused (exit) when the plan forbids hooks or the proxy is off
 // The backend d3d9 loads later, at the first export call (backend.cpp). Loader lock: Win32 file and memory calls only.
 #include "runtime.h"
+#include "ui_host.h"
 #include <vector>
 #include <algorithm>
 
@@ -102,6 +103,7 @@ void Init(HMODULE self) {
     PatchesRun();
     DevInit();                                    // dev keys only (all default off): nothing at all when none is set
     HeadlessInit();                               // headless.enabled only (default off)
+    UiInit();                                     // ui.enabled only (default off; J30): nothing hooked or allocated otherwise
     LOGI("init done; the %s backend loads at the first d3d9 call", rt.cfg.Str("proxy.backend").c_str());
 }
 

@@ -28,9 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
 
 ADAPTER = None   # the role 'adapter' is the game's proxy adapter folder (layout.proxy_adapter: wsc.toml [proxy] or proxy/*/adapter.cpp)
+UI_PINS = 'ui-pins'   # the role 'ui_pins' is the game's UI pin file (layout.ui_pins: wsc.toml [proxy] ui_pins or viewer/pins.json; J30)
 # The DLL inputs (rule 79's scope): role -> the places it may live, in lookup order. A change to any of them is a new DLL.
 INPUTS = [('core', ('proxy/core', 'proxy/src')), ('adapter', (ADAPTER,)), ('build_sh', ('proxy/tools/build.sh',)),
-          ('fetch_lua', ('proxy/tools/fetch_lua.py',)), ('build_id', ('proxy/tools/build_id.py',))]
+          ('fetch_lua', ('proxy/tools/fetch_lua.py',)), ('build_id', ('proxy/tools/build_id.py',)),
+          # J30: RmlUi, FreeType and the host's Lua compile into the DLL from the pinned sources the fetcher takes from this pin file
+          ('fetch_ui', ('proxy/tools/fetch_ui.py',)), ('ui_pins', (UI_PINS,))]
 
 
 def _git(root, *args):
@@ -57,13 +60,15 @@ def locate(root, rev='HEAD'):
     root = Path(root)
     try:
         adapter = _adapter_rel(root)
-    except layout.LayoutError as e:
+        pins = layout.ui_pins(root).resolve().relative_to(root.resolve()).as_posix()
+    except (layout.LayoutError, ValueError) as e:
         raise ValueError(f'build_id: {e}') from None
+    name = lambda p: adapter if p is None else pins if p == UI_PINS else p
     subs = [(s, _oid(root, f'{rev}:{s}')) for s in _submodules(root)]
     out = []
     for role, places in INPUTS:
         hit = None
-        for path in (adapter if p is None else p for p in places):
+        for path in (name(p) for p in places):
             oid = _oid(root, f'{rev}:{path}')
             if oid:
                 hit = (role, path, oid, (root, rev, path)); break
@@ -74,7 +79,7 @@ def locate(root, rev='HEAD'):
             if hit:
                 break
         if not hit:
-            raise ValueError(f'build_id: {" or ".join(adapter if p is None else p for p in places)} ({role}) is not tracked at {rev}')
+            raise ValueError(f'build_id: {" or ".join(name(p) for p in places)} ({role}) is not tracked at {rev}')
         out.append(hit)
     return out
 
