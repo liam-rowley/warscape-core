@@ -1,7 +1,9 @@
 // patch_driver.cpp - in-process driver of the runtime patch engine (pure core: patch_engine.h). Called from DllMain only when
 // PlanEngine(...).patches is true (exe accepted by the guard). Every site is checked and logged; writes happen only when the whole
-// plan is accepted. Loader lock: GetModuleHandle, VirtualQuery, VirtualProtect, FlushInstructionCache only.
+// plan is accepted. Value rows (W7) are resolved from their config keys into an effective copy of the table first (patch_value.h),
+// one log line each, and the plan runs on the copy. Loader lock: GetModuleHandle, VirtualQuery, VirtualProtect, FlushInstructionCache only.
 #include "runtime.h"
+#include "patch_value.h"
 #include <memory>
 #include <vector>
 
@@ -32,14 +34,20 @@ void PatchesRun() {
         LOGE("patch_engine: refused - the exe file's ImageBase is unknown (0x%08x), so no rebase delta: nothing written", (unsigned)rt.fileImageBase);
         return;
     }
-    std::unique_ptr<bool[]> en(new bool[ad.nSites + 1]);
-    for (size_t i = 0; i < ad.nSites; ++i) en[i] = !ad.sites[i].configKey || rt.cfg.Bool(ad.sites[i].configKey);
-    const PatchPlan pl = MakePatchPlan(v, delta, ad.sites, ad.nSites, en.get());
+    // the effective table: value rows carry their resolved bytes and are enabled only when they write (the generated table is const)
+    const EffectiveSites eff = ResolveSites(ad.sites, ad.nSites, rt.cfg);
+    const SiteDef* sites = eff.sites.data();
+    for (size_t i = 0; i < ad.nSites; ++i)
+        if (sites[i].valueKey) {
+            const std::string line = ValueLine(sites[i], eff.values[i], rt.cfg);
+            if (eff.values[i].action == ValueAction::Refused) LOGW("%s", line.c_str()); else LOGI("%s", line.c_str());
+        }
+    const PatchPlan pl = MakePatchPlan(v, delta, sites, ad.nSites, eff.enabled.get());
     LOGI("patch_engine: image base %p (file ImageBase 0x%08x, delta 0x%08x)", base, (unsigned)rt.fileImageBase, (unsigned)delta);
     for (size_t i = 0; i < ad.nSites; ++i) {
-        const SiteDef& d = ad.sites[i]; const SiteCheck& c = pl.sites[i];
+        const SiteDef& d = sites[i]; const SiteCheck& c = pl.sites[i];
         LOGI("patch_engine:   %-32s %s RVA 0x%08x -> %p: %s%s cur [%s]", d.id, d.kind == kHook ? "hook " : "patch", (unsigned)c.valueRva, base + c.valueRva,
-             SiteStateName(c.state), c.enabled ? "" : " (key off)", Hex(c.cur, d.len).c_str());
+             SiteStateName(c.state), c.enabled ? "" : d.valueKey ? " (value stock)" : " (key off)", Hex(c.cur, d.len).c_str());
     }
     const std::string sum = PlanSummary(pl, ad.nSites);
     if (pl.verdict == PlanVerdict::Refuse) { LOGE("%s", sum.c_str()); rt.sitesWhy = pl.reason; return; }
@@ -59,16 +67,16 @@ void PatchesRun() {
         }
         void Flush(uint8_t* p, size_t n) override { FlushInstructionCache(GetCurrentProcess(), p, n); }
     } mem;
-    const WriteResult w = WritePlanAtomic(base, pl, ad.sites, mem);
+    const WriteResult w = WritePlanAtomic(base, pl, sites, mem);
     if (!w.ok) {
         LOGE("patch_engine: REFUSED at write time - %s could not be made writable: nothing written (all-or-nothing)%s",
-             w.failedSite >= 0 ? ad.sites[w.failedSite].id : "?", w.reprotectFailures ? ", a protection restore also failed" : "");
+             w.failedSite >= 0 ? sites[w.failedSite].id : "?", w.reprotectFailures ? ", a protection restore also failed" : "");
         return;
     }
     for (size_t i = 0; i < ad.nSites; ++i)
         if (pl.sites[i].write)
-            LOGI("patch_engine: wrote %s at %p: [%s] -> [%s]", ad.sites[i].id, base + pl.sites[i].valueRva, Hex(pl.sites[i].cur, ad.sites[i].len).c_str(),
-                 Hex(ad.sites[i].patch, ad.sites[i].len).c_str());
+            LOGI("patch_engine: wrote %s at %p: [%s] -> [%s]", sites[i].id, base + pl.sites[i].valueRva, Hex(pl.sites[i].cur, sites[i].len).c_str(),
+                 Hex(sites[i].patch, sites[i].len).c_str());
     if (w.reprotectFailures) LOGW("patch_engine: %d site(s) left writable (protection restore failed)", w.reprotectFailures);
     LOGI("patch_engine: %d of %d planned sites written", w.written, pl.nWrite);
     rt.sitesAccepted = true;
