@@ -3,8 +3,9 @@
   "description": "Covers B41, B59. engine_sites rows get value_offset, an anchor before an opcode whose value follows an absolute address (B41), and patch rows may name an int or float config_keys key (value_key) whose value the proxy writes as the immediate, only when it differs from stock, logging it (B59); files: the engine_sites schema, gen_tables.py, patch_engine.h, patch_driver.cpp, a float key type in config.h, the patch engine host test. Unblocks napoleon J27.",
   "title": "Engine-site patch values: value_offset and numeric values from config keys",
   "phase": 1,
-  "status": "needs_brief",
+  "status": "queued",
   "model": "sonnet",
   "needs_pc": false,
-  "depends_on": []
+  "depends_on": [],
+  "brief": "jobs/W7/brief.md"
 }
