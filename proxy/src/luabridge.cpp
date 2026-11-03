@@ -31,6 +31,15 @@
 //                                                          (the codes are the game's: halt, formation toggles, run/walk ...)
 //   wsp.peek(addr, n) -> hex | nil, err                     probe: n <= 512 bytes read (never a write)
 //   wsp.orders_info() -> text                              install state, owner path, thread ids
+//   ship orders (dev.orders, the ship half of orders.cpp; ships.h; J60). A ship ref: a unit ref's forms, or n = the n-th ship of the fleet:
+//   wsp.ship_state(ref) -> {id, ptr, x, y, z, heading, heading_raw, m02, m22, sail, sail_level, surrendered, blocked, fleet_index,
+//                           fleet_count, wind_x, wind_z, wind_angle} | nil, err   (no speed: two reads give it)
+//   wsp.ship_list([ref]) -> { {state}, ... } | nil, err    the fleet of ref (none: the cached player fleet)
+//   wsp.ship_selection() -> {ships = {ptr, ...}, groups = n} | nil, err   the UI's own selection, its ships
+//   wsp.ship_move(ref, x, z, [heading], [sail], [queue]) -> true, info | nil, err   sail "stationary"|"battle"|"half"|"full"; a heading
+//                                                          is a queued facing order after the move (the move has none)
+//   wsp.ship_face(ref, heading, [flag], [queue]) -> true, info | nil, err   the engine's rotate command (flag: the engine's own)
+//   wsp.ship_halt(ref) -> true, info | nil, err
 #include "dev.h"
 #include <deque>
 #include <map>
@@ -242,11 +251,92 @@ int l_peek(lua_State* L) {
 }
 int l_orders_info(lua_State* L) { lua_pushstring(L, OrdersInfo().c_str()); return 1; }
 
+// ---- ship orders (J60): a ship ref is a unit ref's forms, a number n being the n-th ship of the player's fleet
+bool ShipRef(lua_State* L, int i, uint32_t& ship, std::string& why) {
+    if (lua_type(L, i) != LUA_TNUMBER) return UnitRef(L, i, ship, why);
+    const int n = (int)lua_tonumber(L, i);
+    std::vector<uint32_t> ships;
+    if (!OrdersFleet(0, ships, why)) return false;
+    if (n < 1 || n > (int)ships.size()) { why = "ship number " + std::to_string(n) + " is not in the fleet (1.." + std::to_string(ships.size()) + ")"; return false; }
+    ship = ships[n - 1]; return true;
+}
+void PushShip(lua_State* L, const ShipState& s) {
+    lua_createtable(L, 0, 20);
+    lua_pushstring(L, HexPtr(s.ship).c_str()); lua_setfield(L, -2, "ptr");
+    SetNum(L, "id", s.fleetIndex + 1); SetNum(L, "fleet_index", s.fleetIndex); SetNum(L, "fleet_count", s.fleetCount);
+    lua_pushstring(L, HexPtr(s.army).c_str()); lua_setfield(L, -2, "army");
+    SetNum(L, "x", s.x); SetNum(L, "y", s.y); SetNum(L, "z", s.z); SetNum(L, "heading", s.heading); SetNum(L, "heading_raw", s.headingRaw);
+    SetNum(L, "m02", s.m02); SetNum(L, "m22", s.m22); SetNum(L, "sail_level", s.sailLevel);
+    lua_pushstring(L, SailName(s.sail)); lua_setfield(L, -2, "sail");
+    lua_pushboolean(L, s.surrendered); lua_setfield(L, -2, "surrendered");
+    lua_pushboolean(L, s.blocked); lua_setfield(L, -2, "blocked");
+    if (s.blocked) { lua_pushstring(L, s.blockedWhy.c_str()); lua_setfield(L, -2, "blocked_why"); }
+    if (s.hasWind) { SetNum(L, "wind_x", s.windX); SetNum(L, "wind_z", s.windZ); SetNum(L, "wind_angle", s.windAngle); }
+}
+int l_ship_state(lua_State* L) {
+    uint32_t ship = 0; std::string why; ShipState s;
+    if (!ShipRef(L, 1, ship, why) || !OrdersShip(ship, s, why)) return Fail(L, why.c_str());
+    PushShip(L, s);
+    return 1;
+}
+int l_ship_list(lua_State* L) {
+    uint32_t ship = 0; std::string why; std::vector<uint32_t> ships;
+    if (lua_gettop(L) >= 1 && !lua_isnil(L, 1) && !ShipRef(L, 1, ship, why)) return Fail(L, why.c_str());
+    if (!OrdersFleet(ship, ships, why)) return Fail(L, why.c_str());
+    lua_createtable(L, (int)ships.size(), 0);
+    int i = 1;
+    for (uint32_t p : ships) {
+        ShipState s; std::string w;
+        if (OrdersShip(p, s, w)) PushShip(L, s);
+        else { lua_createtable(L, 0, 2); lua_pushstring(L, HexPtr(p).c_str()); lua_setfield(L, -2, "ptr"); lua_pushstring(L, w.c_str()); lua_setfield(L, -2, "why"); }
+        lua_rawseti(L, -2, i++);
+    }
+    return 1;
+}
+int l_ship_selection(lua_State* L) {
+    std::vector<uint32_t> ships; int groups = 0; std::string why;
+    if (!OrdersShipSelection(ships, groups, why)) return Fail(L, why.c_str());
+    lua_createtable(L, 0, 2);
+    lua_createtable(L, (int)ships.size(), 0);
+    int i = 1; for (uint32_t p : ships) { lua_pushstring(L, HexPtr(p).c_str()); lua_rawseti(L, -2, i++); }
+    lua_setfield(L, -2, "ships");
+    SetNum(L, "groups", groups);
+    return 1;
+}
+int l_ship_move(lua_State* L) {
+    uint32_t ship = 0; std::string why, info;
+    if (!ShipRef(L, 1, ship, why)) return Fail(L, why.c_str());
+    if (lua_type(L, 2) != LUA_TNUMBER || lua_type(L, 3) != LUA_TNUMBER) return Fail(L, "expected (ship, x, z, [heading], [sail], [queue])");
+    ShipMoveArgs a; a.x = (float)lua_tonumber(L, 2); a.z = (float)lua_tonumber(L, 3);
+    if (lua_type(L, 4) == LUA_TNUMBER) { a.hasHeading = true; a.heading = lua_tonumber(L, 4); }
+    if (lua_type(L, 5) == LUA_TSTRING) { a.sail = SailFromName(lua_tostring(L, 5)); if (a.sail < 0) return Fail(L, "sail is stationary, battle, half or full"); }
+    a.queue = lua_toboolean(L, 6) != 0;
+    if (!OrdersShipMove(ship, a, info, why)) return Fail(L, why.c_str());
+    lua_pushboolean(L, 1); lua_pushstring(L, info.c_str());
+    return 2;
+}
+int l_ship_face(lua_State* L) {
+    uint32_t ship = 0; std::string why, info;
+    if (!ShipRef(L, 1, ship, why)) return Fail(L, why.c_str());
+    if (lua_type(L, 2) != LUA_TNUMBER) return Fail(L, "expected (ship, heading, [flag], [queue])");
+    if (!OrdersShipFace(ship, lua_tonumber(L, 2), lua_toboolean(L, 3) ? 1 : 0, lua_toboolean(L, 4) != 0, info, why)) return Fail(L, why.c_str());
+    lua_pushboolean(L, 1); lua_pushstring(L, info.c_str());
+    return 2;
+}
+int l_ship_halt(lua_State* L) {
+    uint32_t ship = 0; std::string why, info;
+    if (!ShipRef(L, 1, ship, why) || !OrdersShipHalt(ship, info, why)) return Fail(L, why.c_str());
+    lua_pushboolean(L, 1); lua_pushstring(L, info.c_str());
+    return 2;
+}
+
 const luaL_Reg s_funcs[] = {
     { "log", l_log }, { "version", l_version }, { "poll", l_poll }, { "result", l_result }, { "dev_config", l_dev_config },
     { "dev_state", l_dev_state }, { "report", l_report }, { "vanilla", l_vanilla }, { "cam_set", l_cam_set },
     { "unit_state", l_unit_state }, { "unit_list", l_unit_list }, { "selection", l_selection }, { "order_move", l_order_move }, { "order_command", l_order_command },
-    { "peek", l_peek }, { "orders_info", l_orders_info }, { nullptr, nullptr }
+    { "peek", l_peek }, { "orders_info", l_orders_info },
+    { "ship_state", l_ship_state }, { "ship_list", l_ship_list }, { "ship_selection", l_ship_selection }, { "ship_move", l_ship_move },
+    { "ship_face", l_ship_face }, { "ship_halt", l_ship_halt }, { nullptr, nullptr }
 };
 } // namespace
 

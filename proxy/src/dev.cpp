@@ -607,6 +607,7 @@ void DevInit() {
     ConsoleInit(k.console, Adapter().console);
     CameraInit(k.camera, Adapter().camera);
     OrdersInit(k.orders, Adapter().orders);
+    OrdersShipsInit(Adapter().ships);   // J60: the ship half (nullptr = ships off, land unaffected)
     if (k.capture) CaptureInit();
 
     std::vector<FileRule> rules;
@@ -641,6 +642,7 @@ void DevOnDirect3DCreate(void* d3d) {
     ConsoleInstall();   // once, before any campaign (no-op with dev.console=0)
     CameraInstall();    // once (no-op with dev.camera=0)
     OrdersInstall();    // once (no-op with dev.orders=0)
+    OrdersShipsInstall();   // after the land half: the ship sites (off alone on a mismatch)
     if (s_frames && d3d && !o_CreateDevice) VtableHook(*(void***)d3d, 16, (void*)hk_CreateDevice, (void**)&o_CreateDevice, "IDirect3D9::CreateDevice");
 }
 

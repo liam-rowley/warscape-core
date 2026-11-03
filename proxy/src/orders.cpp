@@ -10,6 +10,7 @@
 #include "runtime.h"
 #include "dev.h"
 #include "orders.h"
+#include "ships.h"
 #include <cstring>
 #include <deque>
 #include <map>
@@ -160,6 +161,97 @@ bool CommandLocked(uint32_t unit, int cmd, float arg, std::string& info, std::st
     info = b;
     LOGI("orders: %s", b);
     return true;
+}
+
+// ---- ships (J60): their own decode (ships.h) and calls; the queue, Selection, dtor and free are the land route's above. The
+// ship half installs only after the land half and turns off alone on a site mismatch (land unaffected).
+const ShipsAdapter* s_sad = nullptr;
+bool s_shipsInstalled = false;
+std::string s_shipsWhy = "not installed yet";
+ShipLayout s_SL;
+uint32_t s_shipVec = 0, s_shipArmy = 0;
+uintptr_t s_shipAdd = 0, s_shipLoc = 0, s_shipMoveCtor = 0, s_shipMovePush = 0, s_faceCtor = 0, s_facePush = 0, s_haltCtor = 0, s_haltPush = 0;
+
+using LocFn = void*(__thiscall*)(void* self, uint32_t* locOut, const float* xz);
+using ShipMoveFn = void*(__thiscall*)(void* self, void* sel, const uint32_t* loc, int sail, int mode, int queue);
+using FaceFn = void*(__thiscall*)(void* self, void* sel, int angle, int flag, int queue);
+using HaltFn = void*(__thiscall*)(void* self, void* sel);
+
+bool ShipLocked(uint32_t ship, ShipState& s, std::string& why) {
+    if (!s_key) { why = "dev.orders=0"; return false; }
+    if (!s_shipsInstalled) { why = "ship orders not installed: " + s_shipsWhy; return false; }
+    s = ReadShip(ship, s_SL, Read);
+    if (!s.ok) { why = s.why; return false; }
+    s_shipArmy = s.army;
+    return true;
+}
+
+// Every precondition of a ship order, in order: the key, the install, the thread, the ship's decode and the engine's own blocking flags,
+// the battle and its queue, every call target. Then the one-ship Selection; `build` constructs the command into cmd and returns the push.
+template <class Build>
+bool ShipOrderLocked(uint32_t ship, const char* what, std::string& info, std::string& why, Build build) {
+    if (!s_key) { why = "dev.orders=0"; return false; }
+    if (!s_shipsInstalled) { why = "ship orders not installed: " + s_shipsWhy; return false; }
+    if (GetCurrentThreadId() != s_engineTid) { why = "not the engine thread"; return false; }
+    ShipState s;
+    if (!ShipLocked(ship, s, why) || !ShipOrderable(s, why)) return false;
+    uint32_t battle = 0, queue = 0;
+    if (!Battle(battle, queue, why)) return false;
+    for (uintptr_t f : { s_selCtor, s_shipAdd, s_cmdDtor, s_free, s_shipLoc, s_shipMoveCtor, s_shipMovePush, s_faceCtor, s_facePush, s_haltCtor, s_haltPush })
+        if (!Executable(f)) { why = "a ship order function is not executable code in the exe"; return false; }
+    alignas(16) uint8_t sel[kSelBuf] = {};
+    ((CtorFn)s_selCtor)(sel);
+    ((AddFn)s_shipAdd)(sel, ship);
+    uint32_t taken = 0; memcpy(&taken, sel + s_shipVec + s_ad->vecCountOff, 4);
+    std::string detail; bool pushed = false;
+    if (taken == 1) pushed = build((void*)(uintptr_t)queue, sel, detail);
+    for (int off : s_ad->selDataOffs) { uint32_t p = 0; memcpy(&p, sel + off, 4); if (p) ((FreeFn)s_free)((void*)(uintptr_t)p); }
+    if (taken != 1) { char b[96]; snprintf(b, sizeof b, "the engine refused the ship (AddShip took %u: routing, sinking or withdrawing)", taken); why = b; return false; }
+    ++s_orders;
+    char b[384];
+    snprintf(b, sizeof b, "%s #%d ship %s %s pushed %d (was at %.3f, %.3f, %.3f heading %.3f, sail %s %.3f)", what, s_orders, Hex(ship).c_str(),
+             detail.c_str(), pushed ? 1 : 0, s.x, s.y, s.z, s.heading, SailName(s.sail), s.sailLevel);
+    info = b;
+    LOGI("orders: %s", b);
+    if (!pushed) { why = "the queue push returned false: " + detail; return false; }
+    return true;
+}
+
+// Push one command already built in cmd, then its dtor. s_cs held.
+bool PushCmd(uintptr_t push, void* queue, uint8_t* cmd) {
+    const bool ok = (((PushFn)push)(queue, cmd) & 0xff) != 0;
+    ((DtorFn)s_cmdDtor)(cmd);
+    return ok;
+}
+
+bool ShipFaceBuild(void* queue, uint8_t* sel, double heading, int flag, bool q, std::string& detail) {
+    alignas(16) uint8_t cmd[kCmdBuf] = {};
+    const int16_t angle = RawFromDeg(heading);
+    ((FaceFn)s_faceCtor)(cmd, sel, (int)angle, flag ? 1 : 0, q ? 1 : 0);
+    char b[96]; snprintf(b, sizeof b, "face %.3f (raw %d) flag %d queue %d", heading, (int)angle, flag ? 1 : 0, q ? 1 : 0); detail += b;
+    return PushCmd(s_facePush, queue, cmd);
+}
+
+bool ShipMoveLocked(uint32_t ship, const ShipMoveArgs& a, std::string& info, std::string& why) {
+    if (!CheckShipMove(a, why)) return false;
+    uint32_t loc[5] = {};
+    return ShipOrderLocked(ship, "ship move", info, why, [&](void* queue, uint8_t* sel, std::string& detail) {
+        const float xz[2] = { a.x, a.z };
+        ((LocFn)s_shipLoc)(nullptr, loc, xz);   // the script path's target: (x, sea level, z); `this` is not read
+        float lx, ly, lz; memcpy(&lx, &loc[0], 4); memcpy(&ly, &loc[1], 4); memcpy(&lz, &loc[2], 4);
+        char b[192];
+        if (!std::isfinite(ly) || std::fabs(lx - a.x) > 0.01f || std::fabs(lz - a.z) > 0.01f) {
+            snprintf(b, sizeof b, "the ship location gave (%.3f, %.3f, %.3f) for (%.3f, %.3f): not pushed", lx, ly, lz, a.x, a.z); detail = b; return false;
+        }
+        const int sail = a.sail >= 0 ? s_SL.sails[a.sail] : s_sad->moveSail;
+        alignas(16) uint8_t cmd[kCmdBuf] = {};
+        ((ShipMoveFn)s_shipMoveCtor)(cmd, sel, loc, sail, s_sad->moveMode, a.queue ? 1 : 0);
+        snprintf(b, sizeof b, "to (%.3f, %.3f, %.3f) sail %d mode %d queue %d", lx, ly, lz, sail, s_sad->moveMode, a.queue ? 1 : 0); detail = b;
+        if (!PushCmd(s_shipMovePush, queue, cmd)) return false;
+        if (!a.hasHeading) return true;
+        detail += "; then ";
+        return ShipFaceBuild(queue, sel, a.heading, 0, true, detail);   // the move has no heading: a queued facing order after it
+    });
 }
 
 BOOL CALLBACK FindWnd(HWND h, LPARAM p) {
@@ -334,6 +426,107 @@ bool OrdersGroundAt(float x, float z, float& y, std::string& why) {
     if (!std::isfinite(ly) || std::fabs(lx - x) > 0.01f || std::fabs(lz - z) > 0.01f) { why = "no ground there (the projection moved the point)"; return false; }
     y = ly;
     return true;
+}
+
+// ---- ships (J60)
+void OrdersShipsInit(const ShipsAdapter* ad) {
+    Lock l;
+    s_sad = ad;
+    if (s_key && !ad) LOGI("orders: the adapter has no ship route: ships off");
+}
+
+// After OrdersInstall: verify the ship sites and read their operands. Off alone on a mismatch.
+void OrdersShipsInstall() {
+    Lock l;
+    if (!s_key || !s_sad || s_shipsInstalled) return;
+    if (!s_installed) { s_shipsWhy = "the land route is not installed: " + s_sitesWhy; LOGW("orders: ships not installed: %s", s_shipsWhy.c_str()); return; }
+    const ShipsAdapter& a = *s_sad;
+    for (const char* s : { a.vtableSite, a.positionSite, a.bearingSite, a.fleetSite, a.sailSite, a.orderableSite, a.surrenderSite, a.windChainSite,
+                           a.windVectorSite, a.windAngleSite, a.selAddShipSite, a.locationSite, a.moveCtorSite, a.movePushSite, a.faceCtorSite,
+                           a.facePushSite, a.haltCtorSite, a.haltPushSite })
+        if (!SiteAddress(s)) { s_shipsWhy = std::string("site ") + s + " not accepted by the patch engine"; LOGE("orders: ships not installed: %s", s_shipsWhy.c_str()); return; }
+    if (a.cmdBytes <= 0 || (size_t)a.cmdBytes > kCmdBuf) { s_shipsWhy = "the adapter's ship command size exceeds the driver's buffer"; LOGE("orders: ships not installed: %s", s_shipsWhy.c_str()); return; }
+    ShipLayout L;
+    L.vtable = Operand(a.vtableSite, a.vtableOperand);   // the loader relocated it: the live vtable address
+    L.pos = Operand8(a.positionSite, a.posOperand8);
+    L.m02 = Operand(a.bearingSite, a.m02Operand); L.m22 = Operand(a.bearingSite, a.m22Operand);
+    L.army = Operand(a.fleetSite, a.armyOperand); L.count = Operand(a.fleetSite, a.countOperand); L.list = Operand(a.fleetSite, a.listOperand);
+    L.sail = Operand(a.sailSite, a.sailOperand);
+    L.blockA = Operand(a.orderableSite, a.blockAOperand); L.blockB = Operand(a.orderableSite, a.blockBOperand);
+    L.state = Operand(a.orderableSite, a.stateOperand); L.stateBad = Operand8(a.orderableSite, a.stateBadOperand8);
+    L.surr = Operand(a.surrenderSite, a.surrenderOperand); L.surrValue = Operand8(a.surrenderSite, a.surrenderValueOperand8);
+    L.windA = Operand(a.windChainSite, a.windAOperand); L.windB = Operand8(a.windChainSite, a.windBOperand8); L.windC = Operand(a.windChainSite, a.windCOperand);
+    L.windX = Operand8(a.windVectorSite, a.windXOperand8); L.windZ = Operand8(a.windVectorSite, a.windZOperand8);
+    L.windAngle = Operand(a.windAngleSite, a.windAngleOperand);
+    for (int i = 0; i < 4; ++i) L.sails[i] = a.sails[i];
+    for (int i = 0; i < 3; ++i) L.sailAbove[i] = a.sailAbove[i];
+    // the position offset is the ship vtable's slot 0: prove the vtable's first entry is the position site's function
+    uint32_t slot0 = 0;
+    if (!ReadPtr(L.vtable, slot0) || slot0 != (uint32_t)SiteAddress(a.positionSite)) {
+        s_shipsWhy = "the ship vtable's slot 0 is not the position getter site"; LOGE("orders: ships not installed: %s", s_shipsWhy.c_str()); return;
+    }
+    s_shipVec = Operand8(a.selAddShipSite, a.shipVecOperand8);
+    s_shipAdd = SiteAddress(a.selAddShipSite); s_shipLoc = SiteAddress(a.locationSite);
+    s_shipMoveCtor = SiteAddress(a.moveCtorSite); s_shipMovePush = SiteAddress(a.movePushSite);
+    s_faceCtor = SiteAddress(a.faceCtorSite); s_facePush = SiteAddress(a.facePushSite);
+    s_haltCtor = SiteAddress(a.haltCtorSite); s_haltPush = SiteAddress(a.haltPushSite);
+    s_SL = L; s_shipsInstalled = true; s_shipsWhy.clear();
+    LOGI("orders: ships install: vtable 0x%08x pos +0x%x heading atan2(+0x%x, +0x%x) army +0x%x (count +0x%x, list +0x%x) sail +0x%x (above %.3f/%.3f/%.3f) "
+         "blocked +0x%x/+0x%x/+0x%x==%u surrendered +0x%x==%u wind [[[ship+0x%x]+0x%x]+0x%x] (+0x%x, +0x%x) angle +0x%x; selection ship vector +0x%x; "
+         "calls add %p loc %p move %p/%p face %p/%p halt %p/%p",
+         L.vtable, L.pos, L.m02, L.m22, L.army, L.count, L.list, L.sail, L.sailAbove[0], L.sailAbove[1], L.sailAbove[2], L.blockA, L.blockB, L.state, L.stateBad,
+         L.surr, L.surrValue, L.windA, L.windB, L.windC, L.windX, L.windZ, L.windAngle, s_shipVec, (void*)s_shipAdd, (void*)s_shipLoc, (void*)s_shipMoveCtor,
+         (void*)s_shipMovePush, (void*)s_faceCtor, (void*)s_facePush, (void*)s_haltCtor, (void*)s_haltPush);
+}
+
+bool OrdersShip(uint32_t ship, ShipState& s, std::string& why) { Lock l; return ShipLocked(ship, s, why); }
+
+bool OrdersFleet(uint32_t ship, std::vector<uint32_t>& ships, std::string& why) {
+    Lock l;
+    if (ship) { ShipState s; if (!ShipLocked(ship, s, why)) return false; }
+    else if (!s_key) { why = "dev.orders=0"; return false; }
+    else if (!s_shipsInstalled) { why = "ship orders not installed: " + s_shipsWhy; return false; }
+    if (!s_shipArmy) { why = "no fleet known yet: name a ship, or select one in the UI and read the ship selection first"; return false; }
+    uint32_t cnt = 0, list = 0;
+    if (!ReadPtr(s_shipArmy + s_SL.count, cnt) || !ReadPtr(s_shipArmy + s_SL.list, list) || (int)cnt < 0 || (int)cnt > s_SL.maxFleet) { why = "the army's fleet list is not readable"; s_shipArmy = 0; return false; }
+    ships.clear();
+    for (uint32_t i = 0; i < cnt; ++i) { uint32_t p = 0; if (!ReadPtr(list + 4 * i, p)) { why = "the army's fleet list is not readable"; return false; } ships.push_back(p); }
+    return true;
+}
+
+// The UI's own selection S, its ship part (the same Selection layout: the ship vector at the AddShip site's offset, groups 0x10 before).
+bool OrdersShipSelection(std::vector<uint32_t>& ships, int& groups, std::string& why) {
+    Lock l;
+    if (!s_key) { why = "dev.orders=0"; return false; }
+    if (!s_shipsInstalled) { why = "ship orders not installed: " + s_shipsWhy; return false; }
+    uint32_t owner = 0, holder = 0, cnt = 0, data = 0, gcnt = 0;
+    if (!ReadPtr(s_global, owner) || !owner || !ReadPtr(owner + s_holderOff, holder) || !holder) { why = "no UI selection holder (not in a battle?)"; return false; }
+    const uint32_t vec = holder + s_selOff + s_shipVec;
+    if (!ReadPtr(vec + s_ad->vecCountOff, cnt) || !ReadPtr(vec + s_ad->vecDataOff, data) || (int)cnt < 0 || (int)cnt > s_SL.maxFleet) { why = "the UI selection's ships are not readable"; return false; }
+    if (!ReadPtr(vec - 0x10 + s_ad->vecCountOff, gcnt) || (int)gcnt < 0 || (int)gcnt > s_SL.maxFleet) { why = "the UI selection's ship groups are not readable"; return false; }
+    groups = (int)gcnt;
+    ships.clear();
+    for (uint32_t i = 0; i < cnt; ++i) { uint32_t p = 0; if (!ReadPtr(data + 4 * i, p)) { why = "the UI selection is not readable"; return false; } ships.push_back(p); }
+    if (!ships.empty()) { ShipState s; std::string w; ShipLocked(ships[0], s, w); }   // caches the fleet
+    return true;
+}
+
+bool OrdersShipMove(uint32_t ship, const ShipMoveArgs& a, std::string& info, std::string& why) { Lock l; return ShipMoveLocked(ship, a, info, why); }
+
+bool OrdersShipFace(uint32_t ship, double heading, int flag, bool queue, std::string& info, std::string& why) {
+    Lock l;
+    if (!CheckFace(heading, why)) return false;
+    return ShipOrderLocked(ship, "ship face", info, why, [&](void* q, uint8_t* sel, std::string& detail) { return ShipFaceBuild(q, sel, heading, flag, queue, detail); });
+}
+
+bool OrdersShipHalt(uint32_t ship, std::string& info, std::string& why) {
+    Lock l;
+    return ShipOrderLocked(ship, "ship halt", info, why, [&](void* q, uint8_t* sel, std::string& detail) {
+        alignas(16) uint8_t cmd[kCmdBuf] = {};
+        ((HaltFn)s_haltCtor)(cmd, sel);
+        detail = "halt";
+        return PushCmd(s_haltPush, q, cmd);
+    });
 }
 
 std::string OrdersInfo() {

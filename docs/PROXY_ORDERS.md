@@ -52,3 +52,24 @@ is the game adapter's `ctl.routes.orders`.
 Site ids and operand offsets inside their stock bytes (checked by `proxy/tests/test_orders.cpp` against the generated table), the
 selection and command object sizes, the selection's four buffer offsets, and the front/width offsets that have no engine accessor
 (proven by readback in the game repo). A game without the route passes `nullptr`.
+
+## Ships (J60: `ships.h`, the ship half of `orders.cpp`, `ShipsAdapter`)
+Ships are their own objects with their own fleet list, so they have their own decode and entry points; the queue, the `Selection`,
+the command dtor and the engine free are the land route's. `OrdersMove`/`ReadUnit` keep refusing a unit on a moving frame. The ship
+half installs after the land half (`OrdersShipsInstall`) and turns off alone on a site mismatch; `GameAdapter::ships = nullptr` = no ships.
+- **State** (`OrdersShip`, `OrdersFleet`, `OrdersShipSelection`; any thread, reads only): every read checks the ship vtable (a stale
+  or foreign pointer is refused) and the ship's place in its army's fleet list; position, heading (the engine getter's
+  `atan2(m02, m22)` int16), the live sail level and the setting the engine reports, the engine's blocking flags and surrender, the
+  wind when its chain is readable. No speed: the engine keeps none the game repo found, so callers derive it from two reads (`ShipSpeed`).
+- **Orders** (engine thread only; one ship per command, a one-ship `Selection` of our own; every check before the first call):
+  `OrdersShipMove(ship, ShipMoveArgs{x, z, heading, sail, queue})` builds the target with the engine's ship location call (no y) and
+  pushes the ship move command carrying the sail; a heading is a queued facing order after it (the move has none).
+  `OrdersShipFace(ship, heading, flag, queue)` (the engine's rotate command; `flag` is its own, meaning in the game's facts) and
+  `OrdersShipHalt(ship)`. A ship the engine's AddShip refuses (routing, sinking) is refused with the count it took.
+- **Lua**: `wsp.ship_state`, `ship_list`, `ship_selection`, `ship_move(ref, x, z, [heading], [sail], [queue])`, `ship_face`,
+  `ship_halt` (`luabridge.cpp` header). A number ref is the n-th ship of the cached fleet.
+- **Checked result** (`CheckShipArrival`, `ShipSettled`; C17): a live reading against the ordered target, heading and sail, and that
+  the ship moved at least `minMoveFrac` of the distance asked; settled when two reads `dt` apart give less than `settleSpeed` m/s and
+  `settleTurn` deg/s. The thresholds are the game's measured numbers (its route block), not the defaults in `ships.h`.
+- **Adapter**: site ids and operand offsets (checked by `proxy/tests/test_ships.cpp` against the generated table), the command size,
+  the move's default sail and mode, the engine's four sail values and its level thresholds.

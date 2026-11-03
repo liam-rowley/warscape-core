@@ -26,7 +26,7 @@ const GestureAdapter kGesture = { NullScene, NullCamera, NullGround, NullSelecti
 
 const GameAdapter& Adapter() {
     static const GameAdapter a = { gen::kGameName, gen::kConfigFile, gen::kModDir, gen::kInstanceMutex, gen::kIdentity,
-                                   gen::kSites, gen::kSiteCount, gen::kKeys, gen::kKeyCount, &kDev, nullptr, nullptr, nullptr, &kGesture };
+                                   gen::kSites, gen::kSiteCount, gen::kKeys, gen::kKeyCount, &kDev, nullptr, nullptr, nullptr, &kGesture, nullptr };
     return a;
 }
 

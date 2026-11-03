@@ -7,6 +7,7 @@
 #include "console.h"
 #include "camera.h"
 #include "orders.h"
+#include "ships.h"
 
 namespace wsp {
 
@@ -61,7 +62,16 @@ long OrdersPost(uint32_t unit, const MoveArgs& a);    // any thread: queued for 
 bool OrdersPostResult(long id, bool& ok, std::string& text);   // a posted order's outcome, once
 bool OrdersPeek(uint32_t a, size_t n, std::string& hex, std::string& why);         // probe: n bytes as hex (reads only)
 bool OrdersGroundAt(float x, float z, float& y, std::string& why);   // W6: the ground height the move order uses (the engine thread only)
-std::string OrdersInfo();                             // install state, the owner path's pointers, the thread ids
+// ships (J60; ships.h): their own decode and calls on the land route's queue; every entry refuses with the key off
+void OrdersShipsInit(const ShipsAdapter* ad);        // DevInit (nullptr = ships off)
+void OrdersShipsInstall();                           // after OrdersInstall: verify the ship sites, read the offsets
+bool OrdersShip(uint32_t ship, ShipState& s, std::string& why);                         // any thread (reads only)
+bool OrdersFleet(uint32_t ship, std::vector<uint32_t>& ships, std::string& why);        // ship's fleet (0 = the cached player fleet)
+bool OrdersShipSelection(std::vector<uint32_t>& ships, int& groups, std::string& why);  // the UI's own selection S, its ships
+bool OrdersShipMove(uint32_t ship, const ShipMoveArgs& a, std::string& info, std::string& why);   // the engine thread only
+bool OrdersShipFace(uint32_t ship, double heading, int flag, bool queue, std::string& info, std::string& why);   // the engine thread only
+bool OrdersShipHalt(uint32_t ship, std::string& info, std::string& why);                // the engine thread only
+std::string OrdersInfo();                           // install state, the owner path's pointers, the thread ids
 
 // capture.cpp (J8): the frame capture behind dev.capture; decisions in its header
 void CaptureInit();                                   // DevInit: the capture folder

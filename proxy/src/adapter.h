@@ -12,6 +12,7 @@
 #include "console.h"
 #include "camera.h"
 #include "orders.h"
+#include "ships.h"
 
 namespace wsp {
 
@@ -64,6 +65,7 @@ struct GameAdapter {
     const CameraAdapter* camera;             // proxy/<game>/adapter.cpp (J43); nullptr = no battle camera setter
     const OrdersAdapter* orders;             // proxy/<game>/adapter.cpp (J28); nullptr = no battle unit orders
     const GestureAdapter* gesture;           // proxy/<game>/adapter.cpp (W6); nullptr = no gestures (the layer is inert)
+    const ShipsAdapter* ships;               // proxy/<game>/adapter.cpp (J60); nullptr = no ship orders (land unaffected)
 };
 
 const GameAdapter& Adapter();   // defined by the game's adapter.cpp
