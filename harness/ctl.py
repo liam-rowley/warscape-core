@@ -46,17 +46,17 @@ POSE_FIELDS = ('x', 'y', 'z', 'yaw', 'pitch', 'fov')
 
 
 def bash():
-    """The bash that runs job.sh and shot.sh: tools/verbs/setup.py git_bash() (J41, J22), so Windows gets Git Bash and never the WSL
-    launcher on PATH. ctl.py runs from the repo (it is not in the watcher kit), so the finder is loaded by path; when it cannot be
-    loaded or finds nothing, plain 'bash' as before (a missing bash then fails in the call, as it always did)."""
+    """The bash that runs job.sh and shot.sh: the core's own finder, `warscape/gitbash.py` git_bash() (B18), so Windows gets Git Bash
+    and never the WSL launcher on PATH. ctl.py runs from a core checkout (it is not in the watcher kit), so `warscape` is imported from
+    the core root `_OWN`; nothing under the game root is read. When the finder cannot be imported or finds nothing, plain 'bash' as
+    before (a missing bash then fails in the call, as it always did)."""
     global _BASH
     if _BASH is None:
         try:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location('setup_verb', ROOT / 'tools' / 'verbs' / 'setup.py')
-            m = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(m)
-            _BASH = m.git_bash() or 'bash'
+            if str(_OWN) not in sys.path:
+                sys.path.insert(0, str(_OWN))
+            from warscape import gitbash
+            _BASH = gitbash.git_bash() or 'bash'
         except Exception:   # noqa: BLE001  (any failure to load the finder falls back to the old behaviour)
             _BASH = 'bash'
     return _BASH
