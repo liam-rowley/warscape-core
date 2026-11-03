@@ -1,5 +1,6 @@
 """discovery/engine_api.py: probe-line parsing, the last-block rule for a state probed twice, kinds and J6 answers (synthetic logs)."""
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -80,6 +81,24 @@ class Rel(unittest.TestCase):
         from unittest import mock
         with mock.patch.object(engine_api.os.path, 'relpath', side_effect=ValueError('other mount')):
             self.assertTrue(engine_api._rel('x/y.log').endswith('/x/y.log'))
+
+    def test_build_lists_a_log_on_another_drive(self):
+        # the same case through build(): its 'logs' list must use _rel, not os.path.relpath (W4 CI Windows red, 2026-11-03)
+        from unittest import mock
+        real = os.path.relpath
+
+        def other_drive(p, start=os.curdir):
+            if os.path.basename(str(p)).endswith('_proxy.log'):
+                raise ValueError("path is on mount 'C:', start on mount 'D:'")
+            return real(p, start)
+        with tempfile.TemporaryDirectory() as d:
+            raw = Path(d) / 'raw'
+            raw.mkdir()
+            (raw / 'a_proxy.log').write_text(T + 'api land G BattleUI:table\n' + T + 'api land __end total=1\n', encoding='utf-8')
+            with mock.patch.object(engine_api.os.path, 'relpath', side_effect=other_drive):
+                doc = engine_api.build([d])
+        self.assertEqual(len(doc['logs']), 1)
+        self.assertTrue(doc['logs'][0].endswith('raw/a_proxy.log'))
 
 
 class Samples(unittest.TestCase):

@@ -244,7 +244,7 @@ def build(runs):
     per_state = {s: {'names': sum(len(d) for d in o.values()), 'probe_total': totals.get(s),
                      'owners': len(o), **({'note': STATE_NOTES[s]} if s in STATE_NOTES else {})} for s, o in sorted(seen.items())}
     return {'generator': 'discovery/core/engine_api.py', 'runs': [r.replace('\\', '/') for r in runs],
-            'logs': sorted(os.path.relpath(p, REPO).replace('\\', '/') for p in logs),
+            'logs': sorted(_rel(p) for p in logs),
             'states': per_state, 'dropped_blocks': dropped, 'j6': j6_answers(names), 'j6_arg_drift': drift, 'names': rows}
 
 
