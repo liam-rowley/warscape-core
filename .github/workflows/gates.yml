@@ -36,7 +36,7 @@ jobs:
   # and the null game is a folder inside this repo (backlog B16).
   proxy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30   # J30: RmlUi and FreeType compile twice (mingw for the DLL, g++ for the host tests)
     env:
       WSP_GAME_ROOT: proxy/tests/null_game   # relative to the checkout: layout.py resolves it
       WSP_BUILD_ID: nullgame-ci

@@ -55,7 +55,7 @@ reference `repo`; `"extract"`; optionally `captures` under the target), `carry_o
 `engine_api.json`, `lua_cfuncs.json`, `probe_safe.json`, `exe_strings.tsv.gz`, `shader_catalog.json`, `frame_anatomy.md`, `shaders/`. No module finds the game
 by its own place: `paths.py` takes the game root and the adapter from `proxy/tools/layout.py` (`discovery_adapter()`), and the names from `games.json`.
 Result folders (`discovery/assets`, `db`, `loc`, `ui`, `diff`, `gate`) sit beside the adapter folder in the game repo; `--games` and `--out` still override.
-Provenance strings written into results (`generator: discovery/core/...`) keep their old text so a re-run is byte for byte the same (backlog B53).
+Provenance strings written into results (`generator: discovery/core/...`) keep their old text so a re-run is byte for byte the same (backlog B55).
 
 ## Re-run (on the PC, read only; the game folders are never written)
 

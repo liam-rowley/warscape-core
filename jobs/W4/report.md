@@ -19,7 +19,7 @@ report file, so the parent writes it. Same Claude-Session as the build.
   `[tests] dirs` and `[tools] exempt`; core CI runs them on Linux and Windows through `wsc gates`.
 - `NoGameNames` (`tests/test_moved_tools.py`) now covers `discovery/`, with an empty `ALLOW`. Provenance links to `empire-remastered` stay, as the
   lint allows.
-- Docs: `discovery/README.md`, a "Discovery (optional extras)" section in `docs/CONSUMING.md`, the README row, decision C20, backlog B52 to B54.
+- Docs: `discovery/README.md`, a "Discovery (optional extras)" section in `docs/CONSUMING.md`, the README row, decision C20, backlog B54 to B56.
   The Pillow pin (`discovery/requirements.txt`) and the capstone and pefile pins (`re_env.py`) moved unchanged. `VERSION` 0.12.0.
 
 ## Evidence
@@ -53,20 +53,21 @@ report file, so the parent writes it. Same Claude-Session as the build.
   `games.json[<target>].captures` instead of a hard-coded PC path; `briefpaths` refuses the extract store of any game (`/?extract/<name>/`), not
   only the consumer's.
 - `ui_atlas.py` still holds the target game's `UNITS`, `PIECES`, `NAMES`, `ENGINE` and art-rule tables inline (name-free but not game-agnostic;
-  B52), where the brief said the `STATIC_ONLY` reasons and art rules become adapter JSON. `exe.py` still reads the reference repo's `rml_mod` and
-  `perf_mod` files and a C header, and `engine_api.py` keeps its probe-safe word lists (B54). Provenance strings written into results keep the old
+  B54), where the brief said the `STATIC_ONLY` reasons and art rules become adapter JSON. `exe.py` still reads the reference repo's `rml_mod` and
+  `perf_mod` files and a C header, and `engine_api.py` keeps its probe-safe word lists (B56). Provenance strings written into results keep the old
   `discovery/core/<tool>.py` text so that no committed byte moves (`generator` fields, the README "written by" lines, one `lua_api` evidence
-  cell; B53).
+  cell; B55).
 - Tests that read the consumer's real registries move to the consumer's thin test file; the real asset roles are replaced by a 16-rule fixture
   (`discovery/tests/null_adapter/asset_roles.json`, copied from the consumer's rules).
 - The verb imports the discovery modules with `importlib` (the stdlib-only test rejects `import assets`).
 - Decision C20 (the last row on `origin/main` and `job/W2` is C19) and `VERSION` 0.12.0 (`origin/main` 0.9.0; W3 0.9.1, W2 0.10.0, W5 0.11.0).
-  Backlog rows start at B52 because `plan/2026-11-03-napoleon-backlog` holds B50 and B51.
+  Backlog rows are B54 to B56: `plan/2026-11-03-napoleon-backlog` holds B50 and B51, and W2 (merged first) took B52 and B53;
+  renumbered when `main` was merged in on 2026-11-03 (`review.md` still says B52 to B54, meaning these rows).
 - The branch was built before `brief/W4` (PR #22) merged and starts from that branch; `main` is merged in once the brief is on it.
 
 ## Open questions
-- B52: move the `ui_atlas` tables to adapter JSON now or in a follow-up job? Recommend a follow-up.
-- B53: when to regenerate the provenance strings? Recommend the first PC sitting after napoleon J64, in one commit.
+- B54: move the `ui_atlas` tables to adapter JSON now or in a follow-up job? Recommend a follow-up.
+- B55: when to regenerate the provenance strings? Recommend the first PC sitting after napoleon J64, in one commit.
 - The consumer's half (napoleon J64): pin bump plus `[discovery] adapter = "discovery/napoleon"` in one commit (the pinned core refuses unknown
   keys), delete its `tools/verbs/discovery.py` (a game verb named `discovery` is a load error), add `target` and `reference` to its `games.json`,
   repoint the importers to `core/discovery`, delete `discovery/core/` and the moved tests, add the thin repo test, and run the byte-identity proof

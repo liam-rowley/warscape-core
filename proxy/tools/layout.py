@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Where the game repo and its adapters are, for every proxy and harness tool (J12): one answer before and after the move to warscape-core.
 
-purpose: print (or return) the game repo root, the core's own root, the proxy core sources, and the game's proxy, harness and discovery adapters
-usage: python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|discovery-adapter|all]   (default all: one `name<TAB>path` line each)
+purpose: print (or return) the game repo root, the core's own root, the proxy core sources, the RmlUi pin file, and the game's proxy, harness and discovery adapters
+usage: python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|discovery-adapter|ui-pins|all]   (default all: one `name<TAB>path` line each)
 when: every core tool that needs a game path imports it (python) or runs it (bash: build.sh, job.sh, shot.sh); run it by hand to see what a tool will use
 not-a-verb: a path resolver shared by the proxy and harness tools (bash and python), not a registry operation
 
@@ -107,8 +107,23 @@ def discovery_adapter(game=None):
     return p.parent if p.is_file() else p
 
 
+def ui_pins(game=None):
+    """The pin file of the RmlUi host's sources (J30): wsc.toml [proxy] ui_pins, else viewer/pins.json under the game root
+    (the one pin file the review viewer and the in-game host build from; proxy/tools/fetch_ui.py reads it)."""
+    game = game or game_root()
+    f = game / 'wsc.toml'
+    if f.is_file():
+        import tomllib
+        with open(f, 'rb') as fh:
+            v = tomllib.load(fh).get('proxy', {}).get('ui_pins')
+        if v:
+            return game / v
+    return game / 'viewer' / 'pins.json'
+
+
 NAMES = {'own-root': lambda: own_root(), 'game-root': lambda: game_root(), 'proxy-src': lambda: proxy_src(),
-         'proxy-adapter': lambda: proxy_adapter(), 'harness-adapter': lambda: harness_adapter(), 'discovery-adapter': lambda: discovery_adapter()}
+         'proxy-adapter': lambda: proxy_adapter(), 'harness-adapter': lambda: harness_adapter(),
+         'discovery-adapter': lambda: discovery_adapter(), 'ui-pins': lambda: ui_pins()}
 
 
 def main(argv=None):

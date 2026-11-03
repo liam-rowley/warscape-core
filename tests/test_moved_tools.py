@@ -83,7 +83,8 @@ class BuildId(Env):
         init(g)
         write(g / 'proxy/core/a.cpp', 'int a;\n')
         write(g / 'proxy/game/adapter.cpp', 'int b;\n')
-        for n in ('build.sh', 'build_id.py', 'fetch_lua.py', 'layout.py'):
+        write(g / 'viewer/pins.json', '{}\n')   # the UI pin file (J30: a DLL input, it stays in the game repo)
+        for n in ('build.sh', 'build_id.py', 'fetch_lua.py', 'fetch_ui.py', 'layout.py'):
             write(g / 'proxy/tools' / n, (ROOT / 'proxy/tools' / n).read_bytes())
         write(g / 'wsc.toml', '# marker\n')
         git('add', '-A', cwd=g); git('commit', '-q', '-m', 'flat', cwd=g)
@@ -93,7 +94,7 @@ class BuildId(Env):
         core = self.t / 'core'
         init(core)
         write(core / 'proxy/src/a.cpp', (flat / 'proxy/core/a.cpp').read_bytes())
-        for n in ('build.sh', 'build_id.py', 'fetch_lua.py', 'layout.py'):
+        for n in ('build.sh', 'build_id.py', 'fetch_lua.py', 'fetch_ui.py', 'layout.py'):
             write(core / 'proxy/tools' / n, (flat / 'proxy/tools' / n).read_bytes())
         write(core / 'wsc.toml', '# marker\n')
         git('add', '-A', cwd=core); git('commit', '-q', '-m', 'core', cwd=core)
