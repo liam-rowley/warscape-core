@@ -113,7 +113,7 @@ class ConfigError(Exception):
 
 # Keys removed from wsc.toml, with what replaced them: a message written for the key, not the generic "unknown key".
 REMOVED = {
-    ('jobs', 'hooks'): '[jobs] hooks was replaced by [gates] dirs in 0.18.0 (C21): move each hook into a gate module; docs/CONSUMING.md "Game gates"',
+    ('jobs', 'hooks'): '[jobs] hooks was replaced by [gates] dirs in 0.20.0 (C22): move each hook into a gate module; docs/CONSUMING.md "Game gates"',
 }
 
 

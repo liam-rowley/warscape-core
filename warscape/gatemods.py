@@ -1,4 +1,4 @@
-"""Game gate modules: the one way a game repo adds its own checks to the core (core W13, C21; backlog B1, B46). They replace the five
+"""Game gate modules: the one way a game repo adds its own checks to the core (core W13, C22; backlog B1, B46). They replace the five
 hook names of C18 (`[jobs] hooks`, removed with no shim).
 
 A repo lists folders in `wsc.toml` `[gates] dirs`. Every `*.py` in a listed folder whose name does not start with `_` is a gate module,
@@ -81,7 +81,7 @@ def load(ctx):
         m = _exec(f)
         old = [n for n in OLD_HOOKS if n in vars(m)]
         if old:
-            raise ConfigError(f'{rel} defines {", ".join(old)}: the hook names of [jobs] hooks were replaced by gate modules in core W13 (C21). '
+            raise ConfigError(f'{rel} defines {", ".join(old)}: the hook names of [jobs] hooks were replaced by gate modules in core W13 (C22). '
                               'Rename or make them private and give the module NAME, STAGES and run(ctx) (docs/CONSUMING.md "Game gates", the migration steps)')
         for a in ('NAME', 'run'):
             if a not in vars(m):

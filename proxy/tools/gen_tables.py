@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Generate the proxy adapter's C++ tables (exe identity, engine sites, config keys) and its default config file from the registries.
 
-purpose: turn the game repo's registries/engine_sites.jsonl, registries/config_keys.jsonl and its proxy adapter's identity.json into <adapter>/generated/tables.h and the shipped default config file, validating every site (hex, lengths, overlaps, config key, exe pin)
+purpose: turn the game repo's registries/engine_sites.jsonl, registries/config_keys.jsonl and its proxy adapter's identity.json into <adapter>/generated/tables.h and the shipped default config file, validating every site (hex, lengths, overlaps, config key, exe pin; value_key rows: the key's explicit int/float type, default 0, a max, 4 stock bytes that round-trip) and every key (type, default, release value, min/max range); docs/PROXY_SITES.md
 usage: python3 proxy/tools/gen_tables.py [--adapter <repo-relative adapter folder>] [--check]   (default adapter: proxy/tools/layout.py)
 when: after any change to the engine_sites or config_keys registry or identity.json (then rebuild the DLL); --check runs in the gates (tests/test_proxy_tables.py) and fails when the generated files are stale or a site is invalid
 not-a-verb: games cannot add wsc verbs for the proxy yet (wsc.toml verb_dirs is empty and the generator moves to warscape-core with proxy/core at the end of phase 1); the gates reach it through tests/
 """
 import argparse
 import json
+import math
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -43,21 +45,78 @@ def c_bytes(b):
     return '{ ' + ', '.join(f'0x{x:02x}' for x in b) + (' }' if b else '0 }')
 
 
+VALUE_TYPES = {'float': ('<f', 'kValueF32'), 'int': ('<i', 'kValueI32')}
+
+
+def is_value_row(s):
+    return s.get('value_key') is not None
+
+
+def value_row_errors(s, keys):
+    """A value row (W7, docs/PROXY_SITES.md): its bytes come from a numeric config key. Each message names the row and the fix."""
+    sid, errs = s['id'], []
+    vk = s.get('value_key')
+    if vk is None:
+        return [f'{sid}: value_scale and value_floor_stock belong to value_key rows: add a value_key or drop them']
+    if s['kind'] != 'patch':
+        errs.append(f'{sid}: value_key is for patch rows, not {s["kind"]} rows')
+    if 'patch_bytes' in s:
+        errs.append(f'{sid}: both patch_bytes and value_key: a value row takes its bytes from the key, drop patch_bytes')
+    if s.get('config_key'):
+        errs.append(f'{sid}: both config_key and value_key: the value key at 0 is the off switch, drop config_key')
+    sc = s.get('value_scale', 1)
+    if isinstance(sc, bool) or not isinstance(sc, (int, float)) or not math.isfinite(sc) or sc <= 0:
+        errs.append(f'{sid}: value_scale {sc!r} must be a number above 0')
+    if not isinstance(s.get('value_floor_stock', False), bool):
+        errs.append(f'{sid}: value_floor_stock must be true or false')
+    k = next((k for k in keys if k['id'] == vk), None)
+    if k is None:
+        return errs + [f'{sid}: value_key {vk} is not in the config_keys registry: add the key (type, default 0, max)']
+    if validate_key(k):
+        return errs + [f'{sid}: value_key {vk} is an invalid config key (its own errors say why)']
+    t = k.get('type')
+    if t is None:
+        return errs + [f'{sid}: value_key {vk} has no explicit type: add "type": "float" or "int" to its config_keys row (JSON 0 is an int)']
+    if t not in VALUE_TYPES:
+        return errs + [f'{sid}: value_key {vk} is a {t} key: a value row needs an int or float key']
+    d = k.get('default')
+    if isinstance(d, bool) or d != 0:
+        errs.append(f'{sid}: value_key {vk} has default {d!r}: it must be 0 (0 means stock)')
+    if 'max' not in k:
+        errs.append(f'{sid}: value_key {vk} has no max: add the tested ceiling, so an ini can never ask for an untested value')
+    if k.get('min', 0) > 0 or k.get('max', 0) < 0:
+        errs.append(f'{sid}: value_key {vk} range [{k.get("min")}, {k.get("max")}] must contain 0 (0 means stock)')
+    st = hexbytes(s['stock_bytes'])
+    if len(st) != 4:
+        return errs + [f'{sid}: a value row needs 4 stock bytes (a float32 or int32), it has {len(st)}']
+    fmt = VALUE_TYPES[t][0]
+    v = struct.unpack(fmt, bytes(st))[0]
+    if t == 'float' and not math.isfinite(v):
+        return errs + [f'{sid}: stock_bytes {s["stock_bytes"]} are not a finite float32: is the key\'s type right?']
+    if list(struct.pack(fmt, v)) != st:   # the round trip: decode the stock, encode it back, the same bytes
+        errs.append(f'{sid}: stock_bytes {s["stock_bytes"]} do not round-trip through {t} ({v!r}): is the key\'s type right?')
+    return errs
+
+
 def validate_sites(sites, keys, ident):
     errs = []
     key_ids = {k['id'] for k in keys}
     spans = []
     for s in sites:
         sid = s['id']
-        for f in ('anchor_bytes', 'stock_bytes') + (('patch_bytes',) if s['kind'] == 'patch' else ()):
+        fixed = s['kind'] == 'patch' and not is_value_row(s)
+        for f in ('anchor_bytes', 'stock_bytes') + (('patch_bytes',) if fixed else ()):
             if f not in s or not HEX.match(s[f]):
-                errs.append(f'{sid}: {f} missing or not lowercase hex pairs')
+                errs.append(f'{sid}: {f} missing or not lowercase hex pairs (or give a value_key)' if f == 'patch_bytes' else
+                            f'{sid}: {f} missing or not lowercase hex pairs')
         if errs and errs[-1].startswith(sid):
             continue
         a, st = hexbytes(s['anchor_bytes']), hexbytes(s['stock_bytes'])
         if len(a) > MAX_BYTES or len(st) > MAX_BYTES:
             errs.append(f'{sid}: anchor or stock longer than {MAX_BYTES} bytes')
-        if s['kind'] == 'patch':
+        if is_value_row(s) or 'value_scale' in s or 'value_floor_stock' in s:
+            errs += value_row_errors(s, keys)
+        elif s['kind'] == 'patch':
             p = hexbytes(s['patch_bytes'])
             if len(p) != len(st):
                 errs.append(f'{sid}: patch_bytes has {len(p)} bytes, stock_bytes {len(st)} (a patch replaces exactly the stock bytes)')
@@ -69,7 +128,7 @@ def validate_sites(sites, keys, ident):
             errs.append(f"{sid}: config_key {s['config_key']} is not in the config_keys registry")
         if s.get('config_key'):
             k = next((k for k in keys if k['id'] == s['config_key']), None)
-            if k and not isinstance(k['default'], bool):
+            if k and key_kind_or_none(k) != 'bool':
                 errs.append(f"{sid}: config_key {s['config_key']} must be a boolean key (it switches the site on or off)")
         if s.get('exe') and s['exe'] != 'sha1:' + ident['sha1']:
             errs.append(f"{sid}: exe {s['exe']} is not the pinned identity sha1:{ident['sha1']}")
@@ -82,14 +141,88 @@ def validate_sites(sites, keys, ident):
     return errs
 
 
-def key_type(v):
+KEY_TYPES = {'bool': 'kBool', 'int': 'kInt', 'string': 'kStr', 'float': 'kFloat'}
+FLT_MAX = struct.unpack('<f', bytes.fromhex('ffff7f7f'))[0]
+
+
+def key_kind(k):
+    """The key's type: its explicit `type`, else inferred from `default` as before W7 (a float default needs an explicit type)."""
+    if k.get('type') is not None:
+        if k['type'] not in KEY_TYPES:
+            raise ValueError(f"type {k['type']!r}: one of {', '.join(KEY_TYPES)}")
+        return k['type']
+    v = k.get('default')
     if isinstance(v, bool):
-        return 'kBool', '1' if v else '0'
+        return 'bool'
     if isinstance(v, int):
-        return 'kInt', str(v)
+        return 'int'
     if isinstance(v, str):
-        return 'kStr', v
-    raise ValueError(f'config key default {v!r}: only bool, int and string keys are supported')
+        return 'string'
+    raise ValueError(f'default {v!r}: only bool, int and string defaults infer a type (give "type": "float" for a float key)')
+
+
+def key_kind_or_none(k):
+    try:
+        return key_kind(k)
+    except ValueError:
+        return None   # the key's own refusal names it (validate_key)
+
+
+def value_text(kind, v):
+    """The text of value v for a key of this kind (the table's default and the ini); ValueError when v is not that kind."""
+    if kind == 'bool' and isinstance(v, bool):
+        return '1' if v else '0'
+    if kind == 'int' and isinstance(v, int) and not isinstance(v, bool):
+        if not -2**31 <= v < 2**31:
+            raise ValueError(f'{v!r} does not fit int32')
+        return str(v)
+    if kind == 'float' and isinstance(v, (int, float)) and not isinstance(v, bool):
+        if not math.isfinite(v) or abs(v) > FLT_MAX:
+            raise ValueError(f'{v!r} is not a finite float32')
+        return repr(float(v))
+    if kind == 'string' and isinstance(v, str):
+        return v
+    raise ValueError(f'{v!r} is not a valid {kind}')
+
+
+def key_type(k):
+    """(KeyType enumerator, default text) of a config_keys row."""
+    kind = key_kind(k)
+    return KEY_TYPES[kind], value_text(kind, k['default'])
+
+
+def validate_key(k):
+    """Every refusal for one config_keys row (type, default, release_value, range)."""
+    errs, kid = [], k['id']
+    if '.' not in kid:
+        errs.append(f'config key {kid}: ids are <section>.<key> (the INI section and key)')
+    try:
+        kind = key_kind(k)
+    except ValueError as e:
+        return errs + [f'config key {kid}: {e}']
+    for f in ('default', 'release_value'):
+        if f in k:
+            try:
+                value_text(kind, k[f])
+            except ValueError as e:
+                errs.append(f'config key {kid}: {f} {e}')
+    rng = {f: k[f] for f in ('min', 'max') if f in k}
+    if rng and kind not in ('int', 'float'):
+        return errs + [f'config key {kid}: min and max are for int and float keys, not {kind}']
+    for f, v in rng.items():
+        try:
+            value_text(kind, v)
+        except ValueError as e:
+            errs.append(f'config key {kid}: {f} {e}')
+    if errs:
+        return errs
+    lo, hi = rng.get('min'), rng.get('max')
+    if lo is not None and hi is not None and lo > hi:
+        errs.append(f'config key {kid}: min {lo} is above max {hi}')
+    for f in ('default', 'release_value'):
+        if f in k and ((lo is not None and k[f] < lo) or (hi is not None and k[f] > hi)):
+            errs.append(f'config key {kid}: {f} {k[f]} is outside [min {lo}, max {hi}]')
+    return errs
 
 
 def render_header(ident, sites, keys, adapter):
@@ -103,20 +236,31 @@ def render_header(ident, sites, keys, adapter):
            f"static const Identity kIdentity = {{ {c_str(ident['exe_name'])}, {c_str(ident['sha1'])}, {ident['time_date_stamp']}u, {ident['size_of_image']}u }};",
            '']
     out.append(f'static const size_t kSiteCount = {len(sites)};')
-    out.append('static const SiteDef kSites[kSiteCount + 1] = {   // id, kind, rva, anchorLen, anchor, len, stock, patch, configKey')
+    values = any(is_value_row(s) for s in sites)   # the value fields are emitted on value rows only: other tables stay byte-identical
+    out.append('static const SiteDef kSites[kSiteCount + 1] = {   // id, kind, rva, anchorLen, anchor, len, stock, patch, configKey' +
+               (' [, valueKey, valueType, valueFloorStock, valueScale]' if values else ''))
+    kinds = {k['id']: key_kind_or_none(k) for k in keys}
     for s in sites:
         a, st = hexbytes(s['anchor_bytes']), hexbytes(s['stock_bytes'])
-        p = hexbytes(s['patch_bytes']) if s['kind'] == 'patch' else []
+        p = hexbytes(s['patch_bytes']) if s['kind'] == 'patch' and not is_value_row(s) else []
         ck = c_str(s['config_key']) if s.get('config_key') else 'nullptr'
-        out.append(f"    {{ {c_str(s['id'])}, {'kPatch' if s['kind'] == 'patch' else 'kHook'}, {s['rva']}u, {len(a)}, {c_bytes(a)}, {len(st)}, {c_bytes(st)}, {c_bytes(p)}, {ck} }},")
+        v = ''
+        if is_value_row(s):
+            v = (f", {c_str(s['value_key'])}, {VALUE_TYPES[kinds[s['value_key']]][1]}, {1 if s.get('value_floor_stock') else 0},"
+                 f" {float(s.get('value_scale', 1))!r}")
+        out.append(f"    {{ {c_str(s['id'])}, {'kPatch' if s['kind'] == 'patch' else 'kHook'}, {s['rva']}u, {len(a)}, {c_bytes(a)}, {len(st)}, {c_bytes(st)}, {c_bytes(p)}, {ck}{v} }},")
     out.append('    { nullptr, 0, 0, 0, { 0 }, 0, { 0 }, { 0 }, nullptr }   // sentinel (keeps the array non-empty)')
     out.append('};')
     out.append('')
     out.append(f'static const size_t kKeyCount = {len(keys)};')
     out.append('static const KeySpec kKeys[kKeyCount + 1] = {')
     for k in keys:
-        t, d = key_type(k['default'])
-        out.append(f"    {{ {c_str(k['id'])}, {t}, {c_str(d)} }},")
+        t, d = key_type(k)
+        kind = key_kind(k)
+        rng = ''   # min/max only on rows that have them, so the others stay byte-identical
+        if 'min' in k or 'max' in k:
+            rng = ''.join(', ' + (c_str(value_text(kind, k[f])) if f in k else 'nullptr') for f in ('min', 'max'))
+        out.append(f"    {{ {c_str(k['id'])}, {t}, {c_str(d)}{rng} }},")
     out.append('    { nullptr, 0, nullptr }')
     out.append('};')
     out += ['', '} } // namespace wsp::gen', '']
@@ -133,9 +277,9 @@ def render_ini(ident, keys):
     for sec, items in sections.items():
         lines += ['', f'[{sec}]']
         for name, k in items:
-            v = k.get('release_value', k['default'])
-            _, txt = key_type(v)
-            lines.append(f"; {k['description']} (default {key_type(k['default'])[1]})")
+            kind = key_kind(k)
+            txt = value_text(kind, k.get('release_value', k['default']))
+            lines.append(f"; {k['description']} (default {value_text(kind, k['default'])})")
             lines.append(f'{name}={txt}')
     return '\r\n'.join(lines) + '\r\n'
 
@@ -178,12 +322,7 @@ def main():
     keys = sorted(jsonl('registries/config_keys.jsonl'), key=lambda k: k['id'])
     errs = validate_sites(sites, keys, ident)
     for k in keys:
-        if '.' not in k['id']:
-            errs.append(f"config key {k['id']}: ids are <section>.<key> (the INI section and key)")
-        try:
-            key_type(k['default'])
-        except ValueError as e:
-            errs.append(f"config key {k['id']}: {e}")
+        errs += validate_key(k)
     if errs:
         print('gen_tables: INVALID\n  ' + '\n  '.join(errs))
         return 1

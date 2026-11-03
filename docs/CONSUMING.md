@@ -153,7 +153,7 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. Nothing refuses the combination yet (B49), so a repo would find out at its first brief.
-- **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.18.0).
+- **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
@@ -163,7 +163,7 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
 - **Upgrading from a repo that has its own pipeline** (napoleon J62): move the texts into `[jobs.text]`, the rules that are not generic into a gate module,
   turn each workflow into `ci/<name>.in`, run `wsc ci render`, delete the local copies in the same pull request as the pin bump (B9: the pin and `wsc.toml` version in one commit).
 
-## Game gates (0.18.0, core W13, C21)
+## Game gates (0.20.0, core W13, C22)
 A game adds its own checks as **gate modules**: `wsc.toml` `[gates] dirs = ["tools/gates"]` (repo-relative folders), and every `*.py` in a listed folder whose
 name does not start with `_` is loaded, in folder order, then file-name order. The contract is one docstring, `warscape/gatemods.py`; in short:
 
@@ -188,7 +188,7 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
 - A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
   `run`, and a module that still defines one of the old hook names are load errors (`wsc` exits 2 naming the file).
-- **Moving off `[jobs] hooks`** (removed in 0.18.0 with no shim: the loader refuses the key and names this section). In the pin-bump commit itself (B9), because the
+- **Moving off `[jobs] hooks`** (removed in 0.20.0 with no shim: the loader refuses the key and names this section). In the pin-bump commit itself (B9), because the
   new core refuses the old key; for napoleon-remastered (rehearsed on a copy, W13 report):
   1. `wsc.toml`: delete `hooks = [...]` from `[jobs]`; add `[gates]` with `dirs = ["tools/gates"]`.
   2. `git mv tools/jobs_hooks.py tools/gates/pipeline.py` (a folder of its own: every `*.py` in it is loaded). Rename the five old functions (napoleon:
@@ -224,6 +224,9 @@ Proxy features a game turns on through its adapter and its config_keys rows each
 ([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
 ([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
 `GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).
+Engine sites and their config keys ([PROXY_SITES.md](PROXY_SITES.md)): from 0.16.0 a `patch` row may take its value from a numeric key
+(`value_key`, `value_scale`, `value_floor_stock`) and a key may carry `type`, `min` and `max`. Nothing changes for existing rows (their
+generated tables are byte-identical); after the pin bump run `python3 core/proxy/tools/gen_tables.py --check`.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

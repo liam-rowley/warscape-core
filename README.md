@@ -12,7 +12,7 @@ What the core holds, split as in `napoleon-remastered` `docs/plans/PLAN.md` sect
 
 | Core (here) | Adapter (game repo) | State |
 |---|---|---|
-| Registry framework, CLI (`wsc`), gates, CI workflow, pre-push hook | registry contents, extra verbs, own schemas, own gates (**v0.18**, C21) | **v0.1** |
+| Registry framework, CLI (`wsc`), gates, CI workflow, pre-push hook | registry contents, extra verbs, own schemas, own gates (**v0.20**, C22) | **v0.1** |
 | Watcher, game lock, config profiles, headless display kit, sha-checked PC sync (`harness/`, `proxy/tools/pc_deploy.py`) | paths, launch arguments | **v0.4** (C14) |
 | Proxy DLL skeleton: backend loading, log, crash capture, exe-identity guard, runtime patch engine, dev control channel, campaign console, battle camera (`proxy/src`) | identity pin, engine sites, scene detection, console and camera adapters | **v0.4** (C14) |
 | Control API (`harness/ctl.py`: scene, cam, shot, perf, state, reset, pause, speed; `order` with napoleon J28) and contact sheets | scenario list, camera poses, openers | ctl **v0.4**; contact sheets later |
@@ -75,6 +75,7 @@ after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs vi
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
+| `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |
 | `wsc.py`, `warscape/` | the CLI launcher and the library; verbs in `warscape/verbs/` |
 | `schemas/` | the registry schemas the core ships |
 | `registries/` | the core's own registries (real: `tools`; the rest declared empty so CI exercises every schema) |
