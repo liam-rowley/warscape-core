@@ -1,0 +1,13 @@
+{
+  "id": "W6",
+  "description": "The game-agnostic half of napoleon-remastered J29: gesture state machine with host tests, shared window-message hook, D3D9 footprint overlay, CameraRead/GroundAt/GestureAdapter, ctl gesture verb and controls.gestures key; next free minor.",
+  "title": "The gesture layer in the proxy",
+  "phase": 1,
+  "status": "queued",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [
+    "W2"
+  ],
+  "brief": "jobs/W6/brief.md"
+}
