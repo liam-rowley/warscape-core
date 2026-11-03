@@ -5,11 +5,151 @@
 #include "testkit.h"
 #include "capture.h"
 #include "devcore.h"
+#include <atomic>
+#include <random>
+#include <thread>
 
 using namespace wsp;
 
+// The capture's state word on the host: std::atomic<long> with InterlockedCompareExchange's contract (Cas returns the value it found).
+struct TestCell {
+    std::atomic<long> v{kCapIdle};
+    long Load() const { return v.load(); }
+    long Cas(long expected, long desired) { long e = expected; v.compare_exchange_strong(e, desired); return e; }
+};
+// A render thread that read the state before the ctl thread changed it: Load gives the stale value, the CAS sees the real one.
+struct StaleCell : TestCell { long stale = kCapArmed; long Load() const { return stale; } };
+
+// W19 (B32): a "render" thread stepping Presents and a "ctl" thread arming and timing out at random, seeded. Returns the number of
+// invariant breaks; the outcome counts say every path was taken.
+struct StressOut { int errors = 0, rounds = 0, done = 0, nothing = 0, abandoned = 0, refused = 0, lateFinish = 0, closedAbandoned = 0; long finalState = -1; };
+static StressOut Stress(unsigned seed, int rounds) {
+    TestCell c;
+    std::atomic<int> errors{0}, waiting{0}, ctlFrames{1}, closedAbandoned{0}, lateFinish{0};
+    std::atomic<long> ctlId{0}, doneId{0};
+    std::atomic<bool> stop{false};
+    std::thread render([&] {
+        std::mt19937 rng(seed * 2 + 1);
+        bool open = false; int frame = 0, frames = 0; long id = 0, idle = 0;
+        while (!(stop.load() && c.Load() == kCapIdle && !open) && idle < 100000) {
+            if (stop.load()) ++idle;
+            switch (CapOnPresent(c, frame, frames)) {
+            case CapStep::start:   // a recording starts only with a waiter and never over another
+                if (open || waiting.load() != 1) ++errors;
+                open = true; frame = 0; frames = ctlFrames.load(); id = ctlId.load();
+                break;
+            case CapStep::next_frame: if (!open) ++errors; ++frame; break;
+            case CapStep::finish:
+                if (!open) ++errors;
+                open = false; doneId.store(id);
+                if (!CapFinish(c)) ++lateFinish;   // the ctl abandoned it meanwhile: the render side closed and left Idle
+                break;
+            case CapStep::close_abandoned:
+                if (!open) ++errors;
+                open = false; ++closedAbandoned;
+                if (!CapClosed(c)) ++errors;
+                break;
+            case CapStep::none: break;
+            }
+            const unsigned r = rng() % 16;
+            for (unsigned i = 0, n = r == 0 ? 200 : r; i < n; ++i) std::this_thread::yield();
+        }
+        if (open || c.Load() != kCapIdle) ++errors;   // a state no one leaves, or a file left open
+    });
+    StressOut o;
+    std::mt19937 rng(seed);
+    auto waitDone = [&](unsigned polls) { for (unsigned i = 0; i < polls; ++i) { if (c.Load() == kCapDone) return true; std::this_thread::yield(); } return c.Load() == kCapDone; };
+    for (long round = 1; o.rounds < rounds; ++round) {
+        if (c.Load() != kCapIdle) {   // the ctl's early refusal: it writes nothing shared unless Idle; refused for ever = a state no one leaves
+            if (++o.refused > 2000000) { ++errors; break; }
+            std::this_thread::yield(); continue;
+        }
+        ctlFrames.store(1 + (int)(rng() % 3)); ctlId.store(round);
+        waiting.store(1);
+        if (CapArmFromCtl(c) != CapArm::ok) { ++errors; waiting.store(0); continue; }
+        ++o.rounds;
+        CapEnd e = waitDone(rng() % 4 == 0 ? 0 : rng() % 24) ? CapEnd::done : CapOnTimeout(c, false);
+        if (e == CapEnd::wait_more) e = waitDone(rng() % 24) ? CapEnd::done : CapOnTimeout(c, true);
+        if (e == CapEnd::done) {
+            if (doneId.load() != round) ++errors;   // the result read is this capture's
+            waiting.store(0);
+            if (!CapRelease(c)) ++errors;
+            ++o.done;
+        } else if (e == CapEnd::nothing) { waiting.store(0); ++o.nothing; }
+        else if (e == CapEnd::abandoned) { waiting.store(0); ++o.abandoned; }
+        else ++errors;
+    }
+    stop.store(true);
+    render.join();
+    o.errors = errors.load(); o.lateFinish = lateFinish.load(); o.closedAbandoned = closedAbandoned.load(); o.finalState = c.Load();
+    return o;
+}
+
 int main(int argc, char** argv) {
     tk::Args(argc, argv);
+    {   // W19 (B32): every transition of the capture state machine, one thread
+        TestCell c;
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && c.Load() == kCapIdle);           // Idle: a Present does nothing
+        CHECK(CapArmFromCtl(c) == CapArm::ok && c.Load() == kCapArmed);                  // ctl: Idle -> Armed
+        CHECK(CapArmFromCtl(c) == CapArm::running && c.Load() == kCapArmed);
+        CHECK(CapOnPresent(c, 0, 2) == CapStep::start && c.Load() == kCapRecording);     // render: Armed -> Recording first
+        CHECK(CapArmFromCtl(c) == CapArm::running);
+        CHECK(CapOnPresent(c, 0, 2) == CapStep::next_frame && c.Load() == kCapRecording);
+        CHECK(CapOnPresent(c, 1, 2) == CapStep::finish && c.Load() == kCapRecording);    // the file closes before the state moves
+        CHECK(CapFinish(c) && c.Load() == kCapDone);                                     // render: Recording -> Done
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && CapArmFromCtl(c) == CapArm::running && c.Load() == kCapDone);
+        CHECK(CapRelease(c) && c.Load() == kCapIdle);                                    // ctl, after reading the result: Done -> Idle
+        CHECK(!CapRelease(c) && c.Load() == kCapIdle);
+    }
+    {   // the first wait times out with nobody presenting: Armed -> Idle, nothing recorded, and a later Present does nothing
+        TestCell c; CapArmFromCtl(c);
+        CHECK(CapOnTimeout(c, false) == CapEnd::nothing && c.Load() == kCapIdle);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && c.Load() == kCapIdle);
+    }
+    {   // race 1: the render side read Armed, then the ctl withdrew (Armed -> Idle) before its CAS: it does nothing at all
+        StaleCell c; c.v.store(kCapIdle);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::none && c.v.load() == kCapIdle);
+    }
+    {   // the first timeout lost to the render thread: wait the second; the second times out: Recording -> Abandoned, closed at the next Present
+        TestCell c; CapArmFromCtl(c); CapOnPresent(c, 0, 3);
+        CHECK(CapOnTimeout(c, false) == CapEnd::wait_more && c.Load() == kCapRecording);
+        CHECK(CapOnTimeout(c, true) == CapEnd::abandoned && c.Load() == kCapAbandoned);
+        CHECK(CapArmFromCtl(c) == CapArm::closing && c.Load() == kCapAbandoned);         // refused until the render thread closed it
+        CHECK(CapOnPresent(c, 0, 3) == CapStep::close_abandoned && c.Load() == kCapAbandoned);
+        CHECK(CapClosed(c) && c.Load() == kCapIdle);                                     // render: Abandoned -> Idle, nobody waits
+        CHECK(CapArmFromCtl(c) == CapArm::ok);
+    }
+    {   // race 2, Done against Abandoned: the render finished just before the ctl's timeout: reported normally
+        TestCell c; CapArmFromCtl(c); CapOnPresent(c, 0, 1);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::finish && CapFinish(c));
+        CHECK(CapOnTimeout(c, false) == CapEnd::done && c.Load() == kCapDone);
+        CHECK(CapOnTimeout(c, true) == CapEnd::done && c.Load() == kCapDone);
+        CHECK(CapRelease(c) && c.Load() == kCapIdle);
+    }
+    {   // ... and the other order: the ctl abandoned just before the render's Recording -> Done: the render closes and leaves Idle
+        TestCell c; CapArmFromCtl(c); CapOnPresent(c, 0, 1);
+        CHECK(CapOnPresent(c, 0, 1) == CapStep::finish);
+        CHECK(CapOnTimeout(c, true) == CapEnd::abandoned);
+        CHECK(!CapFinish(c) && c.Load() == kCapIdle);
+        CHECK(CapArmFromCtl(c) == CapArm::ok);
+    }
+    {   // the refusals and the state names the results carry
+        CHECK_EQ(std::string(CapRefusal(CapArm::running)), std::string("a capture is running"));
+        CHECK_EQ(std::string(CapRefusal(CapArm::closing)), std::string("the previous capture is still closing: it ends at the next Present"));
+        CHECK_EQ(std::string(CapStateName(kCapAbandoned)), std::string("abandoned"));
+        CHECK_EQ(std::string(CapStateName(kCapIdle)), std::string("idle"));
+    }
+    {   // two threads, seeded: never a state no one leaves, never a recording without a waiter, never two at once, every path taken
+        int errors = 0, rounds = 0, done = 0, nothing = 0, abandoned = 0;
+        for (unsigned seed = 1; seed <= 4; ++seed) {
+            const StressOut o = Stress(seed, 1500);
+            if (o.errors || o.finalState != kCapIdle) printf("  stress seed %u: %d errors, final state %ld\n", seed, o.errors, o.finalState);
+            errors += o.errors + (o.finalState != kCapIdle); rounds += o.rounds; done += o.done; nothing += o.nothing; abandoned += o.abandoned;
+        }
+        printf("  stress: %d captures, %d done, %d nothing recorded, %d abandoned\n", rounds, done, nothing, abandoned);
+        CHECK_EQ(errors, 0);
+        CHECK(done > 0 && nothing > 0 && abandoned > 0);
+    }
     {   // canonical FNV-1a-64 (offset basis 14695981039346656037, not the dropped-digit 1469598103934665603)
         CHECK_EQ(Hex64(Fnv1a64("", 0)), std::string("cbf29ce484222325"));
         CHECK_EQ(Hex64(Fnv1a64("a", 1)), std::string("af63dc4c8601ec8c"));
@@ -70,10 +210,49 @@ int main(int argc, char** argv) {
             size_t calls = 0, q = 0; while ((q = body.find("o_" + name + "(", q)) != std::string::npos) { ++calls; ++q; }
             if (calls < 2) printf("  hook %s forwards %zu times\n", name.c_str(), calls);
             CHECK(calls >= 2);
+            // W19: the idle path is the first statement (one load and a branch), and Depth comes after it, never before
+            const size_t fast = body.find("if (!s_rec) return o_" + name + "("), depth = body.find("Depth g;");
+            if (fast == std::string::npos || depth == std::string::npos || depth < fast) printf("  hook %s: Depth not after the s_rec fast path\n", name.c_str());
+            const size_t brace = body.find('{');
+            CHECK(fast != std::string::npos && depth != std::string::npos && fast < depth && brace < fast &&
+                  body.find_first_not_of(" \n", brace + 1) == fast);
             ++hooks; pos = name1;
         }
-        CHECK(hooks >= 30);
+        CHECK_EQ(hooks, (size_t)39);   // W19: 36 + CreateStateBlock (device slot 59) + IDirect3DStateBlock9 Capture and Apply
+        size_t rows = 0; for (size_t q = 0; (q = cap.find(", (void*)hk_", q)) != std::string::npos; ++q) ++rows;
+        CHECK_EQ(rows, (size_t)39);    // every hook is in an install table (37 device slots, 2 state-block slots)
+        CHECK(cap.find("{ 59, (void*)hk_CreateStateBlock") != std::string::npos && cap.find("{ 4, (void*)hk_SBCapture") != std::string::npos &&
+              cap.find("{ 5, (void*)hk_SBApply") != std::string::npos);
         CHECK(cap.find("Adapter()") == std::string::npos);   // nothing game-specific: the capture reads no adapter field
+        // W19 (B32): the state word moves only by compare-and-swap through capture.h's transitions
+        auto count = [&](const std::string& s) { size_t n = 0; for (size_t q = 0; (q = cap.find(s, q)) != std::string::npos; ++q) ++n; return n; };
+        auto fn = [&](const std::string& head) { const size_t a = cap.find(head); return a == std::string::npos ? std::string() : cap.substr(a, cap.find("\n}", a) - a); };
+        CHECK_EQ(count("InterlockedExchange("), (size_t)0);
+        CHECK_EQ(count("InterlockedCompareExchange("), (size_t)1);   // StateCell::Cas, the one place
+        CHECK_EQ(count("s_state ="), (size_t)1);                     // its definition
+        const std::string present = fn("void CapturePresent(void* dev) {"), run = fn("bool CaptureRun("), event = fn("void CaptureEvent(");
+        CHECK(present.find("CapOnPresent(s_cell, ") != std::string::npos);   // arms by CAS (Armed -> Recording), never a plain exchange from Armed
+        CHECK(run.find("CapArmFromCtl(s_cell)") != std::string::npos && run.find("CapOnTimeout(s_cell, false)") != std::string::npos &&
+              run.find("CapOnTimeout(s_cell, true)") != std::string::npos && run.find("CapRelease(s_cell)") != std::string::npos);   // Idle only from Done or Armed
+        // W19 (B33): the recording thread is fixed before s_rec is set; Depth, CaptureEvent and CapturePresent test it
+        const size_t tid = present.find("s_tid = GetCurrentThreadId();"), rec = present.find("s_rec = true;");
+        CHECK(tid != std::string::npos && rec != std::string::npos && tid < rec);
+        CHECK(cap.find("if (GetCurrentThreadId() == s_tid) return true;\n    InterlockedIncrement(&s_otherCalls);") != std::string::npos);
+        CHECK(cap.find("Depth() : mine(OnRecordingThread()) { if (mine) { on = s_rec && s_depth == 0; ++s_depth; } }") != std::string::npos);
+        CHECK(cap.find("~Depth() { if (mine) --s_depth; }") != std::string::npos);
+        const size_t evTid = event.find("GetCurrentThreadId() != s_tid"), evDepth = event.find("s_depth"), evLine = event.find("Line(");
+        CHECK(evTid != std::string::npos && evDepth != std::string::npos && evTid < evDepth && evDepth < evLine);
+        CHECK(present.find("if (rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }") != std::string::npos);
+        // ... and while another thread is still starting the capture (Recording, s_rec clear) a Present only the starter may act on does nothing
+        const size_t recRead = present.find("const bool rec = s_rec;"), startGuard = present.find("if (!rec && step != CapStep::start && step != CapStep::none) return;"),
+                     sw = present.find("switch (step)");
+        CHECK(recRead != std::string::npos && startGuard != std::string::npos && sw != std::string::npos && recRead < startGuard && startGuard < sw);
+        // W19 (B34): the throwaway state block is made only inside CaptureInstall, after its key check, before the slot-59 hook goes in
+        const std::string install = fn("void CaptureInstall(void* dev) {");
+        const size_t key = install.find("if (!Dk().capture || !dev) return;"), sb = install.find("1 /* D3DSBT_ALL */"), loop = install.find("for (const H& h : hs)");
+        CHECK(key != std::string::npos && sb != std::string::npos && loop != std::string::npos && key < sb && sb < loop);
+        CHECK_EQ(count("1 /* D3DSBT_ALL */"), (size_t)1);   // that call, nowhere else
+        CHECK(fn("HRESULT WINAPI hk_SBApply(").find("WriteState(d, false)") != std::string::npos);   // the readback without targets
     }
     return tk::Done("test_capture");
 }
