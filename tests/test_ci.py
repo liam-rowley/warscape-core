@@ -469,7 +469,7 @@ class CheckSettings(unittest.TestCase):
         rc, out = self.go(answers, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
         self.assertEqual(rc, 1, out)
         probs = '\n'.join(self.problems(out))
-        self.assertIn('`harness` is produced by no workflow job', probs)
+        self.assertIn('`harness` (ruleset) is produced by no workflow job', probs)
         self.assertIn('`harness-windows`', probs)
         self.assertIn('1 approving review', probs)
         self.assertIn('strict', '\n'.join(l for l in out.splitlines() if l.startswith('note:')))

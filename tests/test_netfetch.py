@@ -164,7 +164,7 @@ class Prefetch(unittest.TestCase):
     def tearDown(self):
         for p in reversed(self.patches):
             p.stop()
-        shutil.rmtree(self._tmp.name, onexc=netfetch._force_remove)
+        self._tmp.cleanup()   # TemporaryDirectory clears read-only git objects itself
 
     def prefetch(self):
         out = io.StringIO()
