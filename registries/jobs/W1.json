@@ -3,10 +3,11 @@
   "description": "Read docs/BACKLOG.md and turn each open item into a jobs row (needs_brief, with its dependencies), merge duplicates, and say in the report which items stay as backlog notes. No code changes.",
   "title": "Triage the core backlog into queue rows",
   "phase": 1,
-  "status": "review",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
   "brief": "jobs/W1/brief.md",
-  "report": "jobs/W1/report.md"
+  "report": "jobs/W1/report.md",
+  "review": "jobs/W1/review.md"
 }
