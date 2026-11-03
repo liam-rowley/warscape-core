@@ -1,6 +1,6 @@
 """Host tests for the proxy and harness tools that moved here from napoleon-remastered (J12): where they find the game
 (proxy/tools/layout.py), the DLL build id in either layout (proxy/tools/build_id.py), the exclusive game lock (harness/job.sh), and
-that nothing in this repo names a game. The tools' fuller tests run in the game repo against its real adapter; the proxy's C++ host
+that nothing in the moved code names a game. The tools' fuller tests run in the game repo against its real adapter; the proxy's C++ host
 tests and the harness PowerShell tests run in CI's proxy and harness-windows jobs against the null game (proxy/tests/null_game)."""
 import importlib.util
 import json
@@ -148,16 +148,18 @@ class GameLock(Env):
 
 
 class NoGameNames(unittest.TestCase):
-    """The code that came from a game repo (proxy/, harness/, saves/; J12) names no game: a path, an exe or a mod folder would carry the
+    """The code that came from a game repo (proxy/, harness/, saves/; J12; discovery/, W4) names no game: a path, an exe or a mod folder would carry the
     game into the core (CLAUDE.md). Provenance links to the earlier remaster's repository ("empire-remastered ...") are allowed. The
-    rest of the core cites its consumer's job ids as provenance in comments, which this does not police."""
+    rest of the core cites its consumer's job ids as provenance in comments, which this does not police. A module that cannot be made name-free gets an entry in ALLOW with its reason and a
+    backlog row, never a blanket exemption (none today)."""
     GAME = re.compile(r'napoleon|empire(?!-remastered)', re.I)
+    ALLOW = {}   # tracked path -> why it may name a game (and its backlog row)
 
     def test_no_tracked_file_names_a_game(self):
         files = subprocess.run(['git', '-C', str(ROOT), 'ls-files'], capture_output=True, text=True).stdout.splitlines()
         bad = []
         for f in files:
-            if not f.startswith(('proxy/', 'harness/', 'saves/')) or not (ROOT / f).is_file():
+            if not f.startswith(('proxy/', 'harness/', 'saves/', 'discovery/')) or f in self.ALLOW or not (ROOT / f).is_file():
                 continue
             for n, line in enumerate((ROOT / f).read_bytes().decode('utf-8', 'replace').splitlines(), 1):
                 if self.GAME.search(line):

@@ -19,14 +19,14 @@ engine_facts = "core:engine_facts"
 [tools]
 include = [".githooks/*"]                                   # extensionless git hooks are tools too
 library = ["warscape/*.py", "warscape/verbs/__init__.py"]   # importable library modules: docstrings, no registry row
-exempt = ["tests/**"]                                       # host tests run through the `tests` gate
+exempt = ["tests/**", "discovery/tests/**"]                                       # host tests run through the `tests` gate
 retire_after_days = 0     # off until the job queue stamps last_used (C9)
 
 [docs]
 max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the file name, or under records/ reports/ runs/) are exempt
 
 [tests]
-dirs = ["tests"]
+dirs = ["tests", "discovery/tests"]
 
 # The core runs its own job queue (napoleon J62): rows in registries/jobs/<id>.json, folders in jobs/<id>/, ids W<n>, the same pipeline a game uses.
 [storage]
