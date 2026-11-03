@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import checks, core_version, tools
 from .registry import RegistryError, load_all, schema_path
@@ -147,18 +148,35 @@ def _git(cwd, *args):
     return p.stdout.split() if p.returncode == 0 else None
 
 
-def pin_problems(want, version, head_tags, any_tags):
-    """Problems with a game repo's core pin. `want`: wsc.toml [core] version; `version`: the core's VERSION file; `head_tags`: tag
-    names on the core checkout's HEAD; `any_tags`: whether the checkout has any tag at all (a shallow CI submodule fetches none,
-    so then only VERSION can be compared). Tags are `vX.Y.Z`, lower-case v, and case matters (backlog B5)."""
+def pin_check(pin_commit, shallow, any_tags):
+    """How a game's pin is checked against the core checkout (C10 as amended by core W11): `tag` when the pinned tag is in the checkout
+    (its commit must be HEAD), `shallow` when it is not and the checkout is shallow (VERSION only: a depth-1 CI submodule brings the core
+    tip's tag, not an older pinned one), `missing` when it is not in a full checkout that has other tags (an error: fetch the tags), `none`
+    when the checkout has no tags at all (VERSION only)."""
+    if pin_commit:
+        return 'tag'
+    if shallow:
+        return 'shallow'
+    return 'missing' if any_tags else 'none'
+
+
+def pin_problems(want, version, pin_commit, head, shallow, any_tags, head_tags=(), core_dir='core'):
+    """Problems with a game repo's core pin, from plain values. `want`: wsc.toml [core] version; `version`: the core checkout's VERSION;
+    `pin_commit`: the commit of the tag named exactly `want` in the checkout, or None; `head`: HEAD's commit; `shallow`: the checkout is
+    shallow; `any_tags`: it has any tag; `head_tags`: tag names on HEAD (for the message); `core_dir`: the checkout as the fix names it.
+    Tags are `vX.Y.Z`, lower-case v, and case matters (backlog B5); `pin_check` says what is compared when."""
     det = []
     if not PIN.fullmatch(want):
         det.append(f'wsc.toml pins core {want!r}: a pin is a release tag `vX.Y.Z` (lower-case v)')
     if version != want[1:] if want[:1] == 'v' else version != want:
         det.append(f'wsc.toml pins core {want} but the core checkout is {version}: update the submodule or the pin')
-    if any_tags and want not in head_tags:
+    how = pin_check(pin_commit, shallow, any_tags)
+    if how == 'tag' and pin_commit != head:
         on = f'tag(s) {", ".join(head_tags)}' if head_tags else 'an untagged commit'
         det.append(f'the core checkout is at {on}, not the pinned tag {want} (check out the tag; tags are case-sensitive)')
+    elif how == 'missing':
+        det.append(f'the pinned tag {want} is not in the core checkout, which has other tags: `git -C {core_dir} fetch --tags`, then check '
+                   f'out {want} (tags are case-sensitive)')
     return det
 
 
@@ -177,8 +195,16 @@ def gate_core_pin(ctx):
         return Result('core_pin', 'error' if det else 'ok', 'core VERSION or tag malformed' if det else f'this is the core ({have})', det)
     if not want:
         return Result('core_pin', 'ok', 'no [core] version pinned in wsc.toml (nothing to check)')
-    head = _git(ctx.core_root, 'tag', '--points-at', 'HEAD') or []
-    det = pin_problems(want, have, head, bool(_git(ctx.core_root, 'tag', '--list')))
+    core = ctx.core_root
+    tags = _git(core, 'tag', '--list') or []
+    pin_commit = (_git(core, 'rev-parse', '-q', '--verify', f'refs/tags/{want}^{{commit}}') or [None])[0] if want in tags else None
+    head = (_git(core, 'rev-parse', '-q', '--verify', 'HEAD') or [None])[0]
+    shallow = (_git(core, 'rev-parse', '--is-shallow-repository') or [''])[0] == 'true'
+    try:
+        core_dir = Path(core).resolve().relative_to(Path(ctx.root).resolve()).as_posix()
+    except ValueError:
+        core_dir = str(core)
+    det = pin_problems(want, have, pin_commit, head, shallow, bool(tags), _git(core, 'tag', '--points-at', 'HEAD') or [], core_dir)
     try:
         dirty = subprocess.run(['git', '-C', str(ctx.core_root), 'status', '--porcelain'], capture_output=True, text=True, timeout=30, env=git_env()).stdout.strip()
     except (OSError, subprocess.SubprocessError):
@@ -186,7 +212,8 @@ def gate_core_pin(ctx):
     if dirty:
         det.append('the core checkout has local changes (a game repo never patches the core in place: file the change against warscape-core)')
         det += ['  ' + l for l in dirty.splitlines()[:10]]
-    tagnote = f'tag {want}' if head else 'VERSION only: no tags in this checkout'
+    tagnote = {'tag': f'tag {want}', 'shallow': f'pinned tag {want} not in this shallow checkout: VERSION only',
+               'none': 'VERSION only: no tags in this checkout'}.get(pin_check(pin_commit, shallow, bool(tags)), '')
     return Result('core_pin', 'error' if det else 'ok', 'core pin broken' if det else f'core {have} as pinned ({tagnote}), unmodified', det)
 
 
