@@ -1,0 +1,11 @@
+{
+  "id": "W3",
+  "description": "wsc jobs next crashes with \"Unacceptable pattern: ''\" whenever it prints brief steps: brief_steps in warscape/jobq.py calls root.glob(S.ledgers) before testing S.ledgers, and the core leaves [jobs] ledgers at '' (repo.py DEFAULTS), so Python 3.12+ raises ValueError. Guard the glob, add a host test, sweep for the same pattern.",
+  "title": "jobs next survives an unset [jobs] ledgers",
+  "phase": 1,
+  "status": "queued",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "brief": "jobs/W3/brief.md"
+}
