@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import checks, core_version, tools
-from .registry import RegistryError, load_all, schema_path
+from .registry import RegistryError, load_all, load_schema
 from .repo import git_env
 from .schema import check_schema
 
@@ -39,11 +39,10 @@ def gate_schemas(ctx):
     specs |= set(ctx.config['registries'].values())
     errs = []
     for s in sorted(specs):
-        sp = schema_path(s, ctx.root)
         try:
-            doc = json.loads(sp.read_text(encoding='utf-8'))
-        except (OSError, ValueError) as e:
-            errs.append(f'{s}: {e}')
+            doc = load_schema(s, ctx.root)    # x-extends resolved: the merged document is the one checked
+        except RegistryError as e:
+            errs.append(str(e))
             continue
         errs += [f'{s}: {e}' for e in check_schema(doc)]
     return Result('schemas', 'error' if errs else 'ok', f'{len(errs)} schema problems' if errs else f'{len(specs)} schemas within the supported subset', errs)
