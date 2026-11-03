@@ -38,7 +38,8 @@ DEFAULTS = {
         'exempt': [],
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
-    'gates': {'fast': [], 'skip': []},     # fast: empty = every gate except `tests`
+    'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`
+              'dirs': []},                 # repo-relative folders of game gate modules (warscape/gatemods.py)
     'cli': {'verb_dirs': []},              # repo-relative folders of extra verb modules
     'core': {'version': ''},               # the core version this repo pins (checked by the core_pin gate)
     # where a game's adapters are, for the proxy and harness tools (proxy/tools/layout.py, napoleon J12); empty = the one
@@ -48,14 +49,13 @@ DEFAULTS = {
     'harness': {'adapter': ''},            # repo-relative file: the watcher's adapter.json (its profiles/ beside it)
     # the discovery passes (discovery/, `wsc discovery`; napoleon J64): empty = the one discovery/*/games.json folder in the repo
     'discovery': {'adapter': ''},          # repo-relative folder: games.json (target, reference, install paths) and the rules the tools read
-    # the job queue (napoleon J62; library: warscape/jobq.py, hooks: warscape/hooks.py). The defaults are a plain queue: ids J<n>,
+    # the job queue (napoleon J62; library: warscape/jobq.py; a game's own rules: gate modules, [gates] dirs). The defaults are a plain queue: ids J<n>,
     # sonnet|opus, no game rules, no references in the step texts.
     'jobs': {
         'id_prefix': 'J',                  # job ids are <prefix><n>; branches job/<id>, brief/<id>
         'dir': 'jobs',                     # jobs/<id>/brief.md, report.md, review.md
         'models': ['sonnet', 'opus'],      # the Model line of a brief; the first is the default, the others need a stated reason
         'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
-        'hooks': [],                       # repo-relative Python files defining hook names (warscape/hooks.py)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
@@ -111,6 +111,12 @@ class ConfigError(Exception):
     pass
 
 
+# Keys removed from wsc.toml, with what replaced them: a message written for the key, not the generic "unknown key".
+REMOVED = {
+    ('jobs', 'hooks'): '[jobs] hooks was replaced by [gates] dirs in 0.18.0 (C21): move each hook into a gate module; docs/CONSUMING.md "Game gates"',
+}
+
+
 def _merge(base, over, where=''):
     out = copy.deepcopy(base)
     for k, v in over.items():
@@ -140,6 +146,9 @@ def load_config(root):
             raw = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f'{path}: {e}') from None
+    for (table, key), why in REMOVED.items():
+        if isinstance(raw.get(table), dict) and key in raw[table]:
+            raise ConfigError(f'{CONFIG_NAME}: {why}')
     cfg = _merge(DEFAULTS, raw)
     for name, spec in cfg['registries'].items():
         if not re.fullmatch(r'[a-z][a-z0-9_]*', name):
@@ -149,6 +158,8 @@ def load_config(root):
     bad = [n for n in cfg['storage']['dir'] if n not in cfg['registries']]
     if not isinstance(cfg['storage']['dir'], list) or bad:
         raise ConfigError(f'{CONFIG_NAME}: storage.dir must list declared registries; not declared: {", ".join(map(str, bad))}')
+    if not isinstance(cfg['gates']['dirs'], list) or not all(isinstance(d, str) and d for d in cfg['gates']['dirs']):
+        raise ConfigError(f'{CONFIG_NAME}: gates.dirs must list repo-relative folders of gate modules')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     return cfg

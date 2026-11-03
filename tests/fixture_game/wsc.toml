@@ -1,5 +1,5 @@
 # The fixture game of the job-pipeline host tests (tests/test_fixture_game.py): a second consumer of `wsc jobs`, `wsc policy` and `wsc ci`
-# with ids F<n>, decisions X<n>, a different trailer, one input set and one hook module. Copied into a throwaway git repo by the tests.
+# with ids F<n>, decisions X<n>, a different trailer, one input set and two game gate modules (gates/). Copied into a throwaway git repo by the tests.
 registries_dir = "registries"
 
 [registries]
@@ -11,9 +11,11 @@ dir = ["jobs"]
 [views]
 commit = false
 
+[gates]
+dirs = ["gates"]
+
 [jobs]
 id_prefix = "F"
-hooks = ["hooks/rules.py"]
 legacy = "jobs/legacy.json"
 
 [jobs.text]

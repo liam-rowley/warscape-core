@@ -1,6 +1,7 @@
 """The job queue, as library code (verb: warscape/verbs/jobs.py): the queue rules, the readiness rule, branch reading, the step texts, the
 status page and its launch server. Moved from napoleon-remastered `tools/verbs/jobs.py` (napoleon J62); every game-specific string and
-rule is repo configuration (`wsc.toml` [jobs], [jobs.text]) or a hook module (`warscape/hooks.py`), so a repo with none of them is a plain queue.
+rule is repo configuration (`wsc.toml` [jobs], [jobs.text]) or a game gate module (`warscape/gatemods.py`, stages `jobs` and `view`), so a repo with
+none of them is a plain queue.
 
 Settings: the module-level `S` holds what the repo configured (`configure(ctx)` fills it from `ctx.config['jobs']`; the defaults are the
 generic ones). Tests that want a different configuration call `configure_from(cfg)`.
@@ -26,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from . import hooks
+from . import gatemods
 from .policy import verdict
 from .repo import DEFAULTS
 
@@ -41,7 +42,6 @@ class Settings:
     ledgers = ''
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
-    hooks = ()
     text = dict(DEFAULTS['jobs']['text'])
 
 
@@ -49,16 +49,14 @@ S = Settings()
 
 
 def configure_from(cfg, root=None, reg_dir='registries'):
-    """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file and hook modules."""
+    """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file."""
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
     S.text = dict(cfg['text'])
     S.legacy_rounds = S.legacy_briefs = frozenset()
-    S.hooks = ()
     if root is not None:
         if cfg['legacy']:
             data = json.loads((Path(root) / cfg['legacy']).read_text(encoding='utf-8'))
             S.legacy_rounds, S.legacy_briefs = frozenset(data.get('round_rules', [])), frozenset(data.get('brief_hooks', []))
-        S.hooks = hooks.load(root, cfg['hooks'])
     return S
 
 
@@ -72,14 +70,23 @@ def ref(key, fmt=' ({})'):
     return fmt.format(v) if v else ''
 
 
-def call_hooks(name, ctx, *args, joiner=None):
-    """The results of hook `name` in every configured module that defines it (hooks.py): lists are concatenated, strings joined."""
-    out = []
-    for m in S.hooks:
-        f = getattr(m, name, None)
-        if f:
-            out += list(f(ctx, *args)) if joiner is None else [f(ctx, *args)]
-    return out
+def briefs(rows, read):
+    """(jid, row, text) for every row whose brief exists, in id order, skipping the legacy file's `brief_hooks` ids (jobs frozen before a
+    game's brief rules existed; the JSON key keeps the name it had when those rules were hooks). What a `jobs`-stage gate module reads as
+    `ctx.briefs()`."""
+    for r in sorted(rows, key=lambda r: num(r['id'])):
+        text = read(f'{S.jobs_dir}/{r["id"]}/brief.md')
+        if text is not None and r['id'] not in S.legacy_briefs:
+            yield r['id'], r, text
+
+
+def check(ctx, rows, read, folders=()):
+    """The whole queue check (`wsc jobs check` and the `jobs` gate): the core rules, then the repo's `jobs`-stage gate modules
+    (warscape/gatemods.py). Returns (errors, warnings, summaries): the modules' non-empty summaries go on the `jobs check` line."""
+    res = gatemods.run_stage(ctx, 'jobs', rows=rows, read=read, briefs=lambda: briefs(rows, read))
+    errs = problems(rows, read, folders) + gatemods.problems(res)
+    summaries = [r.summary for r in res if r.summary and not (r.level == 'error' and not r.details)]
+    return errs, gatemods.problems(res, 'warn'), summaries
 
 
 STATUSES_WITH = {'brief': {'queued', 'review', 'fix', 'done'}, 'report': {'review', 'fix', 'done'}, 'review': {'fix', 'done'}}
@@ -93,13 +100,11 @@ def num(jid):
 
 
 # ------------------------------------------------------------------ check
-def brief_problems(jid, row, text, ctx=None):
+def brief_problems(jid, row, text):
     """Shape every brief must have (the Model line rule and the Finish rule): Model line agreeing with the row (a reason when Opus), a call budget,
-    kill criteria, and a Finish section that ends with the status=review command. With `ctx`, a brief whose id is not in the legacy
-    `brief_hooks` list also passes every `brief_problems(ctx, jid, row, text)` hook (hooks.py): a game's own brief rules."""
+    kill criteria, and a Finish section that ends with the status=review command. A game's own brief rules are a `jobs`-stage gate module
+    reading `ctx.briefs()` (warscape/gatemods.py)."""
     errs = []
-    if ctx is not None and jid not in S.legacy_briefs:
-        errs += call_hooks('brief_problems', ctx, jid, row, text)
     if not re.search(rf'^# {jid}:', text, re.M):
         errs.append(f'first heading is not "# {jid}: <title>"')
     m = re.search(r'^Model:\s*(\w+)(.*)$', text, re.M)
@@ -200,9 +205,9 @@ def round_status_problems(row, review, report):
     return [f'round {n} says "{v}", so the row should be {want}, not {st}']
 
 
-def problems(rows, read, folders=(), ctx=None):
-    """Errors for the queue. `rows`: the jobs rows; `read(path)`: file text or None; `folders`: job ids that have a jobs/<id>/ folder;
-    `ctx`: the repo context, which switches the brief hooks on (see brief_problems)."""
+def problems(rows, read, folders=()):
+    """The core's errors for the queue. `rows`: the jobs rows; `read(path)`: file text or None; `folders`: job ids that have a jobs/<id>/
+    folder. `check` adds the repo's own rules."""
     errs, by = [], {r['id']: r for r in rows}
     for jid in sorted(by, key=num):
         r, st = by[jid], by[jid].get('status')
@@ -221,7 +226,7 @@ def problems(rows, read, folders=(), ctx=None):
             errs.append(f'{jid}: has a brief but is still needs_brief (set status=queued brief={S.jobs_dir}/{jid}/brief.md)')
         brief = read(f'{S.jobs_dir}/{jid}/brief.md')
         if brief is not None:
-            errs += [f'{jid}: brief: {e}' for e in brief_problems(jid, r, brief, ctx)]
+            errs += [f'{jid}: brief: {e}' for e in brief_problems(jid, r, brief)]
         report = read(f'{S.jobs_dir}/{jid}/report.md')
         if report is not None:
             errs += [f'{jid}: report: {e}' for e in report_problems(jid, report)]
@@ -588,6 +593,15 @@ def lane(r, by, branches, on_branch=None):
     return 'brief', ('waits for ' + ', '.join(late)) if late else 'can be briefed now'
 
 
+def panel_html(r):
+    """A `view`-stage Result as page HTML: its `html` as is (the repo's own code, as the hook was), else its escaped summary and details
+    as a muted paragraph, else nothing."""
+    if r.html:
+        return r.html
+    lines = [x for x in [r.summary, *r.details] if x]
+    return f'<p class="muted">{"<br>".join(html.escape(str(x)) for x in lines)}</p>' if lines else ''
+
+
 def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None):
     """The queue as one HTML page. `read(path)`: file text or None; `branches`: remote branch names; `generated`: timestamp text;
     `on_branch`: see branch_rows (review and fix buttons need it). Brief, report and review are embedded as escaped Markdown and rendered by
@@ -609,7 +623,7 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
     else:
         head = 'Nothing is ready to pick up or brief.'
     if ctx is not None:
-        panel = ''.join(call_hooks('view_panel', ctx, joiner=''))   # a game's own status line (view_panel hook)
+        panel = ''.join(panel_html(r) for r in gatemods.run_stage(ctx, 'view', rows=rows))   # a game's own status lines (`view`-stage gate modules)
         if panel:
             head += '</p>' + panel + '<p>'
 

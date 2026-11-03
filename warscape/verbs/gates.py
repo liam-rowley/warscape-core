@@ -1,5 +1,5 @@
 """
-Purpose: Run the repo gates: schemas, registries, tool headers and rows, strict JSON, Windows-safe paths, doc size cap, undated "verified", conflict markers, line endings, core pin, host tests.
+Purpose: Run the repo gates: schemas, registries, tool headers and rows, strict JSON, Windows-safe paths, doc size cap, undated "verified", conflict markers, line endings, core pin, host tests, then the repo's own game gates ([gates] dirs).
 Usage: wsc gates [--fast] [--only name,name] [--json OUT] [-q]   (exit 1 when any gate fails; warnings never fail)
 When: before every push (the pre-push hook runs --fast), in CI on every push and PR (full set), and after any change to a registry, tool or doc.
 Verb: gates
@@ -15,7 +15,7 @@ HELP = 'run the gates (CI runs the full set, pre-push runs --fast)'
 
 def add_arguments(p):
     p.add_argument('--fast', action='store_true', help='the fast set: everything except host tests (or [gates] fast in wsc.toml)')
-    p.add_argument('--only', help='comma-separated gate names: ' + ', '.join(G.NAMES))
+    p.add_argument('--only', help='comma-separated gate names: ' + ', '.join(G.NAMES) + ', and the repo game gates (wsc.toml [gates] dirs; an unknown name lists them)')
     p.add_argument('--json', help='also write the results to this file')
     p.add_argument('-q', action='store_true', help='print failures and warnings only')
 
