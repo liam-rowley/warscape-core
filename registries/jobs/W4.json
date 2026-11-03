@@ -3,9 +3,10 @@
   "description": "The game-agnostic half of napoleon-remastered J64: discovery/core moves into the core with its tool ids, the discovery verb, exe_info, the extended game-name lint and host tests, found through a [discovery] adapter.",
   "title": "discovery/core in the core",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W4/brief.md"
+  "brief": "jobs/W4/brief.md",
+  "report": "jobs/W4/report.md"
 }
