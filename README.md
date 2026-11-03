@@ -73,6 +73,7 @@ the core checkout; in the core, tags match `VERSION`), `hooks` (warning: the pre
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
+| `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |
 | `wsc.py`, `warscape/` | the CLI launcher and the library; verbs in `warscape/verbs/` |
 | `schemas/` | the registry schemas the core ships |
 | `registries/` | the core's own registries (real: `tools`; the rest declared empty so CI exercises every schema) |
