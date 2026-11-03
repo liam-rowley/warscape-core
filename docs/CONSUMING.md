@@ -10,7 +10,10 @@ The game repo carries the core as a submodule at `core/`, checked out at a tag (
 
 Why this one: it is the only option where "a game repo never patches the core in place" (napoleon `PLAN.md` section 4) holds by
 construction. An edit inside `core/` cannot be committed to the game repo; it can only be pushed to warscape-core, through a PR.
-The `core_pin` gate adds the rest: it fails when the checkout is not the pinned version or has local changes.
+The `core_pin` gate adds the rest: it fails when the checkout has local changes, when its `VERSION` is not the pinned version, and,
+when the pinned tag is in the checkout, when HEAD is not that tag's commit. A shallow checkout without the pinned tag (CI's depth-1
+submodule brings only the core tip's tag) and a checkout with no tags are compared by `VERSION` only; a full checkout that has other
+tags but not the pinned one fails and names the fix, `git -C core fetch --tags` (C21).
 
 ## The options compared
 
