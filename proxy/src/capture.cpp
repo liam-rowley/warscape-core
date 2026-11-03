@@ -53,6 +53,8 @@ std::map<void*, uint64_t> s_shaderHash;   // this capture's shader objects (poin
 std::set<void*> s_described;              // surfaces, textures and declarations already described in this capture
 std::set<uint64_t> s_written;             // shader files written by this process
 int s_shadersNew = 0, s_walkBad = 0, s_sizeMismatch = 0;
+int s_sbCreated = 0, s_sbCaptured = 0, s_sbApplied = 0;   // this capture's state blocks (B34)
+bool s_sbHooked = false;                  // IDirect3DStateBlock9 Capture and Apply hooked (the throwaway block at install was made)
 size_t s_capShaders = 0;                  // distinct shaders bound in the last capture
 double s_t0 = 0;
 
@@ -179,6 +181,7 @@ ORIG(Clear, DWORD, const void*, DWORD, DWORD, float, DWORD);
 ORIG(SetTransform, DWORD, const float*);
 ORIG(SetViewport, const Viewport*);
 ORIG(SetRenderState, DWORD, DWORD);
+ORIG(CreateStateBlock, DWORD, void**);
 ORIG(EndStateBlock, void**);
 ORIG(SetTexture, DWORD, void*);
 ORIG(SetTextureStageState, DWORD, DWORD, DWORD);
@@ -203,6 +206,8 @@ ORIG(SetPixelShaderConstantI, UINT, const int*, UINT);
 ORIG(SetPixelShaderConstantB, UINT, const BOOL*, UINT);
 using T_NoArg = HRESULT(WINAPI*)(void*);
 T_NoArg o_BeginScene, o_EndScene, o_BeginStateBlock;
+T_NoArg o_SBCapture, o_SBApply;   // IDirect3DStateBlock9 slots 4 and 5 (0-2 IUnknown, 3 GetDevice)
+void WriteState(void* d, bool targets);
 
 HRESULT WINAPI hk_StretchRect(void* d, void* s, const RECT* sr, void* t, const RECT* tr, DWORD f) {
     if (!s_rec) return o_StretchRect(d, s, sr, t, tr, f);
@@ -246,6 +251,28 @@ HRESULT WINAPI hk_EndStateBlock(void* d, void** sb) {
     if (!s_rec) return o_EndStateBlock(d, sb);
     Depth g; const HRESULT hr = o_EndStateBlock(d, sb);
     if (g.on) { std::string l = "SBEND"; AppendX(l, P(sb ? *sb : nullptr)); Line(l); }
+    return hr;
+}
+HRESULT WINAPI hk_CreateStateBlock(void* d, DWORD ty, void** sb) {
+    if (!s_rec) return o_CreateStateBlock(d, ty, sb);
+    Depth g; const HRESULT hr = o_CreateStateBlock(d, ty, sb);
+    if (g.on) { std::string l = "SBCREATE"; AppendU(l, ty); AppendX(l, P(SUCCEEDED(hr) && sb ? *sb : nullptr)); Line(l); ++s_sbCreated; }
+    return hr;
+}
+// IDirect3DStateBlock9 (B34): D3DX effects save and restore state through state blocks, so an Apply changes state no Set* hook sees.
+HRESULT WINAPI hk_SBCapture(void* sb) {
+    if (!s_rec) return o_SBCapture(sb);
+    Depth g; if (g.on) { std::string l = "SBCAPTURE"; AppendX(l, P(sb)); Line(l); ++s_sbCaptured; }
+    return o_SBCapture(sb);
+}
+HRESULT WINAPI hk_SBApply(void* sb) {
+    if (!s_rec) return o_SBApply(sb);
+    Depth g; if (g.on) { std::string l = "SBAPPLY"; AppendX(l, P(sb)); Line(l); ++s_sbApplied; }
+    const HRESULT hr = o_SBApply(sb);
+    if (g.on) {   // what the block may have changed, read back (Get* only; Depth keeps any runtime-internal Set* unrecorded); no targets
+        void* d = nullptr;
+        if (SUCCEEDED(Slot<HRESULT(WINAPI*)(void*, void**)>(sb, 3)(sb, &d)) && d) { WriteState(d, false); Rel(d); }   // GetDevice
+    }
     return hr;
 }
 HRESULT WINAPI hk_Clear(void* d, DWORD n, const void* rects, DWORD flags, DWORD color, float z, DWORD stencil) {
@@ -304,14 +331,18 @@ HRESULT WINAPI hk_SetIndices(void* d, void* ib) { if (!s_rec) return o_SetIndice
 
 // ---- the STATE block: what the previous frame left bound, read back at arm time -------------------------------------------------
 template <typename F> F DevSlot(void* d, int n) { return Slot<F>(d, n); }
-void WriteState(void* d) {
+// targets: the arm-time block (back buffer, render targets, depth surface); the block after an SBAPPLY leaves them out (a state block
+// holds no render target or depth surface, and an RT or DS line would end the reader's pass).
+void WriteState(void* d, bool targets) {
     Line("STATE");
     void* o = nullptr;
-    if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, UINT, UINT, UINT, void**)>(d, 18)(d, 0, 0, 0, &o)) && o) {   // GetBackBuffer
-        DescribeSurface(o); std::string l = "BACKBUFFER"; AppendX(l, P(o)); Line(l); Rel(o);
+    if (targets) {
+        if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, UINT, UINT, UINT, void**)>(d, 18)(d, 0, 0, 0, &o)) && o) {   // GetBackBuffer
+            DescribeSurface(o); std::string l = "BACKBUFFER"; AppendX(l, P(o)); Line(l); Rel(o);
+        }
+        for (DWORD i = 0; i < 4; ++i) { o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, void**)>(d, 38)(d, i, &o))) { RecRT(i, o); Rel(o); } }
+        o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, void**)>(d, 40)(d, &o))) { RecDS(o); Rel(o); }
     }
-    for (DWORD i = 0; i < 4; ++i) { o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, void**)>(d, 38)(d, i, &o))) { RecRT(i, o); Rel(o); } }
-    o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, void**)>(d, 40)(d, &o))) { RecDS(o); Rel(o); }
     Viewport vp{}; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, Viewport*)>(d, 48)(d, &vp))) RecVP(&vp);
     RECT sc{}; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, RECT*)>(d, 76)(d, &sc))) RecScissor(&sc);
     for (DWORD s = 0; s < 256; ++s) { DWORD v = 0; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, DWORD*)>(d, 58)(d, s, &v))) RecRS(s, v); }
@@ -320,6 +351,9 @@ void WriteState(void* d) {
         o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, void**)>(d, 64)(d, sm, &o))) { RecTex(sm, o); Rel(o); }
         for (DWORD ty = 1; ty <= 13; ++ty) { DWORD v = 0; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, DWORD, DWORD*)>(d, 68)(d, sm, ty, &v))) Rec3("SS", sm, ty, v); }
     }
+    const DWORD tss[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 22, 23, 24, 26, 27, 28, 32 };   // D3DTEXTURESTAGESTATETYPE, every defined value
+    for (DWORD st = 0; st < 8; ++st)   // GetTextureStageState
+        for (DWORD ty : tss) { DWORD v = 0; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, DWORD, DWORD, DWORD*)>(d, 66)(d, st, ty, &v))) Rec3("TSS", st, ty, v); }
     o = nullptr; if (SUCCEEDED(DevSlot<HRESULT(WINAPI*)(void*, void**)>(d, 88)(d, &o))) { RecDecl(o); Rel(o); }
     for (UINT s = 0; s < 8; ++s) {
         UINT off = 0, stride = 0, f = 0; o = nullptr;
@@ -369,6 +403,7 @@ void CaptureInstall(void* dev) {
         { 41, (void*)hk_BeginScene, (void**)&o_BeginScene, "BeginScene" }, { 42, (void*)hk_EndScene, (void**)&o_EndScene, "EndScene" },
         { 43, (void*)hk_Clear, (void**)&o_Clear, "Clear" }, { 44, (void*)hk_SetTransform, (void**)&o_SetTransform, "SetTransform" },
         { 47, (void*)hk_SetViewport, (void**)&o_SetViewport, "SetViewport" }, { 57, (void*)hk_SetRenderState, (void**)&o_SetRenderState, "SetRenderState" },
+        { 59, (void*)hk_CreateStateBlock, (void**)&o_CreateStateBlock, "CreateStateBlock" },
         { 60, (void*)hk_BeginStateBlock, (void**)&o_BeginStateBlock, "BeginStateBlock" }, { 61, (void*)hk_EndStateBlock, (void**)&o_EndStateBlock, "EndStateBlock" },
         { 65, (void*)hk_SetTexture, (void**)&o_SetTexture, "SetTexture" }, { 67, (void*)hk_SetTextureStageState, (void**)&o_SetTextureStageState, "SetTextureStageState" },
         { 69, (void*)hk_SetSamplerState, (void**)&o_SetSamplerState, "SetSamplerState" }, { 75, (void*)hk_SetScissorRect, (void**)&o_SetScissorRect, "SetScissorRect" },
@@ -382,6 +417,22 @@ void CaptureInstall(void* dev) {
         { 109, (void*)hk_SetPixelShaderConstantF, (void**)&o_SetPixelShaderConstantF, "SetPixelShaderConstantF" }, { 111, (void*)hk_SetPixelShaderConstantI, (void**)&o_SetPixelShaderConstantI, "SetPixelShaderConstantI" },
         { 113, (void*)hk_SetPixelShaderConstantB, (void**)&o_SetPixelShaderConstantB, "SetPixelShaderConstantB" },
     };
+    // B34: the state-block class's vtable comes from one throwaway D3DSBT_ALL block, made through the original CreateStateBlock before
+    // the slot-59 hook goes in (so it is never recorded) and released at once; nothing is added to the game's own CreateStateBlock path.
+    H ss[] = { { 4, (void*)hk_SBCapture, (void**)&o_SBCapture, "Capture" }, { 5, (void*)hk_SBApply, (void**)&o_SBApply, "Apply" } };
+    int sbOk = 0;
+    void* sb = nullptr;
+    void* create = vt[59] == (void*)hk_CreateStateBlock && o_CreateStateBlock ? (void*)o_CreateStateBlock : vt[59];   // a second device: the original
+    if (SUCCEEDED(reinterpret_cast<HRESULT(WINAPI*)(void*, DWORD, void**)>(create)(dev, 1 /* D3DSBT_ALL */, &sb)) && sb) {
+        void** sv = *(void***)sb;
+        for (const H& h : ss) {
+            char n[64]; snprintf(n, sizeof n, "IDirect3DStateBlock9::%s", h.name);
+            if (sv[h.slot] == h.hk) { ++sbOk; continue; }
+            if (VtableHook(sv, h.slot, h.hk, *h.orig ? nullptr : h.orig, n)) ++sbOk;
+        }
+        Rel(sb);
+    } else LOGW("capture: CreateStateBlock(D3DSBT_ALL) failed at install: state blocks are not hooked (results say \"state_block_hooks\": false)");
+    s_sbHooked = sbOk == (int)(sizeof ss / sizeof ss[0]);
     int ok = 0;
     for (const H& h : hs) {
         char n[64]; snprintf(n, sizeof n, "IDirect3DDevice9::%s", h.name);
@@ -390,7 +441,8 @@ void CaptureInstall(void* dev) {
     }
     s_hooked = ok == (int)(sizeof hs / sizeof hs[0]);
     if (!s_doneEv) s_doneEv = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    LOGI("capture: %d of %d device slots hooked (dev.capture=1, dir '%ls')", ok, (int)(sizeof hs / sizeof hs[0]), s_root.c_str());
+    LOGI("capture: %d of %d device slots, %d of %d state-block slots hooked (dev.capture=1, dir '%ls')", ok, (int)(sizeof hs / sizeof hs[0]), sbOk,
+         (int)(sizeof ss / sizeof ss[0]), s_root.c_str());
 }
 
 void CaptureInit() {   // the folder sits outside the game folder (D25: the uninstall stays byte-exact); empty refuses every capture
@@ -433,7 +485,8 @@ void CapturePresent(void* dev) {
     snprintf(h, sizeof h, "CAPTURE %s launch %s build %s frames %d utc %s scene %s", s_name.c_str(), Rt().launchId.c_str(), WSP_BUILD_ID, s_frames,
              UtcIso(UnixMs()).c_str(), DevSceneNow().c_str());
     Line(h);
-    s_depth = 1; WriteState(dev); s_depth = 0;   // the Get* reads call no hook, but a runtime may forward one through its vtable
+    s_sbCreated = s_sbCaptured = s_sbApplied = 0;
+    s_depth = 1; WriteState(dev, true); s_depth = 0;   // the Get* reads call no hook, but a runtime may forward one through its vtable
     Line("FRAME 1");
     s_t0 = MonoS();
     s_rec = true;
@@ -481,6 +534,7 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
                  MonoS() - t0);
         result = b;
         if (abandoned) result += ", \"file\": " + JStr(Narrow(s_dir) + "frame.txt");
+        result += std::string(", \"state_block_hooks\": ") + (s_sbHooked ? "true" : "false");
         if (abandoned) {
             snprintf(b, sizeof b, "recording did not finish within %.0f s: abandoned; the render thread closes frame.txt at its next Present", MonoS() - t0);
             why = b;
@@ -494,7 +548,9 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
              JStr(Narrow(s_dir)).c_str(), JStr(Narrow(s_dir) + "frame.txt").c_str(), JStr(Narrow(s_root) + "shaders\\").c_str(), s_frame, (unsigned long long)s_bytes,
              (unsigned long long)s_lines, (unsigned long long)s_draws, s_capShaders, s_shadersNew, s_walkBad, s_sizeMismatch, recS, MonoS() - t0);
     result = b;
-    result += ", \"other_thread_calls\": " + std::to_string(s_otherTotal);
+    snprintf(b, sizeof b, ", \"other_thread_calls\": %ld, \"state_blocks_created\": %d, \"state_blocks_captured\": %d, \"state_blocks_applied\": %d, "
+             "\"state_block_hooks\": %s", (long)s_otherTotal, s_sbCreated, s_sbCaptured, s_sbApplied, s_sbHooked ? "true" : "false");
+    result += b;
     const bool ok = s_err.empty();
     if (!ok) why = s_err;
     CapRelease(s_cell);   // Done -> Idle: the only way the ctl sets Idle after a recording

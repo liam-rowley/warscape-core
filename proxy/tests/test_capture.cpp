@@ -210,10 +210,45 @@ int main(int argc, char** argv) {
             size_t calls = 0, q = 0; while ((q = body.find("o_" + name + "(", q)) != std::string::npos) { ++calls; ++q; }
             if (calls < 2) printf("  hook %s forwards %zu times\n", name.c_str(), calls);
             CHECK(calls >= 2);
+            // W19: the idle path is the first statement (one load and a branch), and Depth comes after it, never before
+            const size_t fast = body.find("if (!s_rec) return o_" + name + "("), depth = body.find("Depth g;");
+            if (fast == std::string::npos || depth == std::string::npos || depth < fast) printf("  hook %s: Depth not after the s_rec fast path\n", name.c_str());
+            const size_t brace = body.find('{');
+            CHECK(fast != std::string::npos && depth != std::string::npos && fast < depth && brace < fast &&
+                  body.find_first_not_of(" \n", brace + 1) == fast);
             ++hooks; pos = name1;
         }
-        CHECK(hooks >= 30);
+        CHECK_EQ(hooks, (size_t)39);   // W19: 36 + CreateStateBlock (device slot 59) + IDirect3DStateBlock9 Capture and Apply
+        size_t rows = 0; for (size_t q = 0; (q = cap.find(", (void*)hk_", q)) != std::string::npos; ++q) ++rows;
+        CHECK_EQ(rows, (size_t)39);    // every hook is in an install table (37 device slots, 2 state-block slots)
+        CHECK(cap.find("{ 59, (void*)hk_CreateStateBlock") != std::string::npos && cap.find("{ 4, (void*)hk_SBCapture") != std::string::npos &&
+              cap.find("{ 5, (void*)hk_SBApply") != std::string::npos);
         CHECK(cap.find("Adapter()") == std::string::npos);   // nothing game-specific: the capture reads no adapter field
+        // W19 (B32): the state word moves only by compare-and-swap through capture.h's transitions
+        auto count = [&](const std::string& s) { size_t n = 0; for (size_t q = 0; (q = cap.find(s, q)) != std::string::npos; ++q) ++n; return n; };
+        auto fn = [&](const std::string& head) { const size_t a = cap.find(head); return a == std::string::npos ? std::string() : cap.substr(a, cap.find("\n}", a) - a); };
+        CHECK_EQ(count("InterlockedExchange("), (size_t)0);
+        CHECK_EQ(count("InterlockedCompareExchange("), (size_t)1);   // StateCell::Cas, the one place
+        CHECK_EQ(count("s_state ="), (size_t)1);                     // its definition
+        const std::string present = fn("void CapturePresent(void* dev) {"), run = fn("bool CaptureRun("), event = fn("void CaptureEvent(");
+        CHECK(present.find("CapOnPresent(s_cell, ") != std::string::npos);   // arms by CAS (Armed -> Recording), never a plain exchange from Armed
+        CHECK(run.find("CapArmFromCtl(s_cell)") != std::string::npos && run.find("CapOnTimeout(s_cell, false)") != std::string::npos &&
+              run.find("CapOnTimeout(s_cell, true)") != std::string::npos && run.find("CapRelease(s_cell)") != std::string::npos);   // Idle only from Done or Armed
+        // W19 (B33): the recording thread is fixed before s_rec is set; Depth, CaptureEvent and CapturePresent test it
+        const size_t tid = present.find("s_tid = GetCurrentThreadId();"), rec = present.find("s_rec = true;");
+        CHECK(tid != std::string::npos && rec != std::string::npos && tid < rec);
+        CHECK(cap.find("if (GetCurrentThreadId() == s_tid) return true;\n    InterlockedIncrement(&s_otherCalls);") != std::string::npos);
+        CHECK(cap.find("Depth() : mine(OnRecordingThread()) { if (mine) { on = s_rec && s_depth == 0; ++s_depth; } }") != std::string::npos);
+        CHECK(cap.find("~Depth() { if (mine) --s_depth; }") != std::string::npos);
+        const size_t evTid = event.find("GetCurrentThreadId() != s_tid"), evDepth = event.find("s_depth"), evLine = event.find("Line(");
+        CHECK(evTid != std::string::npos && evDepth != std::string::npos && evTid < evDepth && evDepth < evLine);
+        CHECK(present.find("if (s_rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }") != std::string::npos);
+        // W19 (B34): the throwaway state block is made only inside CaptureInstall, after its key check, before the slot-59 hook goes in
+        const std::string install = fn("void CaptureInstall(void* dev) {");
+        const size_t key = install.find("if (!Dk().capture || !dev) return;"), sb = install.find("1 /* D3DSBT_ALL */"), loop = install.find("for (const H& h : hs)");
+        CHECK(key != std::string::npos && sb != std::string::npos && loop != std::string::npos && key < sb && sb < loop);
+        CHECK_EQ(count("1 /* D3DSBT_ALL */"), (size_t)1);   // that call, nowhere else
+        CHECK(fn("HRESULT WINAPI hk_SBApply(").find("WriteState(d, false)") != std::string::npos);   // the readback without targets
     }
     return tk::Done("test_capture");
 }
