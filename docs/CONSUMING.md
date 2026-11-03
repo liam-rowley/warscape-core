@@ -174,7 +174,13 @@ are `wsc.toml` `[proxy] adapter` / `[harness] adapter` when set, else the one `p
 Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh` and so on; `python3 core/proxy/tools/layout.py`
 prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
 the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
-(`proxy/tests/null_game/README.md`).
+(`proxy/tests/null_game/README.md`); from 0.18.0 the tools' Python host tests run here too (`tests/test_pc_deploy.py`, `test_ctl.py`,
+`test_acceptance.py`, `test_saves.py`, `test_job_sh.py`; W8), so a game keeps only the tests over its own data (its scenario rows and
+battle presets for rule 78, its save map, recipes and staging, its real identity).
+The Git Bash finder is core code from 0.18.0 (`warscape/gitbash.py`: `harness/ctl.py` no longer loads the game's `tools/verbs/setup.py`): a
+game's setup verb imports it (`from warscape.gitbash import git_bash, bash_kind, bash_for_tests`; verbs run with the core on `sys.path`)
+instead of keeping its own, and a host test that runs a shell script takes its bash from `bash_or_skip(self)` (a skip, or a failure under
+`$WSC_REQUIRE_BASH`).
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
 (watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
 
