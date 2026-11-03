@@ -479,15 +479,15 @@ void CapturePresent(void* dev) {
     }
     s_tid = GetCurrentThreadId();   // the recording thread, fixed before s_rec is set
     s_otherCalls = 0; s_otherAtFrame = 0; s_otherTotal = 0;
+    s_bytes = s_lines = s_draws = 0; s_shadersNew = s_walkBad = s_sizeMismatch = 0; s_frame = 0; s_capShaders = 0;   // also for a failed open
+    s_sbCreated = s_sbCaptured = s_sbApplied = 0; s_t0 = MonoS();
     s_file = CreateFileW((s_dir + L"frame.txt").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (s_file == INVALID_HANDLE_VALUE) { s_err = "cannot create frame.txt (" + std::to_string(GetLastError()) + ")"; if (CapFinish(s_cell)) SetEvent(s_doneEv); return; }
     s_buf.reserve(5u << 20);
-    s_bytes = s_lines = s_draws = 0; s_shadersNew = s_walkBad = s_sizeMismatch = 0; s_frame = 0;
     char h[400];
     snprintf(h, sizeof h, "CAPTURE %s launch %s build %s frames %d utc %s scene %s", s_name.c_str(), Rt().launchId.c_str(), WSP_BUILD_ID, s_frames,
              UtcIso(UnixMs()).c_str(), DevSceneNow().c_str());
     Line(h);
-    s_sbCreated = s_sbCaptured = s_sbApplied = 0;
     s_depth = 1; WriteState(dev, true); s_depth = 0;   // the Get* reads call no hook, but a runtime may forward one through its vtable
     Line("FRAME 1");
     s_t0 = MonoS();
