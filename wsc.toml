@@ -61,3 +61,11 @@ meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md"
 [ci]
 workflows = ["gates.yml", "policy.yml"]
 core = ""
+# the checks main's ruleset must require (`wsc ci check-settings`); gates is a matrix job, so its checks are listed by name (W21)
+required_checks = ["gates (ubuntu-latest)", "gates (windows-latest)", "policy", "proxy", "harness-windows"]
+
+# proxy: the proxy sources, tools, host tests and the null game it builds; harness: the watcher kit, the proxy tools and null game its
+# installer case kits, the moved-tools test and the library its Python helpers import. A workflow or template change runs both (W21).
+[ci.inputs]
+proxy = '^\.github/workflows/|^ci/|^proxy/|^wsc\.toml$'
+harness = '^\.github/workflows/|^ci/|^harness/|^proxy/tools/|^proxy/tests/null_game/|^tests/test_moved_tools\.py$|^warscape/|^wsc\.toml$'
