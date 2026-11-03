@@ -457,8 +457,13 @@ void CaptureInit() {   // the folder sits outside the game folder (D25: the unin
 // or takes a waiting arm (capture.h CapOnPresent: Armed -> Recording by CAS before anything else).
 void CapturePresent(void* dev) {
     if (!dev) return;
-    if (s_rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }   // B33: another thread's Present
-    switch (CapOnPresent(s_cell, s_frame, s_frames)) {
+    const bool rec = s_rec;   // read before s_tid (the starting thread writes s_tid, then s_rec)
+    if (rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }   // B33: another thread's Present
+    const CapStep step = CapOnPresent(s_cell, s_frame, s_frames);
+    // Recording (or Abandoned) with s_rec still clear: another thread took the arm and is still opening the file and writing its STATE
+    // block; this Present is not the recording thread's and must not write, count frames or close (W19 review round 1).
+    if (!rec && step != CapStep::start && step != CapStep::none) return;
+    switch (step) {
     case CapStep::none: return;
     case CapStep::next_frame: FrameEnd(); Line("PRESENT"); ++s_frame; Line("FRAME " + std::to_string(s_frame + 1)); return;
     case CapStep::finish:

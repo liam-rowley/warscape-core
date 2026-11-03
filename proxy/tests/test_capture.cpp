@@ -242,7 +242,11 @@ int main(int argc, char** argv) {
         CHECK(cap.find("~Depth() { if (mine) --s_depth; }") != std::string::npos);
         const size_t evTid = event.find("GetCurrentThreadId() != s_tid"), evDepth = event.find("s_depth"), evLine = event.find("Line(");
         CHECK(evTid != std::string::npos && evDepth != std::string::npos && evTid < evDepth && evDepth < evLine);
-        CHECK(present.find("if (s_rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }") != std::string::npos);
+        CHECK(present.find("if (rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }") != std::string::npos);
+        // ... and while another thread is still starting the capture (Recording, s_rec clear) a Present only the starter may act on does nothing
+        const size_t recRead = present.find("const bool rec = s_rec;"), startGuard = present.find("if (!rec && step != CapStep::start && step != CapStep::none) return;"),
+                     sw = present.find("switch (step)");
+        CHECK(recRead != std::string::npos && startGuard != std::string::npos && sw != std::string::npos && recRead < startGuard && startGuard < sw);
         // W19 (B34): the throwaway state block is made only inside CaptureInstall, after its key check, before the slot-59 hook goes in
         const std::string install = fn("void CaptureInstall(void* dev) {");
         const size_t key = install.find("if (!Dk().capture || !dev) return;"), sb = install.find("1 /* D3DSBT_ALL */"), loop = install.find("for (const H& h : hs)");
