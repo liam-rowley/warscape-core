@@ -4,6 +4,7 @@ Usage: wsc discovery check | render | gate [--install] [--write] [--json OUT] | 
 When: after any discovery pass (discovery/*.py) rewrites a result; `check` includes the gate and also fails when a committed README is stale; `gate --install` on the PC after a game update; `gate --write` rewrites discovery/gate/summary.json.
 Verb: discovery
 """
+import importlib
 import json
 import os
 import subprocess
@@ -28,14 +29,19 @@ def _core(root):
     p = str(DISCOVERY)
     if p not in sys.path:
         sys.path.insert(0, p)
-    import paths
+    paths = _mod('paths')
     paths.configure(root)
     return paths
 
 
+def _mod(name):
+    """A discovery module by name (they sit in discovery/, which `_core` puts on the path; the core's own sources import only the standard library)."""
+    return importlib.import_module(name)
+
+
 def _load(root):
     _core(root)
-    from diffout import problems  # noqa: E402
+    problems = _mod('diffout').problems
     docs, bad = {}, []
     for a in AREAS:
         p = Path(root) / 'discovery' / 'diff' / f'{a}.json'
@@ -84,11 +90,7 @@ def _json(p):
 def readmes(root):
     """{README path: text} for every generated discovery README whose source file is committed."""
     _core(root)
-    import assets
-    import db
-    import gate
-    import loc
-    import ui_atlas
+    assets, db, gate, loc, ui_atlas = (_mod(n) for n in ('assets', 'db', 'gate', 'loc', 'ui_atlas'))
     d = Path(root) / 'discovery'
     out = {d / 'diff' / 'README.md': render(root)}
     for sub, mod, src in (('assets', assets, 'summary.json'), ('db', db, 'tables.json'), ('loc', loc, 'summary.json'),
@@ -106,7 +108,7 @@ def readme_problems(root):
 def ui_problems(root):
     """The UI atlas: files as summary.json records them (sha256 of the JSON), deterministic gzip, rows and units in step."""
     _core(root)
-    import ui_atlas
+    ui_atlas = _mod('ui_atlas')
     d = Path(root) / 'discovery' / 'ui'
     if not (d / 'summary.json').exists():
         return []
@@ -116,15 +118,13 @@ def ui_problems(root):
 def j7_problems(root):
     """The asset, db and loc results: deterministic tables, the registry exactly what the committed index, refs and rules give, sheets and db shape."""
     paths = _core(root)
-    import assets
-    import tsvgz
+    assets, tsvgz = _mod('assets'), _mod('tsvgz')
     d = Path(root) / 'discovery'
     if not (d / 'assets' / 'index.tsv.gz').exists():
         return []
     bad = tsvgz.problems(str(d / 'assets' / 'index.tsv.gz'), assets.COLUMNS)
     if (d / 'loc' / 'keys.tsv.gz').exists():
-        import loc
-        bad += tsvgz.problems(str(d / 'loc' / 'keys.tsv.gz'), loc.COLUMNS)
+        bad += tsvgz.problems(str(d / 'loc' / 'keys.tsv.gz'), _mod('loc').COLUMNS)
     if bad:
         return bad
     index = assets.load_index(str(d / 'assets' / 'index.tsv.gz'))
@@ -158,8 +158,7 @@ def _sub(root, *args):
 def _install(root):
     """--install: the PC comparison (read-only), as a callable for gate.run_gate."""
     paths = _core(root)
-    import gate
-    from pack_list import read_index
+    gate, read_index = _mod('gate'), _mod('pack_list').read_index
     games = _json(Path(paths.ADAPTER) / 'games.json')
     g = games[paths.TARGET]
     ident = _json(Path(paths.layout.proxy_adapter(Path(root))) / 'identity.json')
@@ -170,7 +169,7 @@ def _install(root):
 def brief_gaps(root):
     """Every `## Registry gaps` bullet of every committed brief."""
     _core(root)
-    import briefpaths
+    briefpaths = _mod('briefpaths')
     out = []
     for p in sorted((Path(root) / 'jobs').glob('*/brief.md')):
         out += briefpaths.registry_gaps(p.read_text(encoding='utf-8'))[0]
@@ -180,7 +179,7 @@ def brief_gaps(root):
 def gate_run(root, install=False, write=False):
     """(lines, failures, doc) of the discovery gate; the recomputations run here, the slow sibling commands in parallel."""
     _core(root)
-    import gate
+    gate = _mod('gate')
     with ThreadPoolExecutor(max_workers=4) as ex:
         subs = {'reg check (schemas, rows, every tool has a row and a file)': ex.submit(_sub, root, 'reg', 'check'), 'hotkeys check': ex.submit(_sub, root, 'hotkeys', 'check'),
                 'engine_sites table (gen_tables --check)': ex.submit(_gen_tables, root)}

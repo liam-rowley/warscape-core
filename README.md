@@ -21,11 +21,12 @@ What the core holds, split as in `napoleon-remastered` `docs/plans/PLAN.md` sect
 | RmlUi host, component library machinery, design tokens to RCSS, review viewer, fixture capture | design language, screens, data contracts | later (napoleon J30, J35, J63) |
 | Frame-time and memory capture (`ctl perf`, `dev.capture`), A/B and regression diff | budgets, scenes | perf **v0.4**, capture **v0.7**; A/B diff later |
 | ESF save tools (`saves/`) | record paths, recipes | **v0.4** (C14) |
+| Discovery passes (`discovery/`, `wsc discovery`): pack, asset, db, loc, UI atlas, exe and Lua API readers and the discovery gate | `games.json` and the rules the tools read, every committed result | **v0.12** (C20, napoleon J64) |
 
 ## Use it
 
 ```sh
-python3 wsc.py --help                      # verbs: reg, find, gates, jobs, policy, ci (+ a repo's own verbs)
+python3 wsc.py --help                      # verbs: reg, find, gates, jobs, policy, ci, discovery (+ a repo's own verbs)
 python3 wsc.py find shadow resolution      # one search across every registry
 python3 wsc.py reg add tools path/to/tool.py
 python3 wsc.py reg set engine_facts some.fact state=verified date=2026-10-28 evidence=runs/20261028_a

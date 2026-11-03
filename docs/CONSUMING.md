@@ -175,3 +175,17 @@ Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh
 prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
 the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
 (`proxy/tests/null_game/README.md`).
+
+## Discovery (optional extras)
+From 0.12.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
+- **Adapter files a game provides:** `wsc.toml` `[discovery] adapter = "<folder>"` (else the one `discovery/*/games.json`) holding `games.json` with `"target"` and `"reference"`
+  (the two games' names, used for the result fields and README titles), `"extract"`, one entry per name (`root`, `exe`, `data`, `pack_order`, `mod_packs`; the reference also
+  `repo`; the target optionally `captures`), plus `carry_over.json`, `gate.json`, `asset_roles.json`, `db_schema.json`, `console.json`, `engine_api.json`, `lua_cfuncs.json`,
+  `probe_safe.json`, `exe_strings.tsv.gz`, `shader_catalog.json`, `frame_anatomy.md`, `shaders/`. Results stay in the game repo (`discovery/<area>/`, the registries). The identity
+  (`exe_name`, `sha1`) for `gate --install` is the proxy adapter's `identity.json`. A game verb named `discovery` is a load error: delete it in the pin-bump commit.
+- **Extras, PC side only; the gates never need them.** `sheets` needs Pillow (`python3 -m pip install --user -r core/discovery/requirements.txt`, pinned there). The static
+  x86 tools (`x86re`, `console_cmds`, `exe_strings build`) need capstone and pefile in the RE environment: `python3 core/discovery/re_env.py <dir outside the repo>` downloads the
+  wheels pinned by sha256 in that file and builds the venv, then run the tool with `<dir>/venv/.../python -I`. A tool that lacks its extra stops with a message that names this fix;
+  the host tests skip the capstone cases without it.
+- **Re-run steps:** `python3 core/wsc.py discovery all` on the PC, then `discovery check` and `git diff --stat` (empty when nothing changed in the game); `discovery check` and
+  `discovery gate` need only committed files and belong in the game's thin real-repo test.
