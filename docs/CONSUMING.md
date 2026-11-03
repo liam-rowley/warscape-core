@@ -10,7 +10,10 @@ The game repo carries the core as a submodule at `core/`, checked out at a tag (
 
 Why this one: it is the only option where "a game repo never patches the core in place" (napoleon `PLAN.md` section 4) holds by
 construction. An edit inside `core/` cannot be committed to the game repo; it can only be pushed to warscape-core, through a PR.
-The `core_pin` gate adds the rest: it fails when the checkout is not the pinned version or has local changes.
+The `core_pin` gate adds the rest: it fails when the checkout has local changes, when its `VERSION` is not the pinned version, and,
+when the pinned tag is in the checkout, when HEAD is not that tag's commit. A shallow checkout without the pinned tag (CI's depth-1
+submodule brings only the core tip's tag) and a checkout with no tags are compared by `VERSION` only; a full checkout that has other
+tags but not the pinned one fails and names the fix, `git -C core fetch --tags` (C21).
 
 ## The options compared
 
@@ -118,6 +121,19 @@ commit = false              # views go to the git-ignored dir (default "_scratch
   With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
   registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
   either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
+
+## Extending a core schema (0.17.0)
+A game that needs a field a core schema lacks does not copy the schema (its copy would miss every later core change): its own schema
+names the core one in `x-extends` and holds only what it adds, and `wsc.toml` points the registry at it.
+```json
+{"x-extends": "core:hotkeys", "required": ["owner"], "properties": {"owner": {"type": "string", "minLength": 1}}}
+```
+`hotkeys = "schemas/hotkeys.schema.json"` in `[registries]` then validates rows against the merged document: every core rule still
+applies, `additionalProperties: false` now covers `owner` too, and `wsc reg render` writes `owner` after the core fields. The document
+may add `properties`, `required`, `allOf` entries (to narrow a core property), `$defs` and `x-unique` tuples, and replace `title`,
+`description`, `$id` and `x-view`; any other key, a core property redefined or a `$defs` name clash is a load error (merge rules:
+`warscape/registry.py` docstring). A game that already copied a core schema can switch; its rows' key order may change once
+(`wsc reg render`, a one-off diff).
 
 ## The job pipeline (0.9.0, napoleon J62, C18)
 The queue, the pull-request policy and the CI helpers are core verbs (`wsc jobs`, `wsc policy`, `wsc ci`) that a repo configures; a repo with none of the
