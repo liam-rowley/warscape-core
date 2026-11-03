@@ -12,7 +12,7 @@ report file, so the parent writes it. Same Claude-Session as the build.
   and no "The brief must cover") and `test_brief_steps_with_ledgers_set_lists_owed_rows` (a `LEDGER*.md` file with a row naming J4; asserts the "The
   brief must cover LEDGER.md row 7: ..." line). Added `import tempfile`. The existing tests did not cover the non-empty-glob path in `brief_steps`,
   so the second case is new.
-- `VERSION` 0.9.0 to 0.9.1, then 0.10.1 when `main` was merged in after W2 (0.10.0) merged first (2026-11-03).
+- `VERSION` 0.9.0 to 0.9.1, then 0.10.1 when `main` was merged in after W2 (0.10.0) merged first, then 0.13.1 after W6 (0.13.0) merged (2026-11-03).
 
 ## Evidence
 - Fail-first (2026-11-03): the test was committed alone as `48b5ee9`, before any change to `jobq.py`, and run on the unfixed code; its failing

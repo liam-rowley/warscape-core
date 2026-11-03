@@ -175,3 +175,8 @@ Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh
 prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
 the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
 (`proxy/tests/null_game/README.md`).
+
+Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
+([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
+([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
+`GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).
