@@ -51,10 +51,22 @@ int IatHook(HMODULE module, const char* dll, const char* func, void* detour, voi
 bool VtableHook(void** vtbl, int index, void* detour, void** original, const char* name) {
     void** slot = vtbl + index;
     if (*slot == detour) return true;   // already ours (a second device of the same class)
+    // Already in this slot's chain under another feature's hook (J30): a second device of the same class shares the vtable, and
+    // re-hooking would make the earlier feature call the later one and the later one call it back, forever (the RmlUi host hooked
+    // Present after the dev side; the battle loader's helper device then had the dev side re-hook it: every Present recursed and the
+    // battle never loaded, run 20261102_j30pc). Every detour installed per slot is remembered; installing one twice is a no-op.
+    // One lock over the check, the install and the record; a detour is recorded only once it is in the slot (a failed VirtualProtect
+    // must not make a later call report "already in the chain" for a hook that never went in: W2 review).
+    static SRWLOCK lock = SRWLOCK_INIT;
+    static std::vector<std::pair<void**, void*>> installed;
+    struct Held { Held() { AcquireSRWLockExclusive(&lock); } ~Held() { ReleaseSRWLockExclusive(&lock); } } held;
+    for (const auto& p : installed)
+        if (p.first == slot && p.second == detour) { LOGI("hook: vtable %s slot %p [%d]: already in the chain (now %p): left alone", name, (void*)slot, index, *slot); return true; }
     DWORD old = 0;
     if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) { LOGE("hook: vtable %s: VirtualProtect failed %lu", name, GetLastError()); return false; }
     void* prev = InterlockedExchangePointer(slot, detour);
     DWORD tmp; VirtualProtect(slot, sizeof(void*), old, &tmp);
+    installed.push_back({ slot, detour });
     if (original) *original = prev;
     LOGI("hook: vtable %s slot %p [%d]: %p -> %p", name, (void*)slot, index, prev, detour);
     return true;

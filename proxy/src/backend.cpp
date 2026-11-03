@@ -9,6 +9,7 @@
 // from DllMain (LoadLibrary under the loader lock). The backend is not engine memory: it loads in pass-through too.
 // No D3D hook is installed here yet; when a feature adds one it must ask Rt().plan.d3dHooks (guard.h PlanEngine).
 #include "runtime.h"
+#include "ui_host.h"
 
 namespace wsp {
 namespace {
@@ -129,6 +130,7 @@ void* WINAPI Direct3DCreate9(UINT sdk) {
     LOGI("Direct3DCreate9(sdk=%u) -> %p [%s]", sdk, d3d, BackendName());
     HeadlessOnDirect3DCreate(d3d);   // headless only: target, mode-list and device hooks (before the dev side wraps CreateDevice)
     DevOnDirect3DCreate(d3d);   // dev side only (frame hooks ask the plan inside)
+    UiOnDirect3DCreate(d3d);    // the RmlUi host (ui.enabled only): its own CreateDevice, Reset and Present hooks
     return d3d;
 }
 
