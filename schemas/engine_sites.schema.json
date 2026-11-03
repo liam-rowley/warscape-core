@@ -55,6 +55,20 @@
       "type": "string",
       "x-ref": "config_keys"
     },
+    "value_key": {
+      "type": "string",
+      "x-ref": "config_keys",
+      "description": "a patch row's bytes come from this int or float key instead of patch_bytes (4 stock bytes, float32 or int32 by the key's type; 0 = stock); docs/PROXY_SITES.md"
+    },
+    "value_scale": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "value_key rows only: written = key value x scale (default 1)"
+    },
+    "value_floor_stock": {
+      "type": "boolean",
+      "description": "value_key rows only: never write below the stock value (default false)"
+    },
     "verified": {
       "$ref": "#/$defs/verified"
     }
@@ -66,6 +80,7 @@
       "rva",
       "purpose",
       "config_key",
+      "value_key",
       "verified"
     ]
   },
@@ -79,13 +94,65 @@
         }
       },
       "then": {
-        "required": [
-          "patch_bytes"
+        "oneOf": [
+          {
+            "required": [
+              "patch_bytes"
+            ]
+          },
+          {
+            "required": [
+              "value_key"
+            ]
+          }
         ]
       },
       "else": {
         "required": [
           "hook"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "value_key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "kind": {
+            "const": "patch"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "value_scale"
+            ]
+          },
+          {
+            "required": [
+              "value_floor_stock"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "value_key"
+        ]
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "config_key",
+          "value_key"
         ]
       }
     }
