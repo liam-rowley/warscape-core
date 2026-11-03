@@ -176,8 +176,13 @@ prints what they will use. The DLL build id hashes the inputs' content under rol
 the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
 (`proxy/tests/null_game/README.md`).
 
+Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
+([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
+([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
+`GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).
+
 ## Discovery (optional extras)
-From 0.12.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
+From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
 - **Adapter files a game provides:** `wsc.toml` `[discovery] adapter = "<folder>"` (else the one `discovery/*/games.json`) holding `games.json` with `"target"` and `"reference"`
   (the two games' names, used for the result fields and README titles), `"extract"`, one entry per name (`root`, `exe`, `data`, `pack_order`, `mod_packs`; the reference also
   `repo`; the target optionally `captures`), plus `carry_over.json`, `gate.json`, `asset_roles.json`, `db_schema.json`, `console.json`, `engine_api.json`, `lua_cfuncs.json`,

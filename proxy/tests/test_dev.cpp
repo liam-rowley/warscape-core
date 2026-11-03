@@ -150,6 +150,24 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < Timeline::kMax; ++i) t.Add("x", "", 0);
         CHECK_EQ(t.marks.size(), Timeline::kMax);
     }
+    {   // the gesture verb (W6): grammar in gesture_feed.h ParseGestureArgs, reached through ParseCtl
+        CHECK(ParseCtl("gesture info").error.empty() && ParseCtl("gesture plan").error.empty());
+        CHECK(ParseCtl("gesture press 100 200 alt").error.empty() && ParseCtl("gesture move 640 360 alt+ctrl").error.empty());
+        CHECK(ParseCtl("gesture release 10 20").error.empty() && ParseCtl("gesture cancel").error.empty() && ParseCtl("gesture cancel right").error.empty());
+        CHECK_EQ(CtlDefaultTimeout("gesture"), 30.0);
+        const gest::GestureArgs p = gest::ParseGestureArgs("press 100 200 alt+ctrl+shift");
+        CHECK(p.op == "press" && p.x == 100 && p.y == 200 && p.mods == (gest::kModAlt | gest::kModCtrl | gest::kModShift));
+        CHECK(gest::ParseGestureArgs("move 5 6").mods == 0 && gest::ParseGestureArgs("move 5 6 none").error.empty());
+        CHECK(gest::ParseGestureArgs("cancel").how == "esc" && gest::ParseGestureArgs("cancel right").how == "right");
+        for (const char* bad : { "", "press", "press 1", "press a 2", "press 1 2 alt meta", "press 1 2 win", "press 1 2 alt+", "press -1 5", "press 1 99999",
+                                 "release 1 2 3 4", "cancel focus", "cancel esc right", "plan now", "info x", "drag 1 2", "press 1.5 2" }) {
+            const gest::GestureArgs a = gest::ParseGestureArgs(bad);
+            if (a.error.empty()) printf("    gesture '%s' was accepted\n", bad);
+            CHECK(!a.error.empty());
+            CHECK(!ParseCtl(std::string("gesture ") + bad).error.empty());
+        }
+        CHECK(std::string(CtlVerbs()).find("gesture") != std::string::npos);
+    }
     {   // source lints
         // the dev side starts after the plan, and only runs when the plan allows hooks (pass-through: nothing)
         const std::string dm = Strip(tk::ReadFile("core/dllmain.cpp"));

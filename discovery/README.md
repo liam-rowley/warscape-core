@@ -1,6 +1,6 @@
 # Discovery
 
-The discovery passes of the Total War remasters, moved here from a game repo's `discovery/core/` (that repo's job J64, core job W4, 0.12.0, C20). They read a
+The discovery passes of the Total War remasters, moved here from a game repo's `discovery/core/` (that repo's job J64, core job W4, 0.15.0, C20). They read a
 game's packs and exe in place (read only) and write deterministic results into the game repo's `discovery/<area>/` folders. The core holds the
 tools; a game repo holds the adapter folder, every committed result and the registries.
 

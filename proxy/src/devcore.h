@@ -14,6 +14,7 @@
 #include <vector>
 #include "capture.h"
 #include "ui_core.h"
+#include "gesture_feed.h"
 
 namespace wsp {
 
@@ -245,9 +246,9 @@ struct CtlRequest {
     std::vector<std::string> scenes;   // waitfor
     std::string luaArgs;       // lua: the text after " -- ", read by the chunk as wsp.dev_config("lua_args") (J4)
 };
-inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], ui show|hide|reload|scale|click|wheel|dump|state ..., exit"; }
+inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], ui show|hide|reload|scale|click|wheel|dump|state ..., gesture press|move|release|cancel|plan|info ..., exit"; }
 inline double CtlDefaultTimeout(const std::string& verb) {
-    return verb == "lua" || verb == "console" ? 30 : verb == "perf" ? 70 : verb == "capture" ? 60 : verb == "ui" ? 30 : verb == "waitfor" ? 180 : (verb == "autostart" || verb == "reset") ? 240 : 10;
+    return verb == "lua" || verb == "console" ? 30 : verb == "perf" ? 70 : verb == "capture" ? 60 : verb == "ui" || verb == "gesture" ? 30 : verb == "waitfor" ? 180 : (verb == "autostart" || verb == "reset") ? 240 : 10;
 }
 
 inline bool ParseTrailingTimeout(std::string& rest, double& t) {   // "x y 30" -> rest "x y", t 30; false when no number at the end
@@ -320,6 +321,11 @@ inline CtlRequest ParseCtl(const std::string& lineIn) {
         const UiArgs a = ParseUiArgs(r.arg);
         if (!a.error.empty()) r.error = a.error;
         else r.timeoutS = 30 + a.seconds;
+        return r;
+    }
+    if (v == "gesture") {   // the gesture layer (W6): grammar in gesture_feed.h ParseGestureArgs; no trailing timeout (numbers are pixels)
+        const gest::GestureArgs a = gest::ParseGestureArgs(r.arg);
+        if (!a.error.empty()) r.error = a.error;
         return r;
     }
     r.error = "unknown verb '" + v + "' (verbs: " + std::string(CtlVerbs()) + ")";

@@ -45,6 +45,7 @@ std::string ConsoleStatusJson();                      // result members of ctl c
 void CameraInit(bool key, const CameraAdapter* ad);   // DevInit
 void CameraInstall();                                 // first Direct3DCreate9: verify the sites, read the chain's offsets
 bool CameraSet(const CamPose& p, std::string& why);   // the engine thread (wsp.cam_set): the active mode's SetTargetAndPosition
+bool CameraRead(int posOff, int targetOff, float pos[3], float target[3], std::string& why);   // W6: the active mode's pose (reads only)
 
 // orders.cpp (J28): the battle unit control route behind dev.orders; decisions in orders.h
 void OrdersInit(bool key, const OrdersAdapter* ad);   // DevInit
@@ -59,6 +60,7 @@ bool OrdersCommand(uint32_t unit, int cmd, float arg, std::string& info, std::st
 long OrdersPost(uint32_t unit, const MoveArgs& a);    // any thread: queued for the next pump; 0 = dev.orders off
 bool OrdersPostResult(long id, bool& ok, std::string& text);   // a posted order's outcome, once
 bool OrdersPeek(uint32_t a, size_t n, std::string& hex, std::string& why);         // probe: n bytes as hex (reads only)
+bool OrdersGroundAt(float x, float z, float& y, std::string& why);   // W6: the ground height the move order uses (the engine thread only)
 std::string OrdersInfo();                             // install state, the owner path's pointers, the thread ids
 
 // capture.cpp (J8): the frame capture behind dev.capture; decisions in its header

@@ -11,6 +11,7 @@
 #include "ui_d3d9.h"
 #include "ui_core.h"
 #include "ui_host.h"
+#include "gesture_host.h"
 #include "ui_lua.h"
 #include "ui_render_d3d9.h"
 #include "ui_rml.h"
@@ -302,11 +303,13 @@ void Subclass(HWND w) {
     s_wide = IsWindowUnicode(w) != 0;
     s_prevProc = (WNDPROC)(LONG_PTR)(s_wide ? SetWindowLongW(w, GWL_WNDPROC, (LONG)(LONG_PTR)WndProc) : SetWindowLongA(w, GWL_WNDPROC, (LONG)(LONG_PTR)WndProc));
     s_hwnd = w; s_wndTid = GetWindowThreadProcessId(w, nullptr);
+    GestureSetWindow(w);
     LOGI("ui: window %p subclassed (%s, thread %lu), previous procedure %p", (void*)w, s_wide ? "unicode" : "ansi", s_wndTid, (void*)s_prevProc);
 }
 
 HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, HWND w, const RGNDATA* r) {
-    if (dev == s_dev) Frame(dev);
+    // draw order: the game's frame, the gesture preview (W6), the RmlUi panels
+    if (dev == s_dev) { GesturePresent(dev, s_bbW, s_bbH); Frame(dev); }
     return o_Present(dev, a, b, w, r);
 }
 HRESULT WINAPI hk_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
@@ -396,8 +399,13 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_MOUSEWHEEL: ev = UiEv::Wheel; break;
     case WM_KEYDOWN: case WM_KEYUP: case WM_SYSKEYDOWN: case WM_SYSKEYUP: ev = UiEv::Key; break;
     case WM_CHAR: ev = UiEv::Char; break;
-    case WM_ACTIVATEAPP: { Lock l; s_route.engineButtons = 0; s_route.rmlButtons = 0; } return Engine(h, msg, wp, lp);   // a release lost to alt-tab
-    default: return Engine(h, msg, wp, lp);
+    case WM_ACTIVATEAPP: { Lock l; s_route.engineButtons = 0; s_route.rmlButtons = 0; }   // a release lost to alt-tab
+        GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, true);                        // W6: focus loss cancels a gesture; the message passes
+        return Engine(h, msg, wp, lp);
+    default:
+        // W6: the gesture stage sees focus loss (it passes) and its own probe message (never the game's); everything else goes straight on
+        if (GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, true).action == 1) return 0;
+        return Engine(h, msg, wp, lp);
     }
     UiRoute r; bool leave = false;
     {
@@ -427,8 +435,15 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         Count(ev, r.to);
         (void)down;
     }
+    // W6: the gesture stage, behind RmlUi: it sees the mouse messages RmlUi gave to the engine and observes every key message (keys always
+    // pass); it may swallow a mouse message inside a gesture, clear a move's left-button flag, or replay a plain click at the press point.
+    const GestureMsgResult g = GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, (r.to & kToEngine) != 0);
     if (leave) Engine(h, WM_MOUSEMOVE, 0, MAKELPARAM((WORD)(short)-30000, (WORD)(short)-30000));   // hand-over: the engine's hover clears
-    if (r.to & kToEngine) return Engine(h, msg, wp, lp);
+    if (r.to & kToEngine) {
+        if (g.replay) { const LPARAM p = MAKELPARAM((WORD)(short)g.rx, (WORD)(short)g.ry); Engine(h, WM_LBUTTONDOWN, MK_LBUTTON, p); Engine(h, WM_LBUTTONUP, 0, p); return 0; }
+        if (g.action == 1) return 0;                     // swallowed inside a gesture (a mouse message only)
+        return Engine(h, msg, (WPARAM)g.wp, lp);         // g.wp = wp, or the move with its left-button flag cleared
+    }
     return 0;   // RmlUi took it
 }
 
@@ -453,7 +468,7 @@ HRESULT WINAPI hk_DIState(void* dev, DWORD cb, void* data) {
         unsigned mask = 0; for (DWORD i = 0; i < n && i < 8; ++i) if (b[i] & 0x80) mask |= 1u << i;
         if (mask && mask != s_diMouseBtnPrev && InterlockedIncrement(&s_diStateButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceState)");
         s_diMouseBtnPrev = mask;
-        if (UiBlankDiButtons(s)) memset(b, 0, n);
+        if (UiBlankDiButtons(s) || GestureOwnsMouse()) memset(b, 0, n);   // W6: a gesture holds the buttons
         if (UiBlankDiWheel(s)) ((LONG*)data)[2] = 0;
     } else if (dev == s_diKeyboard && cb == 256 && s.textFocus) memset(data, 0, cb);
     return hr;
@@ -468,7 +483,7 @@ HRESULT WINAPI hk_DIData(void* dev, DWORD cbObj, DiData* rg, DWORD* inOut, DWORD
             InterlockedIncrement(&s_diDataReads);
             const bool btn = e->ofs >= 12 && e->ofs < 20, wheel = e->ofs == 8;
             if (btn && (e->data & 0x80) && InterlockedIncrement(&s_diDataButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceData)");
-            if ((btn && UiBlankDiButtons(s)) || (wheel && UiBlankDiWheel(s))) memset(e, 0, cbObj);
+            if ((btn && (UiBlankDiButtons(s) || GestureOwnsMouse())) || (wheel && UiBlankDiWheel(s))) memset(e, 0, cbObj);
         } else if (dev == s_diKeyboard && s.textFocus) memset(e, 0, cbObj);
     }
     return hr;

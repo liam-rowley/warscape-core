@@ -20,7 +20,7 @@ report file, so the parent writes it. Same Claude-Session as the build.
 - `NoGameNames` (`tests/test_moved_tools.py`) now covers `discovery/`, with an empty `ALLOW`. Provenance links to `empire-remastered` stay, as the
   lint allows.
 - Docs: `discovery/README.md`, a "Discovery (optional extras)" section in `docs/CONSUMING.md`, the README row, decision C20, backlog B54 to B56.
-  The Pillow pin (`discovery/requirements.txt`) and the capstone and pefile pins (`re_env.py`) moved unchanged. `VERSION` 0.12.0.
+  The Pillow pin (`discovery/requirements.txt`) and the capstone and pefile pins (`re_env.py`) moved unchanged. `VERSION` 0.12.0, then 0.15.0 when `main` was merged in after W6 (0.13.0) merged first (2026-11-03; W3 takes 0.13.1 and W5 0.14.0).
 
 ## Evidence
 - Gates, verified 2026-11-03 on commit a759704: `python3 wsc.py gates` 12 ok, 2 warn, 0 failed (the `hooks` gate: this clone's `core.hooksPath`
