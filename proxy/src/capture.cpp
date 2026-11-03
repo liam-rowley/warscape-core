@@ -38,7 +38,10 @@ struct StateCell {
     long Cas(long expected, long desired) { return InterlockedCompareExchange(&s_state, desired, expected); }
 } s_cell;
 volatile bool s_rec = false;     // the render thread records (Recording, and Abandoned until it closes the file)
-int s_depth = 0;                 // > 0 inside a recorded call (render thread only)
+volatile DWORD s_tid = 0;        // the recording thread: the one whose Present took the arm; set before s_rec (W19, B33)
+volatile LONG s_otherCalls = 0;  // hooked calls and D3DPERF events on any other thread while recording: forwarded, counted, never recorded
+LONG s_otherAtFrame = 0, s_otherTotal = 0;   // the count at the frame's start (OTHERTHREAD lines); the total at the end (the result)
+int s_depth = 0;                 // > 0 inside a recorded call (the recording thread only: Depth never touches it on another thread)
 bool s_hooked = false;
 std::wstring s_root, s_dir;      // dev.capture_dir, <root>\<name>
 std::string s_name, s_err;
@@ -145,8 +148,23 @@ void RecStream(UINT s, void* vb, UINT off, UINT stride) { std::string l = "SSRC"
 void RecIdx(void* ib) { std::string l = "IDX"; AppendX(l, P(ib)); Line(l); }
 void AppendRect(std::string& l, const RECT* r) { if (r) { AppendI(l, r->left); AppendI(l, r->top); AppendI(l, r->right); AppendI(l, r->bottom); } else l += " - - - -"; }
 
-// The guard every hook takes: records only the outermost call while a capture runs.
-struct Depth { bool on; Depth() : on(s_rec && s_depth == 0) { ++s_depth; } ~Depth() { --s_depth; } };
+// The guard every hook takes after its `if (!s_rec)` fast path: records only the outermost call, and only on the recording thread.
+// A call on another thread is counted and forwarded; s_depth, s_buf and the describe sets are the recording thread's alone (B33).
+bool OnRecordingThread() {
+    if (GetCurrentThreadId() == s_tid) return true;
+    InterlockedIncrement(&s_otherCalls);
+    return false;
+}
+struct Depth {
+    bool mine, on = false;
+    Depth() : mine(OnRecordingThread()) { if (mine) { on = s_rec && s_depth == 0; ++s_depth; } }
+    ~Depth() { if (mine) --s_depth; }
+};
+void FrameEnd() {   // before each frame's PRESENT (or ABANDONED): other-thread calls of this frame, when there were any
+    const LONG n = s_otherCalls;
+    if (n != s_otherAtFrame) { std::string l = "OTHERTHREAD"; AppendU(l, (unsigned long long)(n - s_otherAtFrame)); Line(l); }
+    s_otherAtFrame = n;
+}
 
 // ---- hooks (IDirect3DDevice9 vtable slots) ---------------------------------------------------------------------------------------
 #define ORIG(name, ...) using T_##name = HRESULT(WINAPI*)(void*, __VA_ARGS__); T_##name o_##name
@@ -331,8 +349,10 @@ void Close() {
 
 bool CaptureHooked() { return s_hooked; }
 
-void CaptureEvent(int kind, const wchar_t* name) {   // the engine's D3DPERF events: pass names when the engine emits them
-    if (!s_rec || s_depth) return;
+void CaptureEvent(int kind, const wchar_t* name) {   // the engine's D3DPERF events (any thread): pass names when the engine emits them
+    if (!s_rec) return;
+    if (GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }   // B33: only the recording thread writes
+    if (s_depth) return;
     std::string l = kind == 0 ? "EVENT " : kind == 1 ? "EVENTEND" : "MARKER ";
     if (kind != 1) l += name ? Narrow(name) : std::string("?");
     Line(l);
@@ -383,24 +403,28 @@ void CaptureInit() {   // the folder sits outside the game folder (D25: the unin
 // or takes a waiting arm (capture.h CapOnPresent: Armed -> Recording by CAS before anything else).
 void CapturePresent(void* dev) {
     if (!dev) return;
+    if (s_rec && GetCurrentThreadId() != s_tid) { InterlockedIncrement(&s_otherCalls); return; }   // B33: another thread's Present
     switch (CapOnPresent(s_cell, s_frame, s_frames)) {
     case CapStep::none: return;
-    case CapStep::next_frame: Line("PRESENT"); ++s_frame; Line("FRAME " + std::to_string(s_frame + 1)); return;
+    case CapStep::next_frame: FrameEnd(); Line("PRESENT"); ++s_frame; Line("FRAME " + std::to_string(s_frame + 1)); return;
     case CapStep::finish:
-        Line("PRESENT"); ++s_frame;
+        FrameEnd(); Line("PRESENT"); ++s_frame;
         s_rec = false;
+        s_otherTotal = s_otherCalls;
         { std::set<uint64_t> u; for (auto& kv : s_shaderHash) if (kv.second) u.insert(kv.second); s_capShaders = u.size(); }
         Close();
         if (CapFinish(s_cell)) SetEvent(s_doneEv);   // false: the ctl abandoned it meanwhile, now Idle and nobody waits
         return;
     case CapStep::close_abandoned:   // the ctl gave up (CaptureRun returned failed): a bounded file, kept as evidence
-        Line("ABANDONED frame " + std::to_string(s_frame + 1) + " of " + std::to_string(s_frames));
+        FrameEnd(); Line("ABANDONED frame " + std::to_string(s_frame + 1) + " of " + std::to_string(s_frames));
         s_rec = false;
         Close();
         CapClosed(s_cell);
         return;
     case CapStep::start: break;
     }
+    s_tid = GetCurrentThreadId();   // the recording thread, fixed before s_rec is set
+    s_otherCalls = 0; s_otherAtFrame = 0; s_otherTotal = 0;
     s_file = CreateFileW((s_dir + L"frame.txt").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (s_file == INVALID_HANDLE_VALUE) { s_err = "cannot create frame.txt (" + std::to_string(GetLastError()) + ")"; if (CapFinish(s_cell)) SetEvent(s_doneEv); return; }
     s_buf.reserve(5u << 20);
@@ -470,6 +494,7 @@ bool CaptureRun(const std::string& name, int frames, double timeoutS, std::strin
              JStr(Narrow(s_dir)).c_str(), JStr(Narrow(s_dir) + "frame.txt").c_str(), JStr(Narrow(s_root) + "shaders\\").c_str(), s_frame, (unsigned long long)s_bytes,
              (unsigned long long)s_lines, (unsigned long long)s_draws, s_capShaders, s_shadersNew, s_walkBad, s_sizeMismatch, recS, MonoS() - t0);
     result = b;
+    result += ", \"other_thread_calls\": " + std::to_string(s_otherTotal);
     const bool ok = s_err.empty();
     if (!ok) why = s_err;
     CapRelease(s_cell);   // Done -> Idle: the only way the ctl sets Idle after a recording
