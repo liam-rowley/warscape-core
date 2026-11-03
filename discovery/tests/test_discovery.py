@@ -1,14 +1,11 @@
-"""Host tests for the J6 discovery readers' pure logic (discovery/core/): diff schema, pack kinds, layout V039 codec, fonts, exe masking."""
+"""Host tests for the J6 discovery readers' pure logic (discovery/): diff schema, pack kinds, layout V039 codec, fonts, exe masking."""
 import os
 import struct
 import sys
 import unittest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, 'discovery', 'core'))
-sys.path.insert(0, os.path.join(ROOT, 'proxy', 'tools'))
-sys.path.insert(0, os.path.join(ROOT, 'core', 'proxy', 'tools'))   # pack_list (J12)
-
+import _env  # noqa: F401,E402  (paths and the fixture adapter)
+import paths  # noqa: E402
 import diffout  # noqa: E402
 import exe  # noqa: E402
 import fonts  # noqa: E402
@@ -30,21 +27,11 @@ class DiffSchema(unittest.TestCase):
         with self.assertRaises(ValueError):
             diffout.dumps('x', [diffout.row('a', 1, 2, 'same')] * 2, {})
 
-    def test_committed_diff_files_pass_the_schema(self):
-        import json
-        d = os.path.join(ROOT, 'discovery', 'diff')
-        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-            if f.endswith('.json'):
-                with self.subTest(f=f):
-                    self.assertEqual(diffout.problems(json.load(open(os.path.join(d, f), encoding='utf-8'))), [])
-
-
-class Readme(unittest.TestCase):
-    def test_generated_readme_is_current(self):
-        sys.path.insert(0, os.path.join(ROOT, 'tools', 'verbs'))
-        import discovery
-        p = os.path.join(ROOT, 'discovery', 'diff', 'README.md')
-        self.assertEqual(open(p, encoding='utf-8').read(), discovery.render(ROOT), 'run `wsc discovery render`')
+    def test_the_row_fields_are_the_games_names_from_games_json(self):
+        r = diffout.row('a', 1, 2, 'same')
+        self.assertEqual(sorted(r), sorted(['item', 'ref', 'tgt', 'verdict', 'adapter', 'evidence']))
+        self.assertEqual((r['ref'], r['tgt']), ('1', '2'))
+        self.assertEqual((paths.REFERENCE, paths.TARGET), ('ref', 'tgt'))
 
 
 class PackKinds(unittest.TestCase):
@@ -146,11 +133,11 @@ class ExeSignatures(unittest.TestCase):
     def test_two_signatures_on_one_address_are_shared_not_unique(self):
         pe = {'sections': [{'raw_off': 0, 'raw_size': 64, 'rva': 0x1000}]}
         hay = b'\x90' * 7 + bytes([0x55, 0x8B, 0xEC, 0x83, 0xE8, 1, 2, 3, 4, 0x5D]) + b'\xCC' * 8 + bytes([0x56, 0x57, 0x58, 0x59, 0x5A])
-        sig = lambda name, va, pat: {'source': 'function', 'name': name, 'empire_va': va, 'pat': pat, 'mask': [True] * len(pat)}
+        sig = lambda name, va, pat: {'source': 'function', 'name': name, 'ref_va': va, 'pat': pat, 'mask': [True] * len(pat)}
         got = {h['name']: h['class'] for h in exe.run_search(
             [sig('a', '0x10', hay[7:12]), sig('b', '0x20', hay[7:11]), sig('c', '0x30', hay[25:30]), sig('c guard', '0x30', hay[25:29])],
             hay, pe, hay, pe)}
-        # a and b are different Empire code on one address; c and its guard-site twin are one Empire function
+        # a and b are different reference code on one address; c and its guard-site twin are one reference function
         self.assertEqual(got, {'a': 'shared', 'b': 'shared', 'c': 'unique', 'c guard': 'unique'})
 
 

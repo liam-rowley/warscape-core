@@ -17,7 +17,10 @@ import paths  # noqa: E402
 
 SCHEMA = 1
 VERDICTS = ('same', 'adapter', 'new', 'gone')
-ROW_KEYS = ('item', paths.REFERENCE, paths.TARGET, 'verdict', 'adapter', 'evidence')
+
+
+def row_keys():
+    return ('item', paths.REFERENCE, paths.TARGET, 'verdict', 'adapter', 'evidence')
 
 
 def row(item, reference, target, verdict, adapter='', evidence=''):
@@ -39,8 +42,8 @@ def problems(doc):
         out.append('rows missing or empty')
         rows = []
     for i, r in enumerate(rows):
-        if not isinstance(r, dict) or tuple(sorted(r)) != tuple(sorted(ROW_KEYS)):
-            out.append(f'row {i}: keys {sorted(r) if isinstance(r, dict) else type(r).__name__}, want {sorted(ROW_KEYS)}')
+        if not isinstance(r, dict) or tuple(sorted(r)) != tuple(sorted(row_keys())):
+            out.append(f'row {i}: keys {sorted(r) if isinstance(r, dict) else type(r).__name__}, want {sorted(row_keys())}')
         elif r['verdict'] not in VERDICTS:
             out.append(f'row {i} ({r["item"]}): verdict {r["verdict"]!r}')
     items = [r.get('item') for r in rows if isinstance(r, dict)]

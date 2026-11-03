@@ -1,0 +1,21 @@
+{
+ "note": "Fixture rules for the discovery host tests: first matching rule wins (see assets.py role_of).",
+ "rules": [
+  {"role": "font", "paths": ["*"], "exts": [".cuf", ".fc"]},
+  {"role": "cursor", "paths": ["*"], "exts": [".cur", ".ani"]},
+  {"role": "cursor", "paths": ["ui/cursors/*"]},
+  {"role": "ui_script", "paths": ["*"], "exts": [".luac", ".lua"]},
+  {"role": "ui_db", "paths": ["*"], "exts": [".db"]},
+  {"role": "template", "paths": ["ui/templates/*"], "exts": ["", ".templates", ".twui", ".images"]},
+  {"role": "layout", "paths": ["ui/*"], "exts": [""]},
+  {"role": "flag", "paths": ["ui/flags/*"]},
+  {"role": "unit_card", "paths": ["ui/units/icons/*"]},
+  {"role": "portrait", "paths": ["ui/portraits/*"]},
+  {"role": "battle_picture", "paths": ["ui/frontend ui/battles/*", "battleterrain/presets/*/screenshot*"]},
+  {"role": "button_state", "paths": ["ui/battle ui/buttons/*"]},
+  {"role": "button_state", "paths": ["ui/*skins/*button*", "ui/*skins/*checkbox*", "ui/*skins/*dropdown*", "ui/*skins/*slider*", "ui/*skins/*tab_*", "ui/*skins/*_down.*", "ui/*skins/*_down_*", "ui/*skins/*_roll.*", "ui/*skins/*_selected*", "ui/*skins/*_unselected*", "ui/*skins/*_inactive*", "ui/*skins/*_depress*", "ui/*skins/*_hover*", "ui/*skins/*_active*", "ui/*skins/*_off.*", "ui/*skins/*_up.*"]},
+  {"role": "panel_frame", "paths": ["ui/*skins/*frame*", "ui/*skins/*pane*", "ui/*skins/*corner*", "ui/*skins/*border*", "ui/*skins/*fill*", "ui/*skins/*paper*", "ui/*skins/*_bg*", "ui/*skins/*background*", "ui/*skins/*edge*", "ui/*skins/*line*", "ui/*skins/*bar*", "ui/*skins/*_left*", "ui/*skins/*_right*", "ui/*skins/*_center*", "ui/*skins/*_top*", "ui/*skins/*_bottom*", "ui/*skins/*/top.*", "ui/*skins/*/bottom.*", "ui/*skins/*/left.*", "ui/*skins/*/right.*", "ui/*skins/* tl.*", "ui/*skins/* tr.*", "ui/*skins/* bl.*", "ui/*skins/* br.*", "ui/*skins/*_tl.*", "ui/*skins/*_tr.*", "ui/*skins/*_bl.*", "ui/*skins/*_br.*"]},
+  {"role": "icon", "paths": ["ui/*skins/*"], "max_side": 64},
+  {"role": "ui_art", "paths": ["ui/*skins/*"]}
+ ]
+}

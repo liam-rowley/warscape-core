@@ -1,4 +1,4 @@
-"""Host tests for the J7 discovery passes' pure logic (discovery/core/): pack adapter, ids, roles, image headers, loc, db, gzip, schema."""
+"""Host tests for the J7 discovery passes' pure logic (discovery/): pack adapter, ids, roles, image headers, loc, db, gzip, schema."""
 import gzip
 import json
 import os
@@ -8,9 +8,7 @@ import tempfile
 import unittest
 import zlib
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, 'discovery', 'core'))
-
+import _env  # noqa: F401,E402  (paths and the fixture adapter)
 import assets  # noqa: E402
 import db  # noqa: E402
 import imagehdr  # noqa: E402
@@ -84,10 +82,6 @@ class Ids(unittest.TestCase):
         self.assertNotEqual(moved['id'], old[0]['id'])
         self.assertEqual(moved['used_by'], ['x'])
         self.assertNotIn('used_by', next(r for r in new if r['path'] == 'ui\\a_b.tga'))
-
-    def test_committed_registry_ids_are_unique(self):
-        reg = assets.read_registry(os.path.join(ROOT, 'registries', 'assets.jsonl'))
-        self.assertEqual(len({r['id'] for r in reg}), len(reg))
 
 
 class Roles(unittest.TestCase):
@@ -232,13 +226,6 @@ class DeterministicGzip(unittest.TestCase):
 
     def test_paths_with_backslash_t_survive(self):
         self.assertEqual(tsvgz.cell('ui\\templates\\x'), 'ui\\templates\\x')
-
-
-class CommittedResults(unittest.TestCase):
-    def test_discovery_check_covers_j7(self):
-        sys.path.insert(0, os.path.join(ROOT, 'tools', 'verbs'))
-        import discovery
-        self.assertEqual(discovery.j7_problems(ROOT), [])
 
 
 if __name__ == '__main__':

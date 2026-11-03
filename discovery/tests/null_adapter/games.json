@@ -1,0 +1,8 @@
+{
+ "note": "The fixture adapter of the discovery host tests (WSP_DISCOVERY_ADAPTER, set by _env.py): two made-up games, no install, no extract.",
+ "target": "tgt",
+ "reference": "ref",
+ "extract": "extract",
+ "tgt": {"root": "tgt_game", "exe": "tgt.exe", "data": "data", "pack_order": ["main", "patch"], "mod_packs": []},
+ "ref": {"root": "ref_game", "exe": "ref.exe", "data": "data", "pack_order": ["main"], "mod_packs": [], "repo": "ref_repo"}
+}

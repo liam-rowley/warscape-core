@@ -7,9 +7,8 @@ import sys
 import tempfile
 import unittest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, 'discovery', 'core'))
-sys.path.insert(0, os.path.join(ROOT, 'core', 'proxy', 'tools'))
+import _env  # noqa: F401,E402  (paths and the fixture adapter)
+ROOT = str(_env.CORE)
 import luachunk  # noqa: E402
 import ui_atlas  # noqa: E402
 import ui_walk  # noqa: E402
@@ -70,7 +69,7 @@ class Resolve(unittest.TestCase):
         assets = {'ui\\campaign ui\\skins\\a b.tga': 'ui/campaign_ui/skins/a_b.tga'}
         self.assertEqual(ui_atlas.art_id('UI/Campaign UI/Skins/a b.tga', assets), 'ui/campaign_ui/skins/a_b.tga')
         self.assertEqual(ui_atlas.art_id('data\\UI\\Campaign UI\\Skins\\a b.tga', assets), 'ui/campaign_ui/skins/a_b.tga')
-        self.assertEqual(ui_atlas.art_id('C:\\Empire\\data\\UI\\Campaign UI\\Skins\\a b.tga', assets), 'ui/campaign_ui/skins/a_b.tga')
+        self.assertEqual(ui_atlas.art_id('C:\\Editor\\data\\UI\\Campaign UI\\Skins\\a b.tga', assets), 'ui/campaign_ui/skins/a_b.tga')
         self.assertTrue(ui_atlas.art_id('C:\\Docs\\golden_bullet.tga', assets).startswith('editor_path:'))
         self.assertTrue(ui_atlas.art_id('ui/missing.tga', assets).startswith('unresolved:'))
 

@@ -1,7 +1,7 @@
-"""Host tests for the discovery gate (J11): discovery/core/gate.py and `wsc discovery gate`, and the brief found-path rule (discovery/core/briefpaths.py, row 80).
+"""Host tests for the discovery gate (J11): discovery/gate.py and `wsc discovery gate`, and the brief found-path rule (discovery/briefpaths.py, row 80).
 
 Every rule has a bad fixture that fails and the matching good one that passes. Fixtures are small synthetic indexes and rows; the one
-test that reads the real 88,415-row index runs the gate and the brief rule on this repo (that is what puts them in the `tests` gate).
+test that reads a real game's registries (the gate and the brief rule on the game repo) lives in that repo's thin test.
 """
 import importlib.util
 import json
@@ -12,20 +12,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / 'discovery' / 'core'))
-sys.path.insert(0, str(ROOT / 'tools' / 'verbs'))
+import _env  # noqa: E402  (paths and the fixture adapter)
+ROOT = _env.CORE
+sys.path.insert(0, str(ROOT))
 
 import assets  # noqa: E402
 import briefpaths as bp  # noqa: E402
-import discovery  # noqa: E402
 import gate  # noqa: E402
+import paths  # noqa: E402
 import tsvgz  # noqa: E402
+from warscape import jobq  # noqa: E402
+from warscape.verbs import discovery  # noqa: E402
 
-sys.path.insert(0, str(ROOT / 'core'))
-from warscape import jobq  # noqa: E402  (the brief shape rules are warscape-core's since J62; the found-path hook is tools/jobs_hooks.py)
-
-LEGACY_BRIEFS = frozenset(json.loads((ROOT / 'jobs' / 'legacy.json').read_text(encoding='utf-8'))['brief_hooks'])   # exempt from the brief hooks only
+LEGACY_BRIEFS = frozenset({'J10'})   # a fixture: the ids a game exempts from the brief hooks only
 
 BS = chr(92)
 EXE = 'ab' * 20
@@ -152,13 +151,11 @@ class Currency(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        for d in ('discovery/assets', 'discovery/napoleon', 'registries'):
+        for d in ('discovery/assets', 'registries'):
             (self.root / d).mkdir(parents=True)
         self.rows = [irow('data.pack', 'ui' + BS + 'a.tga', 10), irow('data.pack', 'ui' + BS + 'b.tga', 20), irow('loose', 'ui' + BS + 'c.tga', 5)]
         self.index = self.root / 'discovery' / 'assets' / 'index.tsv.gz'
         write_index(self.index, self.rows)
-        self.roles = {'note': '', 'rules': [{'role': 'art', 'paths': ['*']}]}
-        (self.root / 'discovery' / 'napoleon' / 'asset_roles.json').write_text(json.dumps(self.roles))
         (self.root / 'discovery' / 'assets' / 'refs.json').write_text(json.dumps({'refs': {}}))
         self.write_registry()
 
@@ -167,7 +164,7 @@ class Currency(unittest.TestCase):
 
     def write_registry(self):
         idx = assets.load_index(str(self.index))
-        rules = assets.load_roles(str(self.root / 'discovery' / 'napoleon' / 'asset_roles.json'))
+        rules = assets.load_roles(paths.adapter_file('asset_roles.json'))   # the fixture adapter's rules, which j7_problems reads too
         assets.write_registry(assets.registry_rows(idx, {}, rules, []), str(self.root / 'registries' / 'assets.jsonl'))
 
     def summary(self):
@@ -197,14 +194,6 @@ class Currency(unittest.TestCase):
     def test_fingerprints_leave_loose_files_out(self):
         self.assertEqual(assets.pack_fingerprints(assets.load_index(str(self.index))), {'data.pack': {'entries': 2, 'bytes': 30}})
 
-    def test_stale_readme_fails_on_a_copy_of_the_committed_results(self):
-        with tempfile.TemporaryDirectory() as d:
-            shutil.copytree(ROOT / 'discovery', Path(d) / 'discovery')
-            self.assertEqual(discovery.readme_problems(d), [])
-            with open(Path(d) / 'discovery' / 'assets' / 'README.md', 'a', encoding='utf-8') as f:
-                f.write('hand edit\n')
-            self.assertTrue(any('stale' in x for x in discovery.readme_problems(d)))
-
 
 class Install(unittest.TestCase):
     """--install on a synthetic install tree: fake packs whose indexes the fake reader returns (the real game folder is not read here)."""
@@ -212,7 +201,7 @@ class Install(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / 'data').mkdir()
-        (self.root / 'Napoleon.exe').write_bytes(b'exe')
+        (self.root / 'tgt.exe').write_bytes(b'exe')
         self.sha = __import__('hashlib').sha1(b'exe').hexdigest()
         for n in ('data.pack', 'boot.pack'):
             (self.root / 'data' / n).write_bytes(b'')
@@ -224,7 +213,7 @@ class Install(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_install(self, sha=None):
-        return gate.install_problems(self.summary, self.root, 'data', 'Napoleon.exe', sha or self.sha,
+        return gate.install_problems(self.summary, self.root, 'data', 'tgt.exe', sha or self.sha,
                                      lambda p: ({}, self.entries[Path(p).name]))
 
     def test_matching_install_passes(self):
@@ -243,11 +232,6 @@ class Install(unittest.TestCase):
         got = ' '.join(self.run_install())
         self.assertIn('boot.pack (in pack_order) is not installed', got)
         self.assertIn('new.pack are not in the index', got)
-
-    def test_offline_run_says_install_not_compared_and_is_never_ok(self):
-        lines, _, _ = discovery.gate_run(ROOT)
-        self.assertTrue(any(x.startswith('warn install not compared') for x in lines))
-        self.assertFalse(any(x.startswith('ok   install') for x in lines))
 
 
 class Ratchet(unittest.TestCase):
@@ -269,7 +253,7 @@ KNOWN = bp.make_known(
     asset_ids={'ui/flags/a.tga'},
     ui_units={'battle.deploy': {'layout': 'battle ui' + BS + 'deploy', 'script': 'battle ui/deploy_scripts/deploy.luac, battle ui/deploy_scripts/b.luac'},
               'template.card': {'layout': 'data' + BS + 'ui' + BS + 'templates' + BS + 'uied.templates#card'}},
-    repo_files={'tools/x.py', 'proxy/napoleon/a.cpp', 'ui/viewer.html'})
+    repo_files={'tools/x.py', 'proxy/tgt/a.cpp', 'ui/viewer.html'})
 
 
 def check(text):
@@ -278,8 +262,8 @@ def check(text):
 
 class FoundPaths(unittest.TestCase):
     def test_shape_1_the_extract_store(self):
-        self.assertTrue(any('extract store' in x for x in check('Read `/extract/napoleon/db/x.tsv` for it.')))
-        self.assertTrue(any('extract store' in x for x in check('see extract/napoleon/loc/ now')))
+        self.assertTrue(any('extract store' in x for x in check('Read `/extract/tgt/db/x.tsv` for it.')))
+        self.assertTrue(any('extract store' in x for x in check('see extract/tgt/loc/ now')))
 
     def test_shape_2_pack_form_path(self):
         got = check('The picture is `ui' + BS + 'flags' + BS + 'a.tga` in the pack.')
@@ -304,15 +288,15 @@ class FoundPaths(unittest.TestCase):
         self.assertTrue(check('Rebuild `battle ui' + BS + 'deploy` first.'))
 
     def test_repo_paths_and_other_names_are_accepted(self):
-        text = ('Run `python3 core/wsc.py find x`; edit `tools/x.py` and `proxy/napoleon/a.cpp`, `ui/viewer.html`, `data.pack`, '
-                '`units_tables`, `rml_mod/foo/bar.lua`, `C:' + BS + 'napoleon_remastered_pc' + BS + '_scratch`, https://example.com/ui/x.')
+        text = ('Run `python3 core/wsc.py find x`; edit `tools/x.py` and `proxy/tgt/a.cpp`, `ui/viewer.html`, `data.pack`, '
+                '`units_tables`, `rml_mod/foo/bar.lua`, `C:' + BS + 'tgt_remastered_pc' + BS + '_scratch`, https://example.com/ui/x.')
         self.assertEqual(check(text), [])
 
     def test_placeholders_and_globs_are_patterns_not_citations(self):
         self.assertEqual(check('Look for `ui/<name>.luac` and `fx' + BS + '*.fx`.'), [])
 
     def test_quoted_line_exempts_a_fence_and_a_bullet(self):
-        fence = 'Quoted, not a citation:\n```\nfx/old.fx\n/extract/napoleon/x/\n```\nAfter.\n'
+        fence = 'Quoted, not a citation:\n```\nfx/old.fx\n/extract/tgt/x/\n```\nAfter.\n'
         self.assertEqual(check(fence), [])
         self.assertTrue(check('Not marked:\n```\nfx/old.fx\n```\n'))
         bullet = '- Quoted, not a citation: the old brief said `fx/old.fx`\n  and `ui/more.tga`.\n- Cite `fx/other.fx`.\n'
@@ -372,36 +356,6 @@ class BriefRule(unittest.TestCase):
 
     def test_shape_rules_still_apply_to_legacy_briefs(self):
         self.assertTrue(self.errs('J10', '# J10: x\n'))
-
-    def test_the_legacy_set_is_every_brief_on_main_at_j11s_base(self):
-        out = subprocess.run(['git', '-C', str(ROOT), 'ls-tree', '-r', '--name-only', 'c674fb1', 'jobs'], capture_output=True, text=True)
-        if out.returncode != 0:
-            self.skipTest('J11 base commit not in this clone')
-        on_main = {p.split('/')[1] for p in out.stdout.split() if p.endswith('/brief.md')}
-        self.assertEqual(on_main | {'J24', 'J37'}, set(LEGACY_BRIEFS))   # J24 and J37 merged before J11 did
-
-
-class ThisRepo(unittest.TestCase):
-    def test_the_gate_passes_on_the_real_registries_and_is_deterministic(self):
-        lines, fails, doc = discovery.gate_run(ROOT)
-        self.assertEqual(fails, [], '\n'.join(lines))
-        self.assertEqual(gate.summary_text(doc), gate.summary_text(discovery.gate_run(ROOT)[2]))
-        self.assertEqual((ROOT / 'discovery' / 'gate' / 'summary.json').read_text(encoding='utf-8'), gate.summary_text(doc))
-
-    def test_every_committed_brief_passes_the_found_path_rule_or_is_legacy(self):
-        known = bp.load_known(ROOT)
-        bad = []
-        for p in sorted((ROOT / 'jobs').glob('*/brief.md')):
-            if p.parent.name not in LEGACY_BRIEFS:
-                bad += [f'{p.parent.name}: {e}' for e in bp.found_path_problems(p.read_text(encoding='utf-8'), known)]
-        self.assertEqual(bad, [])
-
-    def test_the_four_cases_the_rule_exists_for_fail_on_the_real_registries(self):
-        known = bp.load_known(ROOT)
-        unit = next(u for u in known.ui_ids if u.startswith('battle.'))
-        path = next(k for k, v in known.ui_paths.items() if unit in v and ' ' in k)
-        self.assertTrue(bp.found_path_problems(f'Open `{path}`.', known))
-        self.assertEqual(bp.found_path_problems(f'Open `{unit}`.', known), [])
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-"""Host tests for the Lua API discovery pass (discovery/core/lua_api.py): pure logic on synthetic Lua 5.1 chunks and name sets."""
+"""Host tests for the Lua API discovery pass (discovery/lua_api.py): pure logic on synthetic Lua 5.1 chunks and name sets."""
 import json
 import os
 import struct
@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'discovery', 'core'))
+import _env  # noqa: F401,E402  (paths and the fixture adapter)
 import diffout  # noqa: E402
 import lua_api  # noqa: E402
 import luachunk  # noqa: E402
@@ -100,9 +100,9 @@ class LuaApi(unittest.TestCase):
         tmp_path = self.tmp
         p = tmp_path / 'a.luac'
         p.write_bytes(sample())
-        empire = {'calls': {'CampaignUI.Foo': {'n': 1, 'scripts': ['ui/a.luac'], 'sigs': {'()': 1}}},
+        reference = {'calls': {'CampaignUI.Foo': {'n': 1, 'scripts': ['ui/a.luac'], 'sigs': {'()': 1}}},
                   'methods': {}, 'global_reads': {}, 'defined': {}, 'events': {}, 'fields_set': {}}
-        rows, detail = lua_api.build(empire, {'ui' + chr(92) + 'a.luac': str(p)}, ['events.lua'], {}, {})
+        rows, detail = lua_api.build(reference, {'ui' + chr(92) + 'a.luac': str(p)}, ['events.lua'], {}, {})
         out = tmp_path / 'lua_api.json'
         diffout.write(str(out), 'lua_api', rows, detail)
         assert diffout.problems(json.load(open(out))) == []

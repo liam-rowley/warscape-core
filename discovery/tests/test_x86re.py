@@ -1,6 +1,6 @@
-"""discovery/core/x86re.py walk on synthetic bytes: indirect jmp tail calls and jump tables (J15 review 8, J9 deliverable 0).
+"""discovery/x86re.py walk on synthetic bytes: indirect jmp tail calls and jump tables (J15 review 8, J9 deliverable 0).
 
-Needs capstone (the RE venv: discovery/core/re_env.py); skipped without it. Run with the venv python:
+Needs capstone (the RE venv: discovery/re_env.py); skipped without it. Run with the venv python:
 <venv>/Scripts/python -m unittest tests.test_x86re
 """
 import struct
@@ -8,7 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'discovery' / 'core'))
+import _env  # noqa: F401  (paths and the fixture adapter)
 try:
     import capstone
     import x86re
@@ -33,7 +33,7 @@ def image(code, data=b''):
     return im
 
 
-@unittest.skipUnless(HAVE, 'capstone is not installed here (the RE venv: discovery/core/re_env.py)')
+@unittest.skipUnless(HAVE, 'capstone is not installed here (the RE venv: discovery/re_env.py)')
 class Walk(unittest.TestCase):
     def test_jmp_register_is_itail(self):
         w = image(b'\x8b\x01' + b'\xff\xe0').walk(TEXT)          # mov eax,[ecx]; jmp eax

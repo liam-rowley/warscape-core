@@ -1,11 +1,11 @@
-"""discovery/core/engine_api.py: probe-line parsing, the last-block rule for a state probed twice, kinds and J6 answers (synthetic logs)."""
+"""discovery/engine_api.py: probe-line parsing, the last-block rule for a state probed twice, kinds and J6 answers (synthetic logs)."""
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'discovery' / 'core'))
+import _env  # noqa: F401,E402  (paths and the fixture adapter)
 import engine_api  # noqa: E402
 
 T = '2026-11-01T16:24:13.170Z [INFO ] [t1] lua: '
@@ -106,23 +106,6 @@ class ProbeSafe(unittest.TestCase):
                 e('GetHealthStatus', doc='Update the killometer bar'), e('MPCanCancel'), e('Valid')]}}}), encoding='utf-8')
             names = [r['name'] for r in engine_api.probe_safe(str(cf))['getters']]
             self.assertEqual(names, ['CampaignKey', 'CurrentTurn'])
-
-    def test_committed_list_current(self):
-        self.assertEqual(engine_api.main(['probe-safe', '--check']), 0, 'discovery/napoleon/probe_safe.json is stale: rerun probe-safe')
-
-
-class Committed(unittest.TestCase):
-    def test_table_current(self):
-        out = Path(engine_api.OUT)
-        if not out.exists():
-            self.skipTest('no committed engine_api.json')
-        doc = json.loads(out.read_text(encoding='utf-8'))
-        runs = [Path(engine_api.REPO) / r for r in doc['runs']]
-        missing = [str(r) for r in runs if not (r / 'raw').is_dir()]
-        if missing:
-            self.skipTest(f'{missing} not present')
-        args = ['build'] + [x for r in runs for x in ('--run', str(r))] + ['--check']
-        self.assertEqual(engine_api.main(args), 0, 'discovery/napoleon/engine_api.json is stale: rebuild it')
 
 
 if __name__ == '__main__':

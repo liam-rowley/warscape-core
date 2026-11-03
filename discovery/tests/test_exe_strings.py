@@ -1,4 +1,4 @@
-"""discovery/core/exe_strings.py: string scan rules and the find mode, on synthetic bytes and a synthetic table (no exe, no RE venv)."""
+"""discovery/exe_strings.py: string scan rules and the find mode, on synthetic bytes and a synthetic table (no exe, no RE venv)."""
 import contextlib
 import io
 import sys
@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'discovery' / 'core'))
+import _env  # noqa: F401,E402  (paths and the fixture adapter)
 import exe_strings  # noqa: E402
 import tsvgz  # noqa: E402
 
@@ -53,15 +53,6 @@ class Find(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 hits = exe_strings.find(str(t), 'imposter', refs_only=True)
             self.assertEqual([h[8] for h in hits], ['imposter distance'])
-
-    def test_committed_table_reads(self):
-        table = Path(exe_strings.TABLE)
-        self.assertTrue(table.exists(), 'discovery/napoleon/exe_strings.tsv.gz is committed')
-        header, rows = tsvgz.read(table)
-        self.assertEqual(header, exe_strings.HEADER)
-        self.assertEqual(tsvgz.problems(str(table), exe_strings.HEADER), [])
-        self.assertEqual(rows, sorted(rows), 'rows sorted (deterministic)')
-        self.assertGreater(len(rows), 20000)
 
 
 if __name__ == '__main__':
