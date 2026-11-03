@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "warscape-core/schemas/hotkeys.schema.json",
   "title": "Hotkeys",
-  "description": "Every key binding, vanilla and mod: the gate fails on any clash (same binding in the same context, or in `global`).",
+  "description": "Every key binding, vanilla and mod: the gate fails on any clash (same binding in the same context, or in `global`; a bare key with `fires_with` also clashes with the chords it fires for, `x-chord`).",
   "type": "object",
   "required": [
     "id",
@@ -47,6 +47,13 @@
         "mod"
       ]
     },
+    "fires_with": {
+      "enum": [
+        "any_modifier",
+        "shift"
+      ],
+      "description": "how a bare binding fires beyond the key alone: `any_modifier` with any modifiers held (so it takes Alt+Space too), `shift` alone or with Shift added; absent: exactly as written"
+    },
     "source_ref": {
       "type": "string",
       "minLength": 1,
@@ -71,6 +78,10 @@
   "x-wildcard": {
     "context": "global"
   },
+  "x-chord": {
+    "field": "binding",
+    "flag": "fires_with"
+  },
   "allOf": [
     {
       "if": {
@@ -90,6 +101,23 @@
         }
       },
       "description": "Empire learning: Alt is held for the move gesture, so a mod hotkey on F4 becomes Alt+F4"
+    },
+    {
+      "if": {
+        "required": [
+          "fires_with"
+        ]
+      },
+      "then": {
+        "properties": {
+          "binding": {
+            "not": {
+              "pattern": "\\+"
+            }
+          }
+        }
+      },
+      "description": "`fires_with` describes a bare key: the binding has no modifier"
     }
   ],
   "$defs": {
