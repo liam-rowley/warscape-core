@@ -59,8 +59,11 @@ static StressOut Stress(unsigned seed, int rounds) {
     StressOut o;
     std::mt19937 rng(seed);
     auto waitDone = [&](unsigned polls) { for (unsigned i = 0; i < polls; ++i) { if (c.Load() == kCapDone) return true; std::this_thread::yield(); } return c.Load() == kCapDone; };
-    for (int round = 1; round <= rounds; ++round) {
-        if (c.Load() != kCapIdle) { ++o.refused; std::this_thread::yield(); continue; }   // the ctl's early refusal: it writes nothing shared unless Idle
+    for (long round = 1; o.rounds < rounds; ++round) {
+        if (c.Load() != kCapIdle) {   // the ctl's early refusal: it writes nothing shared unless Idle; refused for ever = a state no one leaves
+            if (++o.refused > 2000000) { ++errors; break; }
+            std::this_thread::yield(); continue;
+        }
         ctlFrames.store(1 + (int)(rng() % 3)); ctlId.store(round);
         waiting.store(1);
         if (CapArmFromCtl(c) != CapArm::ok) { ++errors; waiting.store(0); continue; }

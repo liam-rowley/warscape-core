@@ -78,6 +78,63 @@ inline CaptureArgs ParseCaptureArgs(const std::string& arg) {
     return a;
 }
 
+// ---- the capture state machine (W19, B32): one word, every transition a compare-and-swap, no lock ---------------------------------
+// Threads: the ctl thread arms and waits; the render thread (the one whose Present takes the arm) records. A Cell gives Load() and
+// Cas(expected, desired) -> the value it found (InterlockedCompareExchange's contract): capture.cpp wraps a volatile LONG, the host
+// test a std::atomic<long>. Who moves what:
+//   ctl     Idle -> Armed (arm)                Armed -> Idle (first wait timed out)   Recording -> Abandoned (second wait timed out)
+//           Done -> Idle (result read)
+//   render  Armed -> Recording (at a Present, before the file opens)   Recording -> Done (file closed)   Abandoned -> Idle (file closed)
+// Only the ctl leaves Idle and Done; only the render thread leaves Recording for Done and Abandoned for Idle.
+enum : long { kCapIdle = 0, kCapArmed = 1, kCapRecording = 2, kCapDone = 3, kCapAbandoned = 4 };
+inline const char* CapStateName(long s) {
+    return s == kCapIdle ? "idle" : s == kCapArmed ? "armed" : s == kCapRecording ? "recording" : s == kCapDone ? "done" : s == kCapAbandoned ? "abandoned" : "?";
+}
+
+enum class CapArm { ok, running, closing };
+template <class Cell> CapArm CapArmFromCtl(Cell& c) {   // ctl: Idle -> Armed
+    const long was = c.Cas(kCapIdle, kCapArmed);
+    return was == kCapIdle ? CapArm::ok : was == kCapAbandoned ? CapArm::closing : CapArm::running;
+}
+inline const char* CapRefusal(CapArm a) {
+    return a == CapArm::closing ? "the previous capture is still closing: it ends at the next Present" : a == CapArm::running ? "a capture is running" : "";
+}
+
+// render, at a Present (before the real one); `frame` is the 0-based frame just presented, `frames` the capture's count.
+//   start: Armed -> Recording is done; now open frame.txt, write the header and the STATE block, then set s_rec. A failed CAS (the
+//          ctl withdrew after this thread read Armed) gives none: nothing at all happens.
+//   next_frame / finish: the recording thread's own decision (no transition); finish: write PRESENT, clear s_rec, close, CapFinish.
+//   close_abandoned: write ABANDONED, clear s_rec, close, CapClosed.
+enum class CapStep { none, start, next_frame, finish, close_abandoned };
+template <class Cell> CapStep CapOnPresent(Cell& c, int frame, int frames) {
+    const long st = c.Load();
+    if (st == kCapArmed) return c.Cas(kCapArmed, kCapRecording) == kCapArmed ? CapStep::start : CapStep::none;
+    if (st == kCapRecording) return frame + 1 < frames ? CapStep::next_frame : CapStep::finish;
+    if (st == kCapAbandoned) return CapStep::close_abandoned;
+    return CapStep::none;
+}
+// render, the file closed (the last frame, or a failed open): Recording -> Done, then the event. False when the ctl abandoned it first:
+// then Abandoned -> Idle here (nobody waits, no event).
+template <class Cell> bool CapFinish(Cell& c) {
+    if (c.Cas(kCapRecording, kCapDone) == kCapRecording) return true;
+    c.Cas(kCapAbandoned, kCapIdle);
+    return false;
+}
+template <class Cell> bool CapClosed(Cell& c) { return c.Cas(kCapAbandoned, kCapIdle) == kCapAbandoned; }   // render: Abandoned -> Idle
+
+// ctl, a wait timed out. first: Armed -> Idle (nothing recorded); lost to the render thread: Recording -> wait_more, Done -> done.
+// second: Recording -> Abandoned (failed; read none of the render thread's counters); lost: Done -> done (finished just in time).
+enum class CapEnd { done, nothing, wait_more, abandoned };
+template <class Cell> CapEnd CapOnTimeout(Cell& c, bool second) {
+    if (!second) {
+        const long was = c.Cas(kCapArmed, kCapIdle);
+        return was == kCapArmed ? CapEnd::nothing : was == kCapDone ? CapEnd::done : CapEnd::wait_more;
+    }
+    const long was = c.Cas(kCapRecording, kCapAbandoned);
+    return was == kCapDone ? CapEnd::done : CapEnd::abandoned;   // Recording (or, never by these rules, anything else: not Done, so not read)
+}
+template <class Cell> bool CapRelease(Cell& c) { return c.Cas(kCapDone, kCapIdle) == kCapDone; }   // ctl, the result read: Done -> Idle
+
 // A float as the record writes it: shortest text that reads back to the same float (%.9g), so the values are exact.
 inline void AppendFloat(std::string& o, float f) { char b[24]; snprintf(b, sizeof b, " %.9g", (double)f); o += b; }
 inline void AppendU(std::string& o, unsigned long long v) { char b[24]; snprintf(b, sizeof b, " %llu", v); o += b; }
