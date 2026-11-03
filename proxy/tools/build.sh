@@ -224,5 +224,20 @@ if [[ "$WHAT" == smoke ]]; then
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[controls]\r\ngestures=1\r\n' > "$G/$INI"
   run; check "gesture: the RmlUi host is off (ui.enabled=0)"; check "process detach"
   if grep -q "IDirect3D9::CreateDevice (ui)" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: a UI hook went in with ui.enabled=0"; exit 1; fi
-  echo "build.sh smoke: passed (7 launches under wine, 2 dumps)"
+  # 8) the control channel (W17): a request written before the launch is refused as stale and never run (an exit here would end the
+  #    launch before the peek), and a peek on the null game's site, which the patch engine refuses by design, is refused with its reason.
+  #    The host waits for the peek's answer; the peek is written only once the ctl thread logged, so after the process was created.
+  mkdir -p "$G/ctl"; printf 'exit\n' > "$G/ctl/old1.cmd"; touch -d '2020-01-02 03:04:05 UTC' "$G/ctl/old1.cmd"
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\n' > "$G/$INI"
+  run wait 'ctl\peek1.done' > "$OUT/smoke/ctl_run.txt" 2>&1 &
+  RUN=$!
+  for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
+  printf 'peek null.dummy_hook * 4\n' > "$G/ctl/peek1.tmp"; mv "$G/ctl/peek1.tmp" "$G/ctl/peek1.cmd"
+  wait "$RUN" || { echo "build.sh smoke: the ctl launch failed"; cat "$OUT/smoke/ctl_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  check "ctl: old1: refused: stale: written 2020-01-02T03:04:05.000Z, before this launch started"
+  check "ctl: peek1: refused: sites not accepted by the patch engine"
+  if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
+  grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
+  grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
+  echo "build.sh smoke: passed (8 launches under wine, 2 dumps)"
 fi
