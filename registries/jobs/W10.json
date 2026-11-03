@@ -1,0 +1,12 @@
+{
+  "id": "W10",
+  "description": "Covers B20, B21, B27, B30, B39. Race-free stale lock takeover in job.sh lock and the watcher's expiry (B20); a ps1 job's exit code from its last statement, not a stale $LASTEXITCODE (B21); the kill job returns only at not_running (B27); the prefs overlay sets every occurrence of a key or refuses a duplicated one (B30); pc_deploy.py set waits for, or refuses on, a pending profile restore (B39). Host tests first.",
+  "title": "Watcher and pc_deploy race fixes",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "W8"
+  ]
+}

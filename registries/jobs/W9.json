@@ -1,0 +1,12 @@
+{
+  "id": "W9",
+  "description": "Covers B26 (with B31 merged into it), B51, B60. acceptance.py (through ctl.py build_info()) reads the DLL build id after the launch, or refuses the kit-id fallback, so pass 1 on a fresh install counts (B26, B31); ctl.py scene stages a row's named save into the save folder under a harness name and clears it after (B51); find why the hist_nile relaunch sometimes gets no on_virtual within 180 s and retry the launch once inside v_scene, logged (B60).",
+  "title": "Acceptance and scene launches: build id after launch, staged saves, hist_nile retry",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": true,
+  "depends_on": [
+    "W8"
+  ]
+}

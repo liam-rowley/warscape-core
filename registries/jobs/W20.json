@@ -1,0 +1,13 @@
+{
+  "id": "W20",
+  "description": "Covers B53, B58. ui_host.cpp hk_DIState/hk_DIData read the route state under a lock or as one atomic word, and WM_ACTIVATEAPP clears s_rmlOwner with the button masks (B53, from the W2 review); gesture.cpp: no adapter callback under the non-re-entrant s_lock, WM_CAPTURECHANGED as focus loss, ctl gesture press holds only after a begin, one D3DSBT_ALL state block reused across preview frames, and a ctl smoke walk (B58 a to e, from the W6 review).",
+  "title": "UI host and gesture driver hardening",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "W2",
+    "W6"
+  ]
+}

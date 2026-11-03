@@ -1,0 +1,10 @@
+{
+  "id": "W19",
+  "description": "Covers B32, B33, B34. capture.cpp CaptureRun reports failed when the second wait times out and lets the render thread close the file (B32); a recording keeps only the arming (render) thread's calls and counts the others (B33); hook CreateStateBlock (slot 59) and IDirect3DStateBlock9 Apply/Capture, at least as record lines (B34). Opus: thread ownership and new state-block vtable hooks in the D3D9 detours, where a mistake is a race or a crash in the game.",
+  "title": "Capture: timeout path, render thread only, state blocks",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": []
+}

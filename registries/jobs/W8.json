@@ -1,0 +1,10 @@
+{
+  "id": "W8",
+  "description": "Covers B17, B18. Port the Python host tests of the moved tools (pc_deploy, ctl, acceptance, the ESF tools, job.sh) from napoleon to the null game, so a core change is tested here (B17); a core Git Bash finder that harness/ctl.py uses instead of the game's tools/verbs/setup.py, and that a game's setup verb can reuse (B18).",
+  "title": "Harness host tests in the core and its own Git Bash finder",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": []
+}
