@@ -1,4 +1,4 @@
-# purpose: the virtual display tool: probe the Virtual Display Driver's modes (CDS_TEST), check it is the one display at the wanted size (-Check), set its mode (-Set), move its origin (-Origin) and put both back (-Restore); every change touches ONLY the display selected by name, never a real monitor
+# purpose: the virtual display tool: probe the Virtual Display Driver's modes (CDS_TEST), check it is the one display at the wanted size (-Check), set its mode (-Set), move its origin (-Origin) and put both back (-Restore: the saved origin if it is legal and applies, else the saved mode at the display's current origin, 'position gone'); every change touches ONLY the display selected by name, never a real monitor
 # usage: powershell -NoProfile -ExecutionPolicy Bypass -File vdisplay_probe.ps1 [-Test 1920x1080,2560x1440] [-Hz n] [-Name "Virtual Display Driver"] | -Check -Size WxH | -Set WxH [-Hz n] -SaveTo <json> | -Origin X,Y -SaveTo <json> | -Restore <json>   (as a watcher ps1 job or called by the watcher's launch; exit 0 ok, 2 bad arguments, 3 no unique virtual display (VIRTUAL MISSING), 4 wrong size (VIRTUAL WRONG SIZE), 5 apply failed or did not verify, 6 mode not offered, 7 refused (primary, name mismatch, overlap, -SaveTo exists))
 # when: before every headless launch (the watcher runs -Check, then -Set when the size differs, and -Restore after the game exits); to probe which modes the driver offers; to move the virtual display's origin in a topology test (the only display change an agent may make)
 # not-a-verb: runs on the PC under Windows PowerShell 5.1, outside the repo checkout
@@ -38,6 +38,44 @@ function Get-OriginPlan($displays, $sel, [int]$x, [int]$y) {
         if (Test-RectOverlap $nr (Get-DisplayRect $o $o.X $o.Y)) { return @{ ok = $false; reason = "the new rect $($nr.L),$($nr.T)-$($nr.R),$($nr.B) overlaps $($o.Device) at $($o.X),$($o.Y) ($($o.W)x$($o.H))" } }
     }
     return @{ ok = $true; reason = ''; x = $x; y = $y }
+}
+# Windows keeps the desktop contiguous: an origin whose rect touches no other display (edges or corners) is not one it accepts, whatever the mode.
+function Test-RectTouches($a, $b) { return ($a.L -le $b.R -and $b.L -le $a.R -and $a.T -le $b.B -and $b.T -le $a.B) }
+# The restore plan for a saved record (W5): which of the steps applies and why.
+#   drop    there is no unique virtual display: nothing to restore (the tool exits 3)
+#   already the display is back at the saved mode and origin (exit 0, nothing applied)
+#   saved   the saved origin overlaps nothing and touches another display: apply mode and origin, as before
+#   current the saved position cannot apply (overlap, or it touches no display now): apply the saved mode at the display's current origin x,y
+# Returns @{ step; reason; x; y } (x,y = the origin the step applies at).
+function Get-RestorePlan($displays, $sel, $rec) {
+    if (-not $sel.display) { return @{ step = 'drop'; reason = $sel.reason; x = 0; y = 0 } }
+    $t = $sel.display
+    if ($t.W -eq $rec.w -and $t.H -eq $rec.h -and $t.X -eq $rec.x -and $t.Y -eq $rec.y) { return @{ step = 'already'; reason = ''; x = $t.X; y = $t.Y } }
+    $op = Get-OriginPlan $displays $sel ([int]$rec.x) ([int]$rec.y)
+    if (-not $op.ok) { return @{ step = 'current'; reason = $op.reason; x = $t.X; y = $t.Y } }
+    $nr = Get-DisplayRect $t ([int]$rec.x) ([int]$rec.y)
+    $others = @($displays | Where-Object { $_.Device -ne $t.Device })
+    $touch = $false
+    foreach ($o in $others) { if (Test-RectTouches $nr (Get-DisplayRect $o $o.X $o.Y)) { $touch = $true; break } }
+    if ($others.Count -and -not $touch) { return @{ step = 'current'; reason = "the saved origin $($rec.x),$($rec.y) touches no other display (the desktop must stay contiguous)"; x = $t.X; y = $t.Y } }
+    return @{ step = 'saved'; reason = ''; x = [int]$rec.x; y = [int]$rec.y }
+}
+# Runs a plan. $apply is { param($w,$h,$hz,$x,$y) } returning @{ ok; exit }; $current is { } returning @{ x; y } of the display now (or $null).
+# 'saved': try the saved origin, then (if that fails) the mode at the current origin. 'current': the second only.
+# Returns @{ ok; used (saved|current); exit; x; y; reason }.
+function Invoke-RestoreApply($plan, $rec, [scriptblock]$apply, [scriptblock]$current) {
+    $w = [int]$rec.w; $h = [int]$rec.h; $hz = [int]$rec.hz
+    $why = $plan.reason
+    if ($plan.step -eq 'saved') {
+        $a = & $apply $w $h $hz ([int]$rec.x) ([int]$rec.y)
+        if ($a.ok) { return @{ ok = $true; used = 'saved'; exit = 0; x = [int]$rec.x; y = [int]$rec.y; reason = '' } }
+        $why = "applying it failed (display tool exit $($a.exit))"
+    }
+    $c = & $current
+    if (-not $c) { return @{ ok = $false; used = ''; exit = 5; x = 0; y = 0; reason = "$why; the virtual display could not be read back" } }
+    $b = & $apply $w $h $hz ([int]$c.x) ([int]$c.y)
+    if ($b.ok) { return @{ ok = $true; used = 'current'; exit = 0; x = [int]$c.x; y = [int]$c.y; reason = $why } }
+    return @{ ok = $false; used = ''; exit = $b.exit; x = [int]$c.x; y = [int]$c.y; reason = $why }
 }
 # Candidate refresh rates for -Set: the requested one, else the current then 60.
 function Get-HzCandidates([int]$wanted, [int]$current) {
@@ -185,7 +223,8 @@ function Put-CursorBack($before, $displays) {
     }
 }
 # Applies size and/or origin to the selected display: CDS_TEST first, then dynamic apply, then verify by re-reading the displays.
-function Apply-ToVirtual($all, $sel, [int]$w, [int]$h, [int]$hzWanted, [int]$x, [int]$y, [string]$what) {
+# Returns @{ ok; exit; now } and never exits itself (-Restore follows a failed apply with another); callers exit with .exit. -NoHelp: no driver-config help text.
+function Apply-ToVirtual($all, $sel, [int]$w, [int]$h, [int]$hzWanted, [int]$x, [int]$y, [string]$what, [switch]$NoHelp) {
     $t = $sel.display
     $dmOk = $null; $usedHz = 0; $rc = 0
     foreach ($hz in (Get-HzCandidates $hzWanted $t.Hz)) {
@@ -196,8 +235,8 @@ function Apply-ToVirtual($all, $sel, [int]$w, [int]$h, [int]$hzWanted, [int]$x, 
     }
     if (-not $dmOk) {
         Write-Output "MODE NOT OFFERED: ${w}x${h} is refused by the driver for $($t.Device); nothing was changed."
-        Write-MissingModeHelp @("${w}x${h}") $hzWanted
-        exit 6
+        if (-not $NoHelp) { Write-MissingModeHelp @("${w}x${h}") $hzWanted }
+        return @{ ok = $false; exit = 6; now = $null }
     }
     $cur0 = [VProbe]::CursorNow()
     $rc = Cds-Apply $sel $dmOk
@@ -208,9 +247,9 @@ function Apply-ToVirtual($all, $sel, [int]$w, [int]$h, [int]$hzWanted, [int]$x, 
     $now = @($after | Where-Object { $_.Device -eq $t.Device })
     if ($rc -ne 0 -or -not $now.Count -or $now[0].W -ne $w -or $now[0].H -ne $h -or $now[0].X -ne $x -or $now[0].Y -ne $y) {
         Write-Output "APPLY FAILED: $($t.Device) is not ${w}x${h} at $x,$y after the change"
-        exit 5
+        return @{ ok = $false; exit = 5; now = $null }
     }
-    return $now[0]
+    return @{ ok = $true; exit = 0; now = $now[0] }
 }
 function Save-Prev($t, [string]$path) {
     if (-not $path) { Write-Output 'bad arguments: this mode needs -SaveTo <json> (the previous mode is saved there so it can be restored)'; exit 2 }
@@ -245,7 +284,8 @@ if ($Set) {
     $t = $sel.display
     if ($t.W -eq $sz.w -and $t.H -eq $sz.h) { Write-Output "VIRTUAL OK: $($t.Device) is already $($sz.w)x$($sz.h); nothing to do"; exit 0 }
     Save-Prev $t $SaveTo
-    [void](Apply-ToVirtual $all $sel $sz.w $sz.h $Hz $t.X $t.Y 'the mode change')
+    $ap = Apply-ToVirtual $all $sel $sz.w $sz.h $Hz $t.X $t.Y 'the mode change'
+    if (-not $ap.ok) { exit $ap.exit }
     Write-Output "VIRTUAL SET: $($t.Device) now $($sz.w)x$($sz.h) (was $($t.W)x$($t.H)@$($t.Hz)); restore with -Restore $SaveTo"
     exit 0
 }
@@ -260,7 +300,8 @@ if ($Origin) {
     if (-not $plan.ok) { Write-Output "REFUSED: $($plan.reason). Nothing was changed."; exit 7 }
     if ($t.X -eq $ox -and $t.Y -eq $oy) { Write-Output "VIRTUAL OK: $($t.Device) is already at $ox,$oy; nothing to do"; exit 0 }
     Save-Prev $t $SaveTo
-    [void](Apply-ToVirtual $all $sel $t.W $t.H $t.Hz $ox $oy 'the origin move')
+    $ap = Apply-ToVirtual $all $sel $t.W $t.H $t.Hz $ox $oy 'the origin move'
+    if (-not $ap.ok) { exit $ap.exit }
     Write-Output "VIRTUAL MOVED: $($t.Device) now at $ox,$oy (was $($t.X),$($t.Y)); restore with -Restore $SaveTo"
     exit 0
 }
@@ -268,13 +309,21 @@ if ($Restore) {
     if (-not (Test-Path -LiteralPath $Restore)) { Write-Output "bad arguments: $Restore does not exist"; exit 2 }
     $p = [IO.File]::ReadAllText($Restore) | ConvertFrom-Json
     if ($p.name -and $p.name -ne $Name) { Write-Output "REFUSED: $Restore was saved for '$($p.name)', not '$Name'"; exit 7 }
-    if (-not $sel.display) { Fail-NoSel $sel }
+    if (-not $sel.display) { Fail-NoSel $sel }   # exit 3: Get-RestorePlan says 'drop' for the same case
+    $plan = Get-RestorePlan $all $sel $p
     $t = $sel.display
-    if ($t.W -eq $p.w -and $t.H -eq $p.h -and $t.X -eq $p.x -and $t.Y -eq $p.y) { Write-Output "VIRTUAL OK: $($t.Device) is already back at $($p.w)x$($p.h) at $($p.x),$($p.y)"; exit 0 }
-    $plan = Get-OriginPlan $all $sel ([int]$p.x) ([int]$p.y)
-    if (-not $plan.ok) { Write-Output "REFUSED: $($plan.reason). Nothing was changed."; exit 7 }
-    [void](Apply-ToVirtual $all $sel ([int]$p.w) ([int]$p.h) ([int]$p.hz) ([int]$p.x) ([int]$p.y) 'the restore')
-    Write-Output "VIRTUAL RESTORED: $($t.Device) back at $($p.w)x$($p.h)@$($p.hz) at $($p.x),$($p.y)"
+    if ($plan.step -eq 'already') { Write-Output "VIRTUAL OK: $($t.Device) is already back at $($p.w)x$($p.h) at $($p.x),$($p.y)"; exit 0 }
+    # saved origin first when it is legal; otherwise (or when it does not apply) the saved mode at the origin the display has now. Only this
+    # display is touched, and Apply-ToVirtual still reports any other display that changed.
+    $applyFn = { param($w, $h, $hz, $x, $y) return (Apply-ToVirtual $all $sel $w $h $hz $x $y 'the restore' -NoHelp) }
+    $curFn = { $n = Select-VirtualDisplay @(Get-Displays) $Name; if ($n.display) { return @{ x = $n.display.X; y = $n.display.Y } } else { return $null } }
+    $res = Invoke-RestoreApply $plan $p $applyFn $curFn
+    if (-not $res.ok) {
+        Write-Output "APPLY FAILED: the restore of $($t.Device) to $($p.w)x$($p.h)@$($p.hz) did not apply, at the saved origin or at the current one ($($res.reason)). The record is kept."
+        exit $res.exit
+    }
+    if ($res.used -eq 'current') { Write-Output "VIRTUAL RESTORED (position gone): $($t.Device) mode back at $($p.w)x$($p.h)@$($p.hz); saved origin $($p.x),$($p.y) not applicable ($($res.reason)), kept $($res.x),$($res.y)" }
+    else { Write-Output "VIRTUAL RESTORED: $($t.Device) back at $($p.w)x$($p.h)@$($p.hz) at $($p.x),$($p.y)" }
     exit 0
 }
 

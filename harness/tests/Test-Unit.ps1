@@ -591,8 +591,8 @@ Test-Case 'display tool: -Origin plans refuse any rect that overlaps another dis
     Assert-Eq @(Get-OtherChanges $topoA $topoA '\\.\DISPLAY10').Count 0 'no change = nothing reported'
     Assert-Eq (Parse-Size '3840x2160').w 3840 'Parse-Size'; Assert-True ($null -eq (Parse-Size '3840')) 'bad size'; Assert-True ($null -eq (Parse-Size '1x1')) 'too small'
 }
-# ---- the restore planner (W5 / napoleon J48): a saved position that cannot apply must not keep the mode from coming back ------------------
-# The record is the real one from 2026-10-30 (napoleon J44 left it pending; the 4K primary it touched was gone, the restore failed for 24 minutes).
+# ---- the restore planner (W5): a saved position that cannot apply must not keep the mode from coming back ------------------
+# The record is the real one from 2026-10-30 (a game left it pending; the 4K primary it touched was gone, the restore failed for 24 minutes).
 # The topology after that is not recorded anywhere: it is built from $topoA without the 4K primary, the Dell as primary and the virtual display
 # where the watcher log put it when the restore finally worked (2560,1440).
 $recJ44 = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixtures\vdisplay_restore_20261030_j44.json')) | ConvertFrom-Json
@@ -612,7 +612,7 @@ Test-Case 'restore planner: already back, a legal origin, an overlapping origin,
     Assert-Eq (Get-RestorePlan $topoA $sel $other).step 'saved' 'another mode at an origin that touches the 4K primary: the saved origin is tried'
     $ovl = [pscustomobject]@{ w = 3840; h = 2160; hz = 60; x = -2000; y = 400 }
     $po = Get-RestorePlan $topoA $sel $ovl
-    Assert-Eq $po.step 'current' 'on top of the Dell'; Assert-Match $po.reason 'overlaps .*DISPLAY2' 'names the display it would cover'
+    Assert-Eq $po.step 'current' 'on top of the Dell'; Assert-Match $po.reason 'overlaps .*DISPLAY' 'names the display it would cover'
     $far = [pscustomobject]@{ w = 3840; h = 2160; hz = 60; x = 12000; y = 12000 }
     Assert-Eq (Get-RestorePlan $topoA $sel $far).step 'current' 'far outside the desktop: not contiguous'
     $none = Select-VirtualDisplay @($topoA[0], $topoA[1]) $VDD

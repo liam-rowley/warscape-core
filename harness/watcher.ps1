@@ -8,7 +8,7 @@
 param([string]$Root = '', [string]$Adapter = '', [switch]$NoRun)
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.2.0'
+$Version = '1.3.0'
 $SrcDir = $PSScriptRoot
 if (-not $Root) { $Root = Join-Path $SrcDir '..' }
 $Root = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -736,12 +736,27 @@ function Vdisplay-Restore([string]$why) {
     $r = Run-VDisplay @('-Restore', $f, '-Name', (Vd-Name))
     if ($r.rc -eq 0) {
         Move-Item -LiteralPath $f -Destination (Join-Path (ToDelete '') "vdisplay_restore_$(UtcStamp (Get-Date)).json") -Force
+        Vdisplay-FailFlush
         Log "vdisplay: previous mode restored ($why): $(Tool-Summary $r)"
         return $null
     }
+    if ($r.rc -eq 3) {   # no unique virtual display: there is nothing to restore (D38); the next launch's -Check refuses on its own if it is still missing
+        Vdisplay-FailFlush
+        $dst = Join-Path (ToDelete '') "vdisplay_restore_$(UtcStamp (Get-Date)).json.dropped"
+        Move-Item -LiteralPath $f -Destination $dst -Force
+        Log "vdisplay: pending restore dropped (no virtual display: $(Tool-Summary $r)); record kept at $dst"
+        return $null
+    }
     $m = "vdisplay: RESTORE FAILED ($why): $(Tool-Summary $r)"
-    Log $m
-    return $m
+    # the same failure every 60 s is logged once, then counted; the line with the count follows when it changes or clears
+    if ($m -eq $script:VdLastFail) { $script:VdFailCount++ }
+    else { Vdisplay-FailFlush; $script:VdLastFail = $m; $script:VdFailCount = 1; Log $m }
+    return "$m. The record is $f; the one safe fix: move it to $(ToDelete '') (it only remembers the virtual display's old mode), then launch again"
+}
+$script:VdLastFail = ''; $script:VdFailCount = 0
+function Vdisplay-FailFlush {
+    if ($script:VdFailCount -gt 1) { Log "vdisplay: the RESTORE FAILED above repeated $($script:VdFailCount - 1) more times" }
+    $script:VdLastFail = ''; $script:VdFailCount = 0
 }
 # Housekeeping in Pump: once the game has exited (and no job holds it), restore a mode a launch changed - after a crash or kill too.
 function Vdisplay-Housekeeping {
