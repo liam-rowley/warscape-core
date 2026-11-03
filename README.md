@@ -12,7 +12,7 @@ What the core holds, split as in `napoleon-remastered` `docs/plans/PLAN.md` sect
 
 | Core (here) | Adapter (game repo) | State |
 |---|---|---|
-| Registry framework, CLI (`wsc`), gates, CI workflow, pre-push hook | registry contents, extra verbs, own schemas | **v0.1** |
+| Registry framework, CLI (`wsc`), gates, CI workflow, pre-push hook | registry contents, extra verbs, own schemas, own gates (**v0.20**, C22) | **v0.1** |
 | Watcher, game lock, config profiles, headless display kit, sha-checked PC sync (`harness/`, `proxy/tools/pc_deploy.py`) | paths, launch arguments | **v0.4** (C14) |
 | Proxy DLL skeleton: backend loading, log, crash capture, exe-identity guard, runtime patch engine, dev control channel, campaign console, battle camera (`proxy/src`) | identity pin, engine sites, scene detection, console and camera adapters | **v0.4** (C14) |
 | Control API (`harness/ctl.py`: scene, cam, shot, perf, state, reset, pause, speed; `order` with napoleon J28) and contact sheets | scenario list, camera poses, openers | ctl **v0.4**; contact sheets later |
@@ -68,6 +68,8 @@ merged at load; canonical key order is then the core's fields first, then the ga
 unmodified, its `VERSION` is the pinned `vX.Y.Z`, and HEAD is that tag whenever the tag is in the checkout; a shallow checkout without
 it is compared by `VERSION` only, C21; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.
+A game adds its own checks as gate modules (`wsc.toml` `[gates] dirs`, `NAME` and `run(ctx) -> Result`: `docs/CONSUMING.md` "Game gates"), each its own line
+after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs view` page.
 
 ## Layout
 

@@ -1,6 +1,6 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
-purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's hooks), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
+purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
 usage: wsc jobs check | jobs next [--id <id>] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]]
 when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button.
 verb: jobs
@@ -13,7 +13,7 @@ pull request with a failed check (one `gh pr list` call; `--offline` skips it); 
 check runs (one `gh api` call) above the steps. `view` writes one self-contained HTML page (default `_scratch/jobs.html`) and opens it;
 `view --serve` serves it on 127.0.0.1 and the buttons post (id, action) to the server, which checks a per-run token, Origin, Host, content
 type, readiness against fresh branches and no live session of the same name (`claude agents --json`, fail closed), then runs
-`claude --bg` itself; no permission flag is ever passed. The repo's own rules and texts: `wsc.toml` [jobs] and its hook modules.
+`claude --bg` itself; no permission flag is ever passed. The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
 """
 import sys
 import threading
@@ -61,11 +61,12 @@ def run(args, ctx):
     if args.action == 'check':
         jd = ctx.root / J.S.jobs_dir
         folders = [d.name for d in jd.iterdir() if d.is_dir()] if jd.is_dir() else []
-        errs = J.problems(rows, read, folders, ctx)
-        errs += J.call_hooks('queue_problems', ctx, rows, ctx.files())
-        extra = ''.join(', ' + s for s in J.call_hooks('summary', ctx, rows, read, joiner='') if s)
+        errs, warns, summaries = J.check(ctx, rows, read, folders)
+        extra = ''.join(', ' + s for s in summaries)
         for e in errs:
             print(f'jobs: {e}', file=sys.stderr)
+        for w in warns:
+            print(f'jobs: warning: {w}', file=sys.stderr)
         print(f'jobs check: {len(rows)} rows, {"%d problems" % len(errs) if errs else "ok"}{extra}')
         return 1 if errs else 0
 

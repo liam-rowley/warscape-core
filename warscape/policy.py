@@ -11,14 +11,15 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
   meta/*      repo infrastructure: the `[policy] meta` globs.
 Anything else is refused. Every branch kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows
 numbered <prefix><last+1>, with a YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces.
-A repo's own rules (napoleon's rule 79, the acceptance ledger) come from `policy_problems` hooks (hooks.py), called after the decisions check.
+A repo's own rules (napoleon's rule 79, the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the
+decisions check: an `error` Result's details are policy errors.
 """
 import json
 import re
 import subprocess
 from fnmatch import fnmatchcase
 
-from . import hooks
+from . import gatemods
 
 
 def settings(config):
@@ -111,7 +112,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
     """Errors for this pull request. `base_file`/`head_file` are callables path -> text or None. `sessions`: callable path ->
     list with one set of trailer values per branch commit that touched it (job branches; an empty set is a commit without a trailer, which
     is refused; None skips the authorship check, for the pure-logic tests). `cfg`: settings(). `hook`: callable(facts) -> [str], the
-    repo's `policy_problems` hooks (facts: branch, kind, jid, changed), called after the decisions check."""
+    repo's `policy`-stage gate modules (facts: branch, kind, jid, changed), called after the decisions check."""
     cfg = cfg or settings(_default_config())
     T, jd, trailer = cfg['text'], cfg['jobs_dir'], cfg['trailer']
     errs = decisions_problems(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] and cfg['decisions'] in changed else []
@@ -184,15 +185,16 @@ def _default_config():
 
 
 def collect_facts(ctx, branch, base='origin/main'):
-    """Everything `run` reads from git for one pull request: the merge base, the changed files and the facts handed to hooks."""
+    """Everything `run` reads from git for one pull request: the merge base, the changed files and the facts handed to `policy`-stage gate modules."""
     cwd = str(ctx.root)
     mb = git('merge-base', base, 'HEAD', cwd=cwd).strip()
     changed = [p for p in git('diff', '--name-only', f'{mb}...HEAD', cwd=cwd).splitlines() if p]
     return {'root': ctx.root, 'branch': branch, 'base': base, 'head': 'HEAD', 'merge_base': mb, 'changed': changed}
 
 
-def run_check(ctx, branch, base='origin/main', extra_hook_facts=None):
-    """The errors and the changed files of `branch` against `base`, read from the repo at ctx.root (what `wsc policy` and CI run)."""
+def run_check(ctx, branch, base='origin/main', extra_facts=None):
+    """The errors and the changed files of `branch` against `base`, read from the repo at ctx.root (what `wsc policy` and CI run).
+    `extra_facts`: more facts for the `policy`-stage gate modules (`ctx.facts`), over the collected ones."""
     cfg = settings(ctx.config)
     cwd = str(ctx.root)
     facts = collect_facts(ctx, branch, base)
@@ -204,14 +206,10 @@ def run_check(ctx, branch, base='origin/main', extra_hook_facts=None):
         recs = [r.strip('\n').split('\x1f') for r in out.split('\x1e') if r.strip()]
         return [{v.strip() for v in r[1:] if v.strip()} for r in recs]
 
-    mods = hooks.load(ctx.root, ctx.config['jobs']['hooks'])
+    gatemods.load(ctx)   # a load error stops the check before any git read below
 
     def hook(f):
-        out = []
-        for m in mods:
-            if hasattr(m, 'policy_problems'):
-                out += list(m.policy_problems(ctx, {**facts, **f, **(extra_hook_facts or {})}))
-        return out
+        return gatemods.problems(gatemods.run_stage(ctx, 'policy', facts={**facts, **f, **(extra_facts or {})}))
 
     errs = check(branch, changed, rows_at(mb, cfg, cwd), rows_at('HEAD', cfg, cwd), lambda p: show(base, p, cwd), lambda p: show('HEAD', p, cwd),
                  sessions, cfg, hook)
