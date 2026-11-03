@@ -5,7 +5,7 @@ re-proved by host tests (napoleon-remastered J29's brief recommends Opus for thi
 commit, report what is left. Napoleon J29 keeps about 200 more (adapter, frontage facts, pick and walk proof, bindings, 20 acceptance passes, Liam's feel sign-off).
 
 ## What
-The game-agnostic half of napoleon-remastered J29 (its brief, `jobs/J29/brief.md` on branch `brief/J29` there until it reaches `main`, is the full specification: read
+The game-agnostic half of napoleon-remastered J29 (its brief, `jobs/J29/brief.md` on that repo's `main`, is the full specification: read
 "The route, and why", "Behaviour" and "The core job" first). Alt+drag moves the selected units to a drawn line, Alt+Ctrl+drag rotates them in place, a preview
 is drawn while the button is down, and the orders go out once on release. The game supplies the selection and the orders; this job is everything else.
 Provenance (read-only evidence, never edited): `empire-remastered` `rml_mod/src/gesture_sm.h`, `gesture_math.h`, `gesture_feed.h`, `gesture_group.h`, `gesture_v4.h`,
