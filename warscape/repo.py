@@ -61,6 +61,7 @@ DEFAULTS = {
         'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
         'failed_results': '',              # glob (relative to a run folder a report cites) of ctl result JSONs: one with status "failed" must be named in ## Deviations ('' = off)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
+        'pc_state': '',                    # the PC state folder ($VAR, ~ expanded): a needs_pc build is not ready where it is absent ('' = no gating; WSC_PC_STATE overrides, "" = no PC here; W26)
         'semver_from': 0,                  # W29 (C27): job numbers from this one on carry `semver` (from status queued) and a `Semver:` brief line,
                                            # and their job/ branches may not edit VERSION (the release workflow owns it); 0 = off
         'claim_hours': 4,                  # a review claim (refs/claims/<id>/round-<n>, core W27) older than this may be taken over
