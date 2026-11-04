@@ -7,7 +7,7 @@
 //   5. the dev side (dev.cpp), only when a dev key is on and the plan allows hooks, and the release file rules (proxy.file_rules)
 //   6. headless runs (headless.cpp), only when headless.enabled; refused (exit) when the plan forbids hooks or the proxy is off
 // The backend d3d9 loads later, at the first export call (backend.cpp). Loader lock: Win32 file and memory calls only, and no thread
-// starts (StartThread refuses while Rt().inDllMain; W33, C24).
+// starts (StartThread refuses while Rt().inDllMain; W33, C30).
 #include "runtime.h"
 #include "sha256.h"
 #include "ui_host.h"

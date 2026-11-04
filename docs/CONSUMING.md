@@ -34,6 +34,17 @@ The options weighed against it (subtree, a vendored copy, `pip install`) and the
 - **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
 - `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
 
+## DLL changes in 0.33.0 (W33, C30)
+- **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
+  row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
+  tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".
+- **Migration:** a release that set `dev.file_rules` for shipped data rules moves them to `proxy.file_rules`; the player ini then sets no
+  dev key. A dev launch's `dev.file_rules` stays and wins on the same path.
+- **New log lines:** `patch_engine: protections restored on <n> page(s): ...` (and `... left changed` per bad page), `thread: <name> started
+  (tid N)`, the `dev:` line's `threads at the first Direct3DCreate9: state=<0|1> ctl=<0|1>`, `redirect: <n> rules from <path> (proxy.file_rules)`.
+- **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
+  `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
+
 ## Wiring a game repo (the steps, once approved)
 
 ```sh

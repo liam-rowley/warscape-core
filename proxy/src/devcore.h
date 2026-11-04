@@ -20,7 +20,7 @@
 
 namespace wsp {
 
-// Which dev threads a config needs (W33, C24). They start at the first Direct3DCreate9, never in DllMain (dev.cpp DevOnDirect3DCreate).
+// Which dev threads a config needs (W33, C30). They start at the first Direct3DCreate9, never in DllMain (dev.cpp DevOnDirect3DCreate).
 // The state thread clocks the two outputs that need a clock: state.json (dev.state_json, twice a second) and the timeline's
 // loading_started / scene_ready marks (dev.timeline: a scene leaves a context only when its pumps stop, kPumpFresh, which only a clocked
 // UpdateSceneLocked sees). The ctl thread serves dev.ctl and runs the config autostart. Every other dev key is a hook, or is reached

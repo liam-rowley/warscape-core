@@ -18,8 +18,11 @@ At most 32 anchor and 32 stock bytes. RVAs are rebased at run time (actual modul
 Every site is checked, then the driver decides once (`MakePatchPlan`): the site lies in one section's file-backed bytes (a hook in an
 executable one); anchor and stock compare equal after the load delta is taken off every relocated dword (`ReadUnrelocated`); a patch's
 value bytes carry no relocation; no two sites overlap. A patch whose bytes already equal its patch bytes counts as done. **Any bad site
-means nothing is written**, and every site is still logged. At write time every site is made writable first; one failure restores the
-others and writes nothing (`WritePlanAtomic`). A disabled site is still checked: it is part of the exe's identity.
+means nothing is written**, and every site is still logged. At write time every page a written site touches is made writable first,
+once, and keeps its own old protection; one failure restores the pages already changed and writes nothing (`WritePlanAtomic`). After the
+write each page is restored once with its recorded value and read back: `patch_engine: protections restored on <n> page(s): <rva>=<prot> ...`,
+and a `left changed` warning for a page that does not read back as recorded (a copy-on-write page reads back as its written form; W33, C30).
+A disabled site is still checked: it is part of the exe's identity.
 
 **An absolute address inside the anchor** (`c7 05 <abs32> <imm32>`, `mov dword [abs32], imm32`) needs nothing special: write the
 address in the anchor as the file holds it (unrelocated). `ReadUnrelocated` compares it at any base, and its relocation ends where the

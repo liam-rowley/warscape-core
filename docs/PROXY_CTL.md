@@ -11,6 +11,8 @@ From 0.29.0 (W10) `job.sh ctl <owner> ...` needs the game lock: the owner or the
 With `dev.ctl=1` the proxy watches `<dev.ctl_dir>`: a request is `<id>.cmd` (one line, a verb and its arguments), taken by renaming it to
 `<id>.cmd.taken`, answered by `<id>.done` (JSON, written atomically, last). Requests run one at a time, oldest write time first. An id is
 1 to 64 of `A-Za-z0-9._-`, not starting with `.` or `_`, and never reused (`_ids.txt` keeps them across launches). `CtlVerbs()` lists the verbs.
+The ctl thread starts at the game's first `Direct3DCreate9`, never in DllMain (W33, C30; `thread: dev.ctl started` in `proxy.log`). A
+request written between process start and then waits for it and is not stale: it was written after the process was created.
 
 ## Stale requests (0.18.0, W17)
 A request whose file was last written **before this process was created** is from an earlier launch (a driver killed while it waited
