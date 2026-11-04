@@ -48,6 +48,7 @@ class Settings:
     reg_dir = 'registries'
     ledgers = ''
     failed_results = ''
+    semver_from = 0
     root = None
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
@@ -61,6 +62,7 @@ def configure_from(cfg, root=None, reg_dir='registries'):
     """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file."""
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
     S.failed_results, S.root = cfg.get('failed_results', ''), (Path(root) if root is not None else None)
+    S.semver_from = cfg.get('semver_from', 0)
     S.text = dict(cfg['text'])
     S.legacy_rounds = S.legacy_briefs = frozenset()
     if root is not None:
@@ -118,6 +120,11 @@ def num(jid):
     return int(jid[1:]) if re.fullmatch(r'[A-Z]\d+', jid or '') else 10 ** 9
 
 
+def semver_rule(jid):
+    """True when job `jid` falls under the semver rule (W29, C27): `[jobs] semver_from` is set and the job number is at or above it."""
+    return bool(getattr(S, 'semver_from', 0)) and num(jid) >= S.semver_from
+
+
 # ------------------------------------------------------------------ check
 def brief_problems(jid, row, text):
     """Shape every brief must have (the Model line rule and the Finish rule): Model line agreeing with the row (a reason when Opus), a call budget,
@@ -134,6 +141,14 @@ def brief_problems(jid, row, text):
             errs.append(f'Model line says {m.group(1)}, the row says {row.get("model")}')
         if m.group(1).lower() in S.models[1:] and not re.search(r'\breason\b', m.group(2), re.I):
             errs.append(f'{m.group(1).title()} without "reason:" on the Model line' + ref('ref_models', ' ({}: ' + m.group(1).title() + ' only with a stated reason)'))
+    if semver_rule(jid):   # W29 (C27): the Semver line agrees with the row, and the brief no longer owns VERSION
+        sv = re.search(r'^Semver:\s*(\w+)', text, re.M)
+        if not sv:
+            errs.append(f'no "Semver: <patch|minor|major|none>" line (from {S.prefix}{S.semver_from} on the release workflow owns VERSION, C27)')
+        elif sv.group(1).lower() != row.get('semver'):
+            errs.append(f'Semver line says {sv.group(1)}, the row says {row.get("semver")}')
+        if re.search(r'^## VERSION\b', text, re.M):
+            errs.append('a "## VERSION" section: the release workflow owns VERSION (C27); the Semver line replaces it')
     if not re.search(r'[Bb]udget\s+about\s+\d+\s+tool\s+calls', text):
         errs.append('no call budget ("Budget about <n> tool calls"' + ref('ref_models', ', {}') + ')')
     kill = re.search(r'^## Kill criteria\s*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
@@ -270,6 +285,8 @@ def problems(rows, read, folders=()):
                 errs.append(f'{jid}: status {st} needs {f}={want}')
             if text is not None and not r.get(f):
                 errs.append(f'{jid}: {want} exists but the row has no {f}= (set it, with the status that goes with it)')
+        if semver_rule(jid) and st not in ('needs_brief', 'blocked') and not r.get('semver'):
+            errs.append(f'{jid}: status {st} needs semver=<patch|minor|major|none> (from {S.prefix}{S.semver_from} on, C27)')
         if st == 'needs_brief' and read(f'{S.jobs_dir}/{jid}/brief.md') is not None:
             errs.append(f'{jid}: has a brief but is still needs_brief (set status=queued brief={S.jobs_dir}/{jid}/brief.md)')
         brief = read(f'{S.jobs_dir}/{jid}/brief.md')

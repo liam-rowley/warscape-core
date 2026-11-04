@@ -106,9 +106,12 @@ jobs:
 
 ## Upgrading and releasing
 
-- **Core release:** a PR bumps `VERSION`; after Liam merges it, the tag `vX.Y.Z` is cut on that merge commit. Tags are never moved.
-- **Game upgrade:** `git -C core fetch --tags && git -C core checkout vX.Y.Z`, set `[core] version` to the same tag, run
-  `python3 core/wsc.py gates`, commit `core` and `wsc.toml` together on a branch.
+- **Releases (0.36.0, W29, C27):** the `release` workflow tags; nobody else does. After `gates` passes on `main` it computes the version from the
+  rows done since the last tag (`semver` on each row; `[jobs] semver_from` on), opens `release/vX.Y.Z` (VERSION only), auto-merges it and puts an
+  annotated tag on the merge commit; each `[release] consumers` adapter is compiled first (`warn`: a failure goes in the tag message and an issue).
+  `python3 wsc.py release plan` says what the next run does. The secret, the tag ruleset and the manual 1.0.0 path: [RELEASES.md](RELEASES.md).
+- **Game upgrade:** `python3 core/wsc.py core bump vX.Y.Z` (from 0.36.0 on; a bump to 0.36.0 itself is the hand steps: `git -C core fetch --tags`,
+  check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate) or 0.26.0 (base-judged policy, C24) are in
   [UPGRADING.md](UPGRADING.md).
