@@ -27,7 +27,8 @@ def settings(config):
     p, j = config['policy'], config['jobs']
     return {'decisions': p['decisions'], 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
             'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
-            'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl", 'text': dict(j['text'])}
+            'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
+            'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text'])}
 
 
 def git(*args, cwd=None):
@@ -158,7 +159,9 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         ok = {f'{jd}/{jid}/brief.md', f"{cfg['reg_jobs']}/{jid}.json"}
         extra = [p for p in changed if p not in ok]
         if extra:
-            errs.append(f'a brief branch may only add {jd}/{jid}/brief.md and update its row; it also changes: {", ".join(extra)}')
+            hint = ' (a committed registry view: C19, set `[views] commit = false`)'
+            shown = [p + hint if p in cfg.get('views', ()) else p for p in extra]
+            errs.append(f'a brief branch may only add {jd}/{jid}/brief.md and update its row; it also changes: {", ".join(shown)}')
         row = head_rows.get(jid)
         if not row or row.get('status') != 'queued' or row.get('brief') != f'{jd}/{jid}/brief.md':
             errs.append(f'row {jid} must be `queued` with brief={jd}/{jid}/brief.md')

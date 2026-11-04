@@ -190,6 +190,9 @@ class CoreOwnConfig(unittest.TestCase):
         self.assertEqual(pp.check('brief/W2', brief_and_row, base, head, files(), files(), cfg=self.cfg), [])
         errs = pp.check('brief/W2', brief_and_row + ['registries/jobs.md'], base, head, files(), files(), cfg=self.cfg)
         self.assertTrue(any('a brief branch may only add' in e and 'registries/jobs.md' in e for e in errs), errs)
+        self.assertTrue(any('registries/jobs.md (a committed registry view: C19, set `[views] commit = false`)' in e for e in errs), errs)
+        errs = pp.check('brief/W2', brief_and_row + ['proxy/x.cpp'], base, head, files(), files(), cfg=self.cfg)
+        self.assertFalse(any('C19' in e for e in errs), errs)   # only a registry view gets the hint
 
 
 class PolicyOnGit(unittest.TestCase):
