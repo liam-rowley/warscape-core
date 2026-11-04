@@ -44,8 +44,9 @@ A verdict line, exactly `**Verdict: merge.**`, `**Verdict: merge after fixes.**`
 the branch merge), and findings ranked **blocker**, **should-fix**, **later**, each with `file:line`, what fails, and how to see it fail.
 
 - Fix small should-fix items yourself on the branch only with the verdict `merge after fixes`: one commit each, with a test where the code allows, listed in
-  the review; a fresh round then reviews your change. `policy` warns on a `merge` round whose own commits change a file outside `jobs/<id>/` and the job's
-  row (W27 rule A).
+  the review; a fresh round then reviews your change. Under the core's rules `policy` refuses a `merge` round whose own commits change a file outside
+  `jobs/<id>/` and the job's row (W27 rule A, W40; a game's `[policy] reviewer_code` may still warn). The fix: the round's own session changes its verdict
+  to `merge after fixes`; once that session is gone, a fresh round goes on top, and its review clears the commits before it (an old round is never edited).
 - Leave blockers and larger items as findings for the job chat.
 - **Later** items for the core go to warscape-core `docs/BACKLOG.md` through a warscape-core pull request; for the repo itself, into the review.
 - Write the review into `jobs/<id>/review.md` on the branch as a round section at the **top** of the file:

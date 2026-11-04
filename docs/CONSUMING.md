@@ -153,6 +153,7 @@ decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
 decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
+reviewer_code = "warn"             # W27 rule A: "error" refuses reviewer code under `merge` (W40): set it in a pin bump, once open `merge` rounds are done
 thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
 plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
