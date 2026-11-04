@@ -340,8 +340,10 @@ class CoreBumpPure(unittest.TestCase):
 
 class AdapterSyntaxFlags(unittest.TestCase):
     def test_flags_are_the_dll_lines(self):
-        sys.path.insert(0, str(CORE / 'proxy' / 'tools'))
-        import adapter_syntax
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('adapter_syntax', CORE / 'proxy' / 'tools' / 'adapter_syntax.py')
+        adapter_syntax = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(adapter_syntax)
         fl = adapter_syntax.flags((CORE / 'proxy' / 'tools' / 'build.sh').read_text(encoding='utf-8'))
         for want in ('-std=c++17', '-Wall', '-Wextra', '-Wshadow', '-Werror', '-DRMLUI_STATIC_LIB'):
             self.assertIn(want, fl)
