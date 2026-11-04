@@ -1,6 +1,6 @@
 # W29 report: Release tags by workflow: semver on rows, release branch, annotated tags on a green main
 
-W29 makes the core's release tags a function of a green `main` (C27): job rows carry `semver`, a `release` workflow computes the version from the rows done since the last tag, opens and auto-merges `release/vX.Y.Z` (a new policy kind that may change only `VERSION`) and puts an annotated tag on the merge commit; it never moves a tag and never uses `GITHUB_TOKEN`. `core_pin` checks the tag on `main`, each consumer adapter is compiled with `-fsyntax-only` before the tag, and `wsc core bump <tag>` writes a consumer's bump as one commit. VERSION 0.34.0 (a legacy job, bumped by hand).
+W29 makes the core's release tags a function of a green `main` (C27): job rows carry `semver`, a `release` workflow computes the version from the rows done since the last tag, opens and auto-merges `release/vX.Y.Z` (a new policy kind that may change only `VERSION`) and puts an annotated tag on the merge commit; it never moves a tag and never uses `GITHUB_TOKEN`. `core_pin` checks the tag on `main`, each consumer adapter is compiled with `-fsyntax-only` before the tag, and `wsc core bump <tag>` writes a consumer's bump as one commit. VERSION 0.35.0 (a legacy job, bumped by hand; 0.34.0 until W33 took it, see "Merge with main" at the end).
 
 ## What was built, per decision
 1. **Token** (decided by Liam 2026-11-04: a GitHub App). `ci/release.yml.in` mints a token with `actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510`
@@ -20,7 +20,7 @@ W29 makes the core's release tags a function of a green `main` (C27): job rows c
 4. **Policy and core_pin.** `release/vX.Y.Z`: only `VERSION`, content `X.Y.Z`, one patch, minor or major step above the base's VERSION; in the
    docstring and the refusal text; judged by the base's code (W23: no new judge input, `JUDGE_API` unchanged). `core_pin` in the core, on main
    (`GITHUB_REF` main, or HEAD an ancestor of `origin/main`) with tags in the checkout: `v<VERSION>` missing is a `warn` for `[release] grace_minutes`
-   (120) after the commit that set VERSION, then an `error`; lightweight at or above `[release] annotated_from` (0.34.0) is an `error`.
+   (120) after the commit that set VERSION, then an `error`; lightweight at or above `[release] annotated_from` (0.35.0) is an `error`.
 5. **Manual lever:** `--version` on `plan`, `open` and `tag`, only through the dispatch input: greater than the last tag, one step above VERSION.
 6. **Consumer compile:** `proxy/tools/adapter_syntax.py` (deviation 1) reads the DLL compile line's flags from build.sh's text at run time. CI's
    `proxy` job runs it on `null_game` and `null_game_no_gesture` (both compile) and on a copy of `null_game` with the gesture initialiser removed, which
@@ -63,7 +63,7 @@ W29 makes the core's release tags a function of a green `main` (C27): job rows c
    carries a short Releases bullet that links there.
 5. **Tests in `tests/test_release.py`** for the policy kind, the semver rules and the `core_pin` rule (pure), rather than spread over `test_policy.py`,
    `test_jobs.py` and `test_core_pin.py`; the base-judged case is in `test_policy_base.py`.
-6. **`semver_from` 40 and VERSION 0.34.0**: W39 reached `main` while this was built, and W15, W16 and W25 hold 0.31.0 to 0.33.0 on their branches.
+6. **`semver_from` 40 and VERSION 0.34.0** (0.35.0 after the merge with main, below): W39 reached `main` while this was built, and W15, W16 and W25 hold 0.31.0 to 0.33.0 on their branches.
 7. A schema-only change with no done rows releases a `minor` (the floor applies with no rows: a consumer gets a changed schema).
 8. The manual 1.0.0 takes two dispatches: the first opens the release pull request, the automatic run on its merge is red (VERSION above what the
    rows give: the re-derivation guard), and a second dispatch with the same version tags it.
@@ -78,11 +78,19 @@ W29 makes the core's release tags a function of a green `main` (C27): job rows c
    "Restrict deletions", plus "Restrict creations" with the app as the only bypass actor; keep Settings, General, "Allow auto-merge" on.
 3. Followed the recommendations: a failing consumer warns (1); `major` before 1.0.0 is `minor` (3); the 30 lightweight tags stay (4); `none` rows
    release nothing (5).
-4. Until this merges and the App exists, the orchestrator tags by hand as C27 says (v0.30.1 is untagged today). From 0.34.0 nobody does: a hand-made
-   lightweight `v0.34.0` would turn `core_pin` red.
+4. Until this merges and the App exists, the orchestrator tags by hand as C27 says (v0.30.1 is untagged today). From 0.35.0 nobody does: a hand-made
+   lightweight `v0.35.0` would turn `core_pin` red.
 
 ## What napoleon and the reviewer do
-- Napoleon: the bump to v0.34.0 is by hand (its pinned core has no `core bump`); after that `python3 core/wsc.py core bump vX.Y.Z`, delete the verbs it
+- Napoleon: the bump to v0.35.0 is by hand (its pinned core has no `core bump`); after that `python3 core/wsc.py core bump vX.Y.Z`, delete the verbs it
   names (`tools/verbs/discovery.py` collides with the core's `discovery`), run `gates`.
-- Reviewer, after the merge: the `release` run on the merge must end `tag` for v0.34.0 with an annotated tag (`git cat-file -t refs/tags/v0.34.0`
+- Reviewer, after the merge: the `release` run on the merge must end `tag` for v0.35.0 with an annotated tag (`git cat-file -t refs/tags/v0.35.0`
   says `tag`) and a green `core_pin`; without the App secrets it fails at the token step with the named message and changes nothing (tell Liam).
+
+## Merge with main (2026-11-04, after the merge verdict)
+`origin/main` (60ba80e: W15, W16, W25, W26, W27, W33 and others) merged in with no textual conflicts. Renumbered: W33 took 0.34.0 on `main`, so W29
+is **0.35.0** (`VERSION`, `[release] annotated_from`, the CONSUMING.md Releases bullet, the RELEASES.md heading and this report). `semver_from` stays
+**40**: W39 (queued, legacy) is still the highest job id on every branch, so W40 is the first job under the rule. C27 is Liam's row already on
+`main`; W29 adds no decision. `main` was red on `doc_size` (CONSUMING.md 31.5 KB after W16 and W33), so the two one-time pin-bump sections
+("Hooks and gate keys added in 0.24.0", "Moving to base-judged policy") moved verbatim to `docs/CONSUMING_UPGRADES.md`, each leaving a one-line
+pointer under its heading: 29.5 KB. v0.34.0 has no tag; the first `release` run on this merge sees only legacy rows and tags 0.35.0 as it is.
