@@ -555,8 +555,8 @@ int main(int argc, char** argv) {
         const size_t sw = drv.find("void GestureSetWindow(void* hwnd) {");
         Check(sw != std::string::npos && drv.find("ReenteredBy(s_lockOwner", sw) < drv.find("Lock l;", sw), "B58 a: GestureSetWindow tests s_lockOwner before taking s_lock");
         Check(drv.find("s_lockOwner = GetCurrentThreadId();") != std::string::npos && drv.find("s_lockOwner = 0;") != std::string::npos, "B58 a: the Lock struct records and clears its owner");
-        Check(drv.find("InterlockedIncrement(&s_reentered)") != std::string::npos && drv.find("\"reentered\"") != std::string::npos, "B58 a: re-entry is counted and reported in gesture info");
-        Check(drv.find("s_ctlHeld = true;") == std::string::npos && drv.find("\"held\"") != std::string::npos, "B58 c: s_ctlHeld is never set unconditionally; the result reports held");
+        Check(drv.find("InterlockedIncrement(&s_reentered)") != std::string::npos && drv.find("\\\"reentered\\\"") != std::string::npos, "B58 a: re-entry is counted and reported in gesture info");
+        Check(drv.find("s_ctlHeld = true;") == std::string::npos && drv.find("\\\"held\\\"") != std::string::npos, "B58 c: s_ctlHeld is never set unconditionally; the result reports held");
     }
     // the headers carry no Windows types (they build here, on the host, without windows.h) and no game names
     for (const char* h : { "core/gesture_math.h", "core/gesture_sm.h", "core/gesture_feed.h", "core/gesture_plan.h", "core/gesture_group.h" }) {
