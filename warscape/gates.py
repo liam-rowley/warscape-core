@@ -285,6 +285,29 @@ def gate_run_refs(ctx):
     return Result('run_refs', 'error' if errs else 'ok', f'{len(errs)} run README references not found ({tail})' if errs else f'every run README reference exists ({tail})', errs)
 
 
+def gate_doc_paths(ctx):
+    """Every backticked repo path in a living doc exists (W28, R11; `warscape/checks.py` stale_doc_paths): a tracked file or a folder above one, from
+    the root, the doc's folder or across the `core/` boundary, or git-ignored on purpose. Not checked: the job folders and the decisions file (records
+    of their day; the decisions file is append only), fenced blocks, a line with `(was <path>)` or `(moved)`, and `[docs] path_ignore`. A warn: the
+    core's docs name game-repo and empire paths on purpose, more than a short ignore list holds (W28 kill criterion)."""
+    tracked, subs = _tracked(ctx)
+    paths = checks.run_ref_index(tracked)[0]
+    skip = {ctx.config['policy']['decisions']}
+    jdir = ctx.config['jobs']['dir'].rstrip('/') + '/'
+    docs = {p: t for p in checks.living_docs(ctx.files(), ctx.config['docs'], _generated(ctx))
+            if p not in skip and not p.startswith(jdir) and (t := _read(ctx, p)) is not None}
+    errs = checks.stale_doc_paths(docs, paths, ctx.config['docs']['path_ignore'])
+    toks = sorted({e.rsplit(': ', 1)[1].rstrip('/') for e in errs})
+    try:   # one git call for every miss: build output and _scratch/ are git-ignored on purpose
+        p = subprocess.run(['git', '-C', str(ctx.root), 'check-ignore', '--stdin'], input='\n'.join(toks) + '\n', env=git_env(), capture_output=True, text=True)
+        ignored = set(p.stdout.split('\n')) if p.returncode in (0, 1) else set()
+    except OSError:
+        ignored = set()
+    errs = [e for e in errs if (t := e.rsplit(': ', 1)[1].rstrip('/')) not in ignored and not t.startswith('../')]
+    return Result('doc_paths', 'warn' if errs else 'ok', f'{len(errs)} backticked paths in living docs not found ({len(docs)} docs)' if errs
+                  else f'{len(docs)} living docs: every backticked path exists', errs)
+
+
 def gate_ci_render(ctx):
     """Every workflow listed in `[ci] workflows` equals its render from `<template_dir>/<name>.in` (`wsc ci render`). Skipped when none are listed."""
     if not ctx.config['ci']['workflows']:
@@ -343,7 +366,7 @@ def gate_tests(ctx):
 
 GATES = [
     ('schemas', gate_schemas), ('registries', gate_registries), ('tools', gate_tools), ('json', gate_json),
-    ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates),
+    ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates), ('doc_paths', gate_doc_paths),
     ('conflict_markers', gate_conflict_markers), ('eol', gate_eol), ('core_pin', gate_core_pin), ('hooks', gate_hooks),
     ('jobs', gate_jobs), ('ci_render', gate_ci_render), ('run_refs', gate_run_refs), ('tests', gate_tests),
 ]

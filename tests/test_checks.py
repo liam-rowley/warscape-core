@@ -223,7 +223,32 @@ class TestsGateSkips(unittest.TestCase):
                          ['C.test_a: r1', 'C.test_b: r2'])
 
 
+class DocPaths(unittest.TestCase):
+    """W28 (R11): a backticked repo path in a living doc must exist."""
+    TRACKED = ['README.md', 'docs/GUIDE.md', 'docs/img/a.png', 'warscape/gates.py', 'core/wsc.py']
+
+    def stale(self, text, doc='docs/GUIDE.md', ignore=()):
+        return checks.stale_doc_paths({doc: text}, checks.run_ref_index(self.TRACKED)[0], ignore)
+
+    def test_a_stale_token_is_flagged_with_its_line(self):
+        self.assertEqual(self.stale('ok\nsee `warscape/gone.py` and `warscape/gates.py:12`\n'), ['docs/GUIDE.md:2: path not found: warscape/gone.py'])
+
+    def test_existing_paths_are_not_flagged(self):
+        for tok in ('warscape/gates.py', 'warscape/', 'docs/img/', 'img/a.png', 'core/warscape/gates.py', 'core/wsc.py',
+                    'warscape/gates.py#L3', './warscape/gates.py'):
+            self.assertEqual(self.stale(f'`{tok}`'), [], tok)
+        self.assertEqual(self.stale('`core/wsc.py` and `warscape/gates.py`', doc='README.md'), [])
+
+    def test_placeholders_commands_ignored_tokens_and_records_are_not_flagged(self):
+        for tok in ('jobs/<id>/brief.md', 'docs/*.md', '{a,b}/x.py', '$HOME/x.py', '~/x.py', 'https://x.org/a.py', 'C:/x/y.py',
+                    'python3 tools/x.py', 'origin/main', 'job/W28', 'actions/cache'):
+            self.assertEqual(self.stale(f'`{tok}`'), [], tok)
+        self.assertEqual(self.stale('`plan/` and `tools/x.py`', ignore=['plan/', 'tools/*']), [])
+        self.assertEqual(self.stale('`tools/x.py` (was `tools/y.py`)\n`a/b.py` (moved)\n```\n`c/d.py`\n```\n'), [])
+
+
 class RunRefs(unittest.TestCase):
+
     """B13: the rule behind the `run_refs` gate, on plain inputs."""
 
     def test_which_files_are_run_readmes(self):
