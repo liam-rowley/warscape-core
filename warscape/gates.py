@@ -189,11 +189,50 @@ def core_tag_problems(version, head_tags):
     return det
 
 
+def _vt(v):
+    return tuple(int(x) for x in v.split('.'))
+
+
+def release_tag_problem(version, on_main, tags, tag_type, age_min, annotated_from, grace_min):
+    """(level, why) for the core on main (W29, C27): v<VERSION> exists, annotated from `annotated_from` on; missing is a warning for
+    `grace_min` minutes after the commit (the release workflow is pending), then an error. A checkout with no tags is VERSION only (C21)."""
+    if not on_main:
+        return 'ok', ''
+    if not tags:
+        return 'ok', 'VERSION only: no tags in this checkout'
+    tag = f'v{version}'
+    if tag not in tags:
+        if age_min is not None and age_min > grace_min:
+            return 'error', (f'{tag} does not exist {int(age_min)} min after main reached VERSION {version}: the release workflow did not tag '
+                             '(read its last run: `gh run list --workflow release.yml`; docs/CONSUMING.md, Releases)')
+        return 'warn', f'{tag} does not exist yet: release workflow pending'
+    if annotated_from and _vt(version) >= _vt(annotated_from) and tag_type != 'tag':
+        return 'error', f'{tag} is a lightweight tag: from {annotated_from} on the release workflow makes annotated tags (C27); nobody tags by hand'
+    return 'ok', f'tag {tag}' + (' (annotated)' if tag_type == 'tag' else '')
+
+
+def core_release_tag(ctx, version):
+    import os
+    on_main = os.environ.get('GITHUB_REF') == 'refs/heads/main'
+    if not on_main and _git(ctx.root, 'rev-parse', '-q', '--verify', 'refs/remotes/origin/main'):
+        on_main = subprocess.run(['git', '-C', str(ctx.root), 'merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'],
+                                 capture_output=True, timeout=30, env=git_env()).returncode == 0
+    tags = _git(ctx.root, 'tag', '--list', 'v*') or []
+    tag_type = (_git(ctx.root, 'cat-file', '-t', f'refs/tags/v{version}') or [''])[0] if f'v{version}' in tags else ''
+    ct = (_git(ctx.root, 'log', '-1', '--format=%ct', 'HEAD', '--', 'VERSION') or [''])[0]
+    age = (time.time() - int(ct)) / 60 if ct.isdigit() else None
+    rel = ctx.config.get('release') or {}
+    return release_tag_problem(version, on_main, tags, tag_type, age, rel.get('annotated_from', ''), rel.get('grace_minutes', 120))
+
+
 def gate_core_pin(ctx):
     want, have = ctx.config['core']['version'], core_version(ctx.core_root)   # the checkout being checked, not the running core (B7)
     if ctx.is_core:
         det = core_tag_problems(have, _git(ctx.root, 'tag', '--points-at', 'HEAD') or [])
-        return Result('core_pin', 'error' if det else 'ok', 'core VERSION or tag malformed' if det else f'this is the core ({have})', det)
+        if det:
+            return Result('core_pin', 'error', 'core VERSION or tag malformed', det)
+        level, why = core_release_tag(ctx, have)
+        return Result('core_pin', level, why if level != 'ok' else f'this is the core ({have}{"; " + why if why else ""})', [why] if level != 'ok' else [])
     if not want:
         return Result('core_pin', 'ok', 'no [core] version pinned in wsc.toml (nothing to check)')
     core = ctx.core_root

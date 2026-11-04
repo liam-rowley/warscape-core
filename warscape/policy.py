@@ -5,7 +5,10 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
   job/<id>    any files, but only row <id> of the jobs registry; <jobs dir>/<id>/brief.md must already be on the base; the branch must
               carry <id>/report.md and <id>/review.md whose verdict line says exactly "merge"; row <id> must be `done`; no session (the
               `[policy] session_trailer` commit trailer) that wrote the report may write the review (never review your own job), and
-              every commit touching the report or the review must carry that trailer (fails closed).
+              every commit touching the report or the review must carry that trailer (fails closed). From job number `[jobs] semver_from`
+              on (W29, C27) it may not change VERSION: the release workflow owns it.
+  release/vX.Y.Z  only VERSION, whose content is X.Y.Z, exactly one patch, minor or major step above the base's VERSION (W29, C27: the
+              branch the release workflow opens; the workflow re-derives the version before it tags, so a hand-made one tags nothing).
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
   plan/*      planning: the `[policy] plan` globs. No code.
   meta/*      repo infrastructure: the `[policy] meta` globs.
@@ -50,7 +53,7 @@ def settings(config):
     """The policy settings from a loaded wsc.toml: `[policy]` plus the pieces of `[jobs]` and `registries_dir` the rules need."""
     p, j = config['policy'], config['jobs']
     return {'decisions': p['decisions'], 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
-            'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
+            'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'semver_from': j.get('semver_from', 0), 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text'])}
 
@@ -179,6 +182,10 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
             errs.append(f'row {jid} must be `done` on the branch (the reviewer sets it with a merge verdict)')
         if other_rows_changed(jid):
             errs.append(f'a job branch may change only its own row; it also changes {", ".join(other_rows_changed(jid))}')
+        sf = cfg.get('semver_from') or 0
+        if sf and 'VERSION' in changed and int(jid[len(cfg['job_prefix']):]) >= sf:
+            errs.append(f'{jid} changes VERSION: the release workflow owns VERSION (C27); from {cfg["job_prefix"]}{sf} on a job states its '
+                        f'level as `semver` on its row and leaves VERSION alone (git checkout origin/main -- VERSION)')
         if sessions and trailer:
             # fail closed: a commit with no trailer could be anyone's, so it can prove nothing about who reviewed
             by = {n: sessions(f'{jd}/{jid}/{n}') for n in ('report.md', 'review.md')}
@@ -204,6 +211,8 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
             errs.append(f'row {jid} must be `queued` with brief={jd}/{jid}/brief.md')
         if other_rows_changed(jid):
             errs.append(f'a brief branch may change only its own row; it also changes {", ".join(other_rows_changed(jid))}')
+    elif branch.startswith('release/'):
+        errs += release_problems(branch, changed, base_file, head_file)
     elif branch.startswith('plan/'):
         extra = [p for p in changed if not allowed(p, cfg['plan'])]
         if extra:
@@ -214,8 +223,34 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         if extra:
             errs.append(f'a meta/ branch may only touch repo infrastructure; it also changes: {", ".join(extra)} (game code goes through a job)')
     else:
-        errs.append(f'branch "{branch}" is not job/{cfg["job_prefix"]}<n>, brief/{cfg["job_prefix"]}<n>, plan/* or meta/*: all work goes through the job queue'
+        errs.append(f'branch "{branch}" is not job/{cfg["job_prefix"]}<n>, brief/{cfg["job_prefix"]}<n>, plan/*, meta/* or release/vX.Y.Z: all work goes through the job queue'
                     + (f" ({T['rules_ref']})" if T.get('rules_ref') else '') + '. Rename the branch, or add the work as a job first.')
+    return errs
+
+
+def release_problems(branch, changed, base_file, head_file):
+    """A release/vX.Y.Z branch (W29, C27): VERSION only, its content X.Y.Z, one patch, minor or major step above the base's VERSION."""
+    m = re.fullmatch(r'release/v(\d+)\.(\d+)\.(\d+)', branch)
+    if not m:
+        return [f'branch "{branch}" is not release/vX.Y.Z (lower-case v, three numbers): rename it']
+    want = '.'.join(m.groups())
+    errs = []
+    extra = [p for p in changed if p != 'VERSION']
+    if extra or not changed:
+        errs.append(f'a release branch may change only VERSION; it changes {", ".join(extra) or "nothing"}')
+    head = (head_file('VERSION') or '').strip()
+    if head != want:
+        errs.append(f'VERSION on the branch is {head!r}, not {want} (the branch name)')
+    base = (base_file('VERSION') or '').strip()
+    bm = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', base)
+    if not bm:
+        errs.append(f"the base's VERSION {base!r} is not X.Y.Z")
+    else:
+        a, b, c = map(int, bm.groups())
+        ok = {f'{a}.{b}.{c + 1}', f'{a}.{b + 1}.0', f'{a + 1}.0.0'}
+        if want not in ok:
+            errs.append(f"{want} is not one patch, minor or major step above the base's VERSION {base} (one of {', '.join(sorted(ok))}): "
+                        'merge the base and let the release workflow open the branch')
     return errs
 
 

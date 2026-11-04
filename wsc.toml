@@ -39,6 +39,7 @@ commit = false
 
 [jobs]
 id_prefix = "W"
+semver_from = 39     # W29 (C27): from W39 on a row carries `semver`, its brief a `Semver:` line, and its job/ branch leaves VERSION to the release workflow
 
 [jobs.text]
 wsc = "python3 wsc.py"
@@ -59,8 +60,14 @@ plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md"
 meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
         "tests/**", "wsc.toml", ".gitattributes", ".gitignore", "schemas/*", "registries/*"]
 
+# Release tags by workflow (W29, C27; docs/CONSUMING.md, Releases): ci/release.yml.in, `wsc release`. annotated_from: the first version the
+# workflow tags (older tags stay lightweight, never rewritten). Each consumer's adapter compiles against the candidate before the tag.
+[release]
+annotated_from = "0.31.0"
+consumers = [{name = "napoleon", repo = "liam-rowley/napoleon-remastered", adapter = "proxy/napoleon", ref = "main"}]
+
 [ci]
-workflows = ["gates.yml", "policy.yml"]
+workflows = ["gates.yml", "policy.yml", "release.yml"]
 core = ""
 # the checks main's ruleset must require (`wsc ci check-settings`); gates is a matrix job, so its checks are listed by name (W21)
 required_checks = ["gates (ubuntu-latest)", "gates (windows-latest)", "policy", "proxy", "harness-windows"]
