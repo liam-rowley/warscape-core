@@ -3,10 +3,11 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) C1, C2 (core half), B62, rule row 'runner image and apt outside the key'. The id hashes proxy/src, the adapter, build.sh, the fetchers and the pins (build_id.py:33-36), but g++-mingw-w64-i686 is installed unpinned in CI (gates.yml:122) and in Docker (build.sh:15,44), build.sh links every $S/*.cpp (build.sh:129), so an untracked .cpp changes the DLL without changing the id or marking it -dirty, and acceptance reads the id from a proxy.log string, never the DLL's sha256. Hash the compiler and linker version strings into the id (or pin the apt version in both places); compile only git ls-files sources and refuse an untracked one; the DLL logs its own module sha256 into proxy.log at init; CI writes the DLL sha256 and the build id into the step summary. This changes DLL inputs anyway, so fold in B62 (netfetch.retry inside fetch_lua.py and fetch_ui.py; drop the CI-only prefetch if nothing else needs it). C2: name the stb_image_write pin in CONSUMING.md and in fetch_ui.py's refusal. Opus: DLL.",
   "title": "Build id names one DLL: toolchain, committed sources, DLL self-hash",
   "phase": 1,
-  "status": "review",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "depends_on": [],
   "brief": "jobs/W24/brief.md",
-  "report": "jobs/W24/report.md"
+  "report": "jobs/W24/report.md",
+  "review": "jobs/W24/review.md"
 }
