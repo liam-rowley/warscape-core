@@ -88,7 +88,8 @@ class TasklistSaysRunning:
             p.stop()
 
 
-class Deploy(unittest.TestCase):
+class DeployBase(unittest.TestCase):
+    """The fake game, state and kit every install test starts from (no watcher folder under the state: no lock is needed, W25)."""
     def setUp(self):
         # J57: install/uninstall ask require_closed -> running_check -> windows_images -> `tasklist` about the REAL Game.exe, so the
         # tests failed on the PC whenever the game ran. The process list reports nothing running; require_closed and running_check stay
@@ -119,6 +120,8 @@ class Deploy(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+
+class Deploy(DeployBase):
     def test_kit_manifest(self):
         man, bad = pd.verify_kit(self.kit)
         self.assertEqual(bad, [])
@@ -516,6 +519,9 @@ class SetWaitsForRestore(unittest.TestCase):
 
     def setUp(self):
         use_fixture_game(self)
+        bash_or_skip(self, found=FOUND_BASH)   # W25: a state with a watcher folder means set takes the game lock through job.sh
+        os.environ.pop('CLAUDE_CODE_SESSION_ID', None)
+        os.environ['WSC_SESSION_ID'] = 'sess-b39'
         self.tmp = tempfile.TemporaryDirectory()
         t = Path(self.tmp.name)
         self.game, self.state = t / 'game', t / 'state'
@@ -561,7 +567,16 @@ class SetWaitsForRestore(unittest.TestCase):
         self.assertEqual(self.ini.read_bytes(), self.before)
 
     def test_a_restore_that_finishes_during_the_wait_lets_set_write(self):
-        threading.Timer(1.0, lambda: self.active.unlink()).start()
+        # W38: between two polls (set polls once a second), and a delete that outlasts the reader: on Windows a delete fails while
+        # `pending_restore` has the file open, and a timer at 1.0 s met the poll at 1.0 s (main run 41857256437)
+        def finish_restore():
+            for _ in range(200):
+                try:
+                    self.active.unlink()
+                    return
+                except PermissionError:
+                    time.sleep(0.01)
+        threading.Timer(1.5, finish_restore).start()
         t0 = time.time()
         rc, out = self.set(wait_restore=20)
         self.assertEqual(rc, 0)
@@ -593,6 +608,398 @@ class SetWaitsForRestore(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('j9-prof', r.stderr)
         self.assertEqual(self.ini.read_bytes(), self.before)
+
+# ---- W25 (audit 2026-11-03 H7, H8, H12, G5): the lock, the atomic ini, stray files, owned as a union, backups on every install ----------
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from warscape.gitbash import bash_for_tests, bash_or_skip  # noqa: E402
+
+FOUND_BASH = bash_for_tests()
+
+
+def quiet(fn, *a, **kw):
+    """(result or the SystemExit raised, stdout) of one call."""
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        try:
+            return fn(*a, **kw), out.getvalue()
+        except SystemExit as e:
+            return e, out.getvalue()
+
+
+class Lock(DeployBase):
+    """H7: install, uninstall, set and sync-lua take the game lock through the real job.sh (W10's protocol), and release it; a lock the caller
+    holds is used and left held; another holder refuses with nothing written; no watcher folder = no lock needed."""
+
+    def setUp(self):
+        super().setUp()
+        self.bash = bash_or_skip(self, found=FOUND_BASH)
+        self.w = self.state / 'watcher'
+        self.w.mkdir(parents=True)
+        os.environ.pop('CLAUDE_CODE_SESSION_ID', None)
+        os.environ['WSC_SESSION_ID'] = 'sess-a'
+        self.ini = self.game / 'nullgame.ini'
+
+    def job(self, *args):
+        e = {k: v for k, v in os.environ.items() if k != 'HARNESS_ADAPTER'}
+        e['WATCHER_ROOT'] = pd.bash_path(self.w)
+        return subprocess.run([self.bash, str(ROOT / 'harness' / 'job.sh'), *args], capture_output=True, text=True, env=e, timeout=60)
+
+    def other_lock(self):
+        (self.w / 'game.lock').write_text('owner=other session=s-other purpose=a launch started=2026-11-04T00:00:00Z\n', encoding='utf-8')
+
+    def spy_lock(self):
+        """require_closed runs with the lock held (decision 4): record the lock line it saw."""
+        seen, real = [], pd.require_closed
+        def spy(*a, **kw):
+            lk = self.w / 'game.lock'
+            seen.append(lk.read_text(encoding='utf-8') if lk.exists() else None)
+            return real(*a, **kw)
+        p = mock.patch.object(pd, 'require_closed', spy)
+        p.start()
+        self.addCleanup(p.stop)
+        return seen
+
+    def test_every_writing_verb_takes_and_releases_the_lock(self):
+        seen = self.spy_lock()
+        before = pd.snapshot(self.game)
+        quiet(pd.install, self.kit, self.game, self.state)
+        self.assertEqual(quiet(pd.set_keys, self.game, ['proxy.backend=system'], 'nullgame.ini', self.state)[0], 0)
+        (self.game / 'nullgame' / 'lua' / 'autostart.lua').write_bytes(b'-- edited')
+        self.assertEqual(quiet(pd.sync_lua, self.game, self.state)[0], ['nullgame/lua/autostart.lua'])
+        self.assertTrue(quiet(pd.uninstall, self.game, self.state)[0])
+        self.assertEqual(len(seen), 4)
+        for line in seen:
+            self.assertRegex(line or '', r'owner=sess-a session=sess-a purpose=pc_deploy-')
+        self.assertFalse((self.w / 'game.lock').exists())   # released every time
+        self.assertEqual(pd.diff_snapshots(before, pd.snapshot(self.game)), [])
+
+    def test_a_dry_run_and_status_take_no_lock(self):
+        quiet(pd.install, self.kit, self.game, self.state)
+        self.other_lock()
+        self.assertEqual(quiet(pd.sync_lua, self.game, self.state, dry_run=True)[0], [])
+        self.assertEqual(quiet(pd.status, self.game, self.state)[0], 0)
+
+    def test_another_holder_refuses_every_verb_with_nothing_written(self):
+        self.other_lock()
+        r, _ = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertIsInstance(r, pd.Refused)
+        self.assertEqual(r.code, 2)
+        self.assertIn("held by 'other'", str(r))
+        self.assertIn('--wait', str(r))
+        self.assertFalse((self.state / 'install.json').exists())
+        self.assertFalse((self.game / 'd3d9.dll').exists())
+        self.ini.write_bytes(b'[proxy]\r\nbackend=dxvk\r\n')
+        r, _ = quiet(pd.set_keys, self.game, ['proxy.backend=system'], 'nullgame.ini', self.state)
+        self.assertIsInstance(r, pd.Refused)
+        self.assertEqual(self.ini.read_bytes(), b'[proxy]\r\nbackend=dxvk\r\n')
+        self.ini.unlink()
+        (self.w / 'game.lock').unlink()
+        quiet(pd.install, self.kit, self.game, self.state)
+        self.other_lock()
+        snap = pd.snapshot(self.game)
+        for fn in (pd.uninstall, pd.sync_lua):
+            r, _ = quiet(fn, self.game, self.state)
+            self.assertIsInstance(r, pd.Refused, fn.__name__)
+        self.assertEqual(pd.diff_snapshots(snap, pd.snapshot(self.game)), [])
+        self.assertIn('owner=other', (self.w / 'game.lock').read_text())   # never released by us
+
+    def test_assume_closed_never_skips_the_lock(self):
+        self.other_lock()
+        r, _ = quiet(pd.install, self.kit, self.game, self.state, assume_closed=True)
+        self.assertIsInstance(r, pd.Refused)
+        self.assertFalse((self.game / 'd3d9.dll').exists())
+
+    def test_a_lock_the_caller_holds_is_used_and_left_held(self):
+        r = self.job('lock', 'sess-a', 'sess-a', 'a launch')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        line = (self.w / 'game.lock').read_text()
+        _, out = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertTrue((self.game / 'd3d9.dll').exists())
+        self.assertIn('already holds', out)
+        self.assertEqual((self.w / 'game.lock').read_text(), line)   # still ours, untouched in content
+
+    def test_a_running_game_with_our_lock_and_assume_closed_warns_and_proceeds(self):
+        (self.w / 'watcher.status').write_text(json.dumps({'processes': [{'image': 'Game.exe', 'pid': 9}]}), encoding='utf-8')
+        (self.w / 'watcher.alive').write_text('x')
+        r, _ = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertIsInstance(r, SystemExit)
+        self.assertIn('Game.exe (pid 9)', str(r))
+        self.assertFalse((self.w / 'game.lock').exists())   # released after the refusal
+        r, out = quiet(pd.install, self.kit, self.game, self.state, assume_closed=True)
+        self.assertIn('continuing on --assume-closed', out)
+        self.assertTrue((self.game / 'd3d9.dll').exists())
+
+    def test_set_refuses_while_the_watcher_lists_the_game(self):
+        (self.w / 'watcher.status').write_text(json.dumps({'processes': [{'image': 'Game.exe', 'pid': 9}]}), encoding='utf-8')
+        (self.w / 'watcher.alive').write_text('x')
+        self.ini.write_bytes(b'[proxy]\r\nbackend=dxvk\r\n')
+        with mock.patch.object(pd, 'default_identity', return_value=json.loads(self.ident.read_text())):
+            r, _ = quiet(pd.set_keys, self.game, ['proxy.backend=system'], 'nullgame.ini', self.state)
+        self.assertIsInstance(r, SystemExit)
+        self.assertIn('Game.exe (pid 9)', str(r))
+        self.assertEqual(self.ini.read_bytes(), b'[proxy]\r\nbackend=dxvk\r\n')
+        self.assertFalse((self.w / 'game.lock').exists())
+
+    def test_no_session_refuses(self):
+        os.environ.pop('WSC_SESSION_ID')
+        r, _ = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertIsInstance(r, pd.Refused)
+        for word in ('--session', 'WSC_SESSION_ID', '--owner'):
+            self.assertIn(word, str(r))
+        self.assertFalse((self.state / 'install.json').exists())
+        quiet(pd.install, self.kit, self.game, self.state, session='S-B')   # lower-cased, as ctl.py does
+        self.assertTrue((self.game / 'd3d9.dll').exists())
+        self.assertFalse((self.w / 'game.lock').exists())
+
+    def test_a_watcher_folder_without_job_sh_refuses_and_names_job_sh(self):
+        with mock.patch.object(pd, 'job_sh_candidates', lambda explicit=None: []):
+            r, _ = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertIsInstance(r, pd.Refused)
+        self.assertIn('--job-sh', str(r))
+        self.assertFalse((self.state / 'install.json').exists())
+
+    def test_no_watcher_folder_proceeds_and_says_so(self):
+        self.w.rmdir()
+        os.environ.pop('WSC_SESSION_ID')   # no lock to take, so no session needed either
+        r, out = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertNotIsInstance(r, SystemExit)
+        self.assertIn('no watcher folder', out)
+
+    def test_install_refreshes_the_lock_before_the_slow_part(self):
+        calls, real = [], pd.run_job_sh
+        def spy(js, root, *args):
+            calls.append(args[0])
+            return real(js, root, *args)
+        with mock.patch.object(pd, 'run_job_sh', spy):
+            quiet(pd.install, self.kit, self.game, self.state)
+        self.assertEqual(calls, ['holds', 'lock', 'touch', 'unlock'])
+
+    def test_the_cli_takes_owner_session_and_job_sh(self):
+        env = {**os.environ, 'WSP_GAME_ROOT': str(pd.ROOT)}
+        r = subprocess.run([sys.executable, str(ROOT / 'proxy/tools/pc_deploy.py'), 'install', '--kit', str(self.kit), '--game', str(self.game),
+                            '--state', str(self.state), '--owner', 'w25-test', '--session', 'sess-z', '--job-sh', str(ROOT / 'harness' / 'job.sh')],
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('session=sess-z', r.stdout)
+        self.assertIn('w25-test', r.stdout)
+        self.other_lock()
+        r = subprocess.run([sys.executable, str(ROOT / 'proxy/tools/pc_deploy.py'), 'uninstall', '--game', str(self.game), '--state', str(self.state)],
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)   # refused, like job.sh
+        self.assertIn("held by 'other'", r.stderr)
+
+
+class AtomicWrite(DeployBase):
+    """H7: the ini (and install.json) is written to a same-folder temp file and os.replace'd into place; a replace that keeps failing leaves the
+    ini byte-identical and no temp file."""
+
+    def setUp(self):
+        super().setUp()
+        self.ini = self.game / 'nullgame.ini'
+        self.ini.write_bytes(b'; keep\r\n[proxy]\r\nbackend=dxvk\r\n')
+        self.before = self.ini.read_bytes()
+        p = mock.patch.object(pd, 'default_identity', return_value=json.loads(self.ident.read_text()))   # the fake exe's identity
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_set_writes_through_a_same_folder_temp_file(self):
+        calls, real = [], os.replace
+        def spy(a, b):
+            calls.append((Path(a), Path(b)))
+            return real(a, b)
+        with mock.patch.object(pd.os, 'replace', spy):
+            r, _ = quiet(pd.set_keys, self.game, ['proxy.backend=system'], 'nullgame.ini', None)
+        self.assertEqual(r, 0)
+        ini_calls = [c for c in calls if c[1] == self.ini]
+        self.assertEqual(len(ini_calls), 1, calls)
+        src = ini_calls[0][0]
+        self.assertEqual(src.parent, self.ini.parent)
+        self.assertTrue(src.name.startswith('nullgame.ini.') and src.name.endswith('.tmp'), src.name)
+        self.assertEqual(self.ini.read_bytes(), b'; keep\r\n[proxy]\r\nbackend=system\r\n')
+
+    def test_a_replace_that_keeps_failing_leaves_the_ini_and_no_temp(self):
+        n = []
+        def deny(a, b):
+            n.append(1)
+            raise PermissionError(13, 'in use')
+        with mock.patch.object(pd.os, 'replace', deny), mock.patch.object(pd, 'ATOMIC_RETRY_S', 0):
+            r, _ = quiet(pd.set_keys, self.game, ['proxy.backend=system'], 'nullgame.ini', None)
+        self.assertIsInstance(r, SystemExit)
+        self.assertIn('nothing was written', str(r))
+        self.assertEqual(len(n), 6)   # the first try and 5 retries
+        self.assertEqual(self.ini.read_bytes(), self.before)
+        self.assertEqual([p.name for p in self.game.iterdir() if p.name.endswith('.tmp')], [])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows only: a reader without share-delete blocks os.replace there')
+    def test_an_ini_open_for_reading_makes_set_retry_then_refuse(self):
+        with open(self.ini, 'rb'):
+            t0 = time.time()
+            r, _ = quiet(pd.set_keys, self.game, ['proxy.backend=system'], 'nullgame.ini', None)
+            self.assertGreaterEqual(time.time() - t0, 0.9)   # 5 retries 0.2 s apart
+        self.assertIsInstance(r, SystemExit)
+        self.assertEqual(self.ini.read_bytes(), self.before)
+        self.assertEqual([p for p in self.game.iterdir() if p.name.endswith('.tmp')], [])
+
+    def test_install_json_is_written_atomically(self):
+        seen, real = [], pd.write_atomic
+        def spy(path, data):
+            seen.append(Path(path).name)
+            return real(path, data)
+        self.ini.unlink()   # nothing installed: a config file there would be a stray
+        with mock.patch.object(pd, 'write_atomic', spy):
+            quiet(pd.install, self.kit, self.game, self.state)
+            quiet(pd.set_keys, self.game, ['proxy.backend=system'], None, self.state)
+            quiet(pd.sync_lua, self.game, self.state)
+        self.assertIn('install.json', seen)
+        self.assertIn('nullgame.ini', seen)
+        self.assertEqual([p.name for p in self.state.iterdir() if p.name.endswith('.tmp')], [])
+
+
+class StrayAndUpgrade(DeployBase):
+    """H8 and G5: a path the mod owns by name is ours when nothing is installed (status fails, install refuses before its snapshot, --move-stray);
+    owned is the union of every installed set; every install backs up what it is about to own for the first time, and a failed backup is retried."""
+
+    def ident_dict(self):
+        return json.loads(self.ident.read_text())
+
+    def test_status_lists_a_stray_config_file_or_mod_folder_and_fails(self):
+        with mock.patch.object(pd, 'default_identity', return_value=self.ident_dict()):
+            self.assertEqual(quiet(pd.status, self.game, self.state)[0], 0)
+            (self.game / 'nullgame.ini').write_text('[proxy]\nbackend=dxvk\n')
+            rc, out = quiet(pd.status, self.game, self.state)
+            self.assertEqual(rc, 1)
+            self.assertIn('stray: nullgame.ini (nothing is installed', out)
+            self.assertIn('_to_delete', out)
+            (self.game / 'nullgame.ini').unlink()
+            (self.game / 'nullgame' / 'logs').mkdir(parents=True)
+            rc, out = quiet(pd.status, self.game, self.state)
+            self.assertEqual(rc, 1)
+            self.assertIn('stray: nullgame/', out)
+
+    def test_a_foreign_d3d9_alone_is_not_stray(self):
+        (self.game / 'd3d9.dll').write_bytes(b'a ReShade wrapper')
+        with mock.patch.object(pd, 'default_identity', return_value=self.ident_dict()):
+            self.assertEqual(quiet(pd.status, self.game, self.state)[0], 0)
+        self.assertEqual(pd.stray_owned(self.game, ['nullgame.ini', 'nullgame/']), [])
+        kit_dll = next(e for e in json.loads((self.kit / 'manifest.json').read_text())['files'] if e['path'] == 'd3d9.dll')
+        shutil.copyfile(self.kit / kit_dll['staged'], self.game / 'd3d9.dll')   # our own DLL left behind: stray by its sha
+        self.assertEqual(pd.stray_owned(self.game, ['nullgame.ini', 'nullgame/'], {'d3d9.dll': {kit_dll['sha256']}}), ['d3d9.dll'])
+
+    def test_install_refuses_a_stray_before_any_snapshot(self):
+        (self.game / 'nullgame.ini').write_text('[proxy]\nbackend=dxvk\n')
+        r, _ = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertIsInstance(r, SystemExit)
+        self.assertIn('nullgame.ini', str(r))
+        self.assertIn('--move-stray', str(r))
+        self.assertFalse((self.state / 'snapshots').exists())
+        self.assertFalse((self.state / 'install.json').exists())
+        self.assertFalse((self.game / 'd3d9.dll').exists())
+
+    def test_move_stray_moves_it_aside_and_the_uninstall_is_exact_without_it(self):
+        before = pd.snapshot(self.game)
+        (self.game / 'nullgame.ini').write_text('[proxy]\nbackend=dxvk\n')
+        (self.game / 'nullgame' / 'logs').mkdir(parents=True)
+        (self.game / 'nullgame' / 'logs' / 'proxy.log').write_text('old')
+        quiet(pd.install, self.kit, self.game, self.state, move_stray=True)
+        moved = list((self.state / '_to_delete').glob('stray_*'))
+        self.assertEqual(len(moved), 1)
+        self.assertEqual((moved[0] / 'nullgame.ini').read_text(), '[proxy]\nbackend=dxvk\n')
+        self.assertTrue((moved[0] / 'nullgame' / 'logs' / 'proxy.log').exists())
+        self.assertTrue(quiet(pd.uninstall, self.game, self.state)[0])
+        self.assertEqual(pd.diff_snapshots(before, pd.snapshot(self.game)), [])
+
+    def extra_kit(self, extra, data, build_id):
+        """A kit that also owns `extra` (a file at the top of the game folder), with that file in it."""
+        kit = pd.build_kit(self.kits, dll=self.src / 'd3d9.dll', dxvk_dir=self.src, build_id=build_id, identity=self.ident)
+        man = json.loads((kit / 'manifest.json').read_text())
+        h = hashlib.sha256(data).hexdigest()
+        staged = f'{h[:12]}__{extra}'
+        (kit / staged).write_bytes(data)
+        man['owned'].append(extra)
+        man['files'].append({'path': extra, 'staged': staged, 'sha256': h, 'size': len(data), 'role': 'proxy'})
+        (kit / 'manifest.json').write_text(json.dumps(man, indent=2) + '\n')
+        return kit
+
+    def test_an_upgrade_owns_the_union_backs_up_a_new_path_and_uninstalls_exactly(self):
+        (self.game / 'dxgi.dll').write_bytes(b'a foreign dxgi wrapper')
+        before = pd.snapshot(self.game)
+        kit1 = self.extra_kit('old.asi', b'our old plugin', 'k1')
+        kit2 = self.extra_kit('dxgi.dll', b'our new dxgi', 'k2')
+        quiet(pd.install, kit1, self.game, self.state)
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'a foreign dxgi wrapper')   # kit1 does not own it
+        quiet(pd.install, kit2, self.game, self.state)
+        rec = json.loads((self.state / 'install.json').read_text())
+        self.assertEqual(rec['owned'], ['d3d9.dll', 'nullgame.ini', 'nullgame/', 'old.asi', 'dxgi.dll'])
+        self.assertEqual(rec['owned_by']['old.asi'], json.loads((kit1 / 'manifest.json').read_text())['kit_id'])
+        self.assertEqual(rec['owned_by']['dxgi.dll'], json.loads((kit2 / 'manifest.json').read_text())['kit_id'])
+        self.assertTrue(any(b['path'] == 'dxgi.dll' for b in rec['backups']))
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'our new dxgi')
+        self.assertFalse(list((self.state / '_to_delete').rglob('dxgi.dll')))   # the foreign file went to backup/, never to _to_delete
+        ok, out = quiet(pd.uninstall, self.game, self.state)
+        self.assertTrue(ok, out)
+        self.assertEqual((self.game / 'dxgi.dll').read_bytes(), b'a foreign dxgi wrapper')
+        self.assertFalse((self.game / 'old.asi').exists())
+        self.assertEqual(pd.diff_snapshots(before, pd.snapshot(self.game)), [])
+
+    def test_a_failed_backup_is_taken_on_the_rerun_never_sent_to_to_delete(self):
+        (self.game / 'd3d9.dll').write_bytes(b'someone else\'s d3d9 wrapper')
+        before = pd.snapshot(self.game)
+        real, n = pd.move_out, []
+        def flaky(src, dest):
+            if Path(dest).is_relative_to(self.state / 'backup') and not n:
+                n.append(1)
+                raise SystemExit('pc_deploy: simulated failure moving the backup')
+            return real(src, dest)
+        with mock.patch.object(pd, 'move_out', flaky):
+            r, _ = quiet(pd.install, self.kit, self.game, self.state)
+        self.assertIsInstance(r, SystemExit)
+        quiet(pd.install, self.kit, self.game, self.state)   # the re-run
+        self.assertFalse(list((self.state / '_to_delete').rglob('d3d9.dll')))
+        self.assertEqual([p.read_bytes() for p in (self.state / 'backup').rglob('d3d9.dll')], [b'someone else\'s d3d9 wrapper'])
+        self.assertTrue(quiet(pd.uninstall, self.game, self.state)[0])
+        self.assertEqual((self.game / 'd3d9.dll').read_bytes(), b'someone else\'s d3d9 wrapper')
+        self.assertEqual(pd.diff_snapshots(before, pd.snapshot(self.game)), [])
+
+
+class SafeRel(DeployBase):
+    """H12 small guard: Windows takes a backslash as a separator, so a kit path is checked after \\ -> /; drive and stream colons, empty, . and
+    .. segments are refused, and a staged or kit file name is a plain file name."""
+
+    def test_safe_rel(self):
+        for bad in ('', '/x', '..\\x', 'a\\..\\..\\x', 'C:\\x', 'C:x', 'a:stream', 'x/a:b', './x', 'a/./b', 'a//b', 'a/', '..'):
+            self.assertIsNone(pd.safe_rel(bad), bad)
+        self.assertEqual(pd.safe_rel('nullgame\\lua\\sub\\x.lua'), 'nullgame/lua/sub/x.lua')
+        self.assertEqual(pd.safe_rel('d3d9.dll'), 'd3d9.dll')
+
+    def kit_with(self, **kw):
+        kit = pd.build_kit(self.kits, dll=self.src / 'd3d9.dll', dxvk_dir=self.src, build_id=f'p{time.time_ns()}', identity=self.ident)
+        man = json.loads((kit / 'manifest.json').read_text())
+        e = next(e for e in man['files'] if e['path'] == 'nullgame/lua/wsp.lua')
+        e.update(kw)
+        (kit / 'manifest.json').write_text(json.dumps(man))
+        return kit
+
+    def test_verify_kit_refuses_backslash_drive_stream_and_dot_paths(self):
+        for path in ('nullgame/..\\..\\x', 'nullgame/C:\\x', 'nullgame/a:stream', 'nullgame/./x', 'nullgame/a//b'):
+            self.assertTrue(any('not a relative path inside the game folder' in b for b in pd.verify_kit(self.kit_with(path=path))[1]), path)
+        self.assertTrue(any('not a plain file name' in b for b in pd.verify_kit(self.kit_with(staged='..\\x'))[1]))
+        self.assertEqual(pd.verify_kit(self.kit_with(path='nullgame\\lua\\sub\\wsp.lua'))[1], [])   # a normal nested path, Windows spelling
+
+    def test_verify_harness_kit_refuses_the_same(self):
+        for path in ('src\\..\\..\\x', 'C:\\x', 'src/a:b', 'src/./x', 'src//x', 'other/x'):
+            kit = pd.build_harness_kit(self.kits, build_id=f'h{time.time_ns()}')
+            man = json.loads((kit / 'manifest.json').read_text())
+            man['files'][0]['path'] = path
+            (kit / 'manifest.json').write_text(json.dumps(man))
+            self.assertTrue(any('outside src/ and profiles/' in b for b in pd.verify_harness_kit(kit)[1]), path)
+        kit = pd.build_harness_kit(self.kits, build_id=f'hk{time.time_ns()}')
+        man = json.loads((kit / 'manifest.json').read_text())
+        man['kit_files'][0]['name'] = '..\\install.ps1'
+        (kit / 'manifest.json').write_text(json.dumps(man))
+        self.assertTrue(any('not a plain file name' in b for b in pd.verify_harness_kit(kit)[1]))
 
 
 if __name__ == '__main__':

@@ -189,11 +189,50 @@ def core_tag_problems(version, head_tags):
     return det
 
 
+def _vt(v):
+    return tuple(int(x) for x in v.split('.'))
+
+
+def release_tag_problem(version, on_main, tags, tag_type, age_min, annotated_from, grace_min):
+    """(level, why) for the core on main (W29, C27): v<VERSION> exists, annotated from `annotated_from` on; missing is a warning for
+    `grace_min` minutes after the commit (the release workflow is pending), then an error. A checkout with no tags is VERSION only (C21)."""
+    if not on_main:
+        return 'ok', ''
+    if not tags:
+        return 'ok', 'VERSION only: no tags in this checkout'
+    tag = f'v{version}'
+    if tag not in tags:
+        if age_min is not None and age_min > grace_min:
+            return 'error', (f'{tag} does not exist {int(age_min)} min after main reached VERSION {version}: the release workflow did not tag '
+                             '(read its last run: `gh run list --workflow release.yml`; docs/CONSUMING.md, Releases)')
+        return 'warn', f'{tag} does not exist yet: release workflow pending'
+    if annotated_from and _vt(version) >= _vt(annotated_from) and tag_type != 'tag':
+        return 'error', f'{tag} is a lightweight tag: from {annotated_from} on the release workflow makes annotated tags (C27); nobody tags by hand'
+    return 'ok', f'tag {tag}' + (' (annotated)' if tag_type == 'tag' else '')
+
+
+def core_release_tag(ctx, version):
+    import os
+    on_main = os.environ.get('GITHUB_REF') == 'refs/heads/main'
+    if not on_main and _git(ctx.root, 'rev-parse', '-q', '--verify', 'refs/remotes/origin/main'):
+        on_main = subprocess.run(['git', '-C', str(ctx.root), 'merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'],
+                                 capture_output=True, timeout=30, env=git_env()).returncode == 0
+    tags = _git(ctx.root, 'tag', '--list', 'v*') or []
+    tag_type = (_git(ctx.root, 'cat-file', '-t', f'refs/tags/v{version}') or [''])[0] if f'v{version}' in tags else ''
+    ct = (_git(ctx.root, 'log', '-1', '--format=%ct', 'HEAD', '--', 'VERSION') or [''])[0]
+    age = (time.time() - int(ct)) / 60 if ct.isdigit() else None
+    rel = ctx.config.get('release') or {}
+    return release_tag_problem(version, on_main, tags, tag_type, age, rel.get('annotated_from', ''), rel.get('grace_minutes', 120))
+
+
 def gate_core_pin(ctx):
     want, have = ctx.config['core']['version'], core_version(ctx.core_root)   # the checkout being checked, not the running core (B7)
     if ctx.is_core:
         det = core_tag_problems(have, _git(ctx.root, 'tag', '--points-at', 'HEAD') or [])
-        return Result('core_pin', 'error' if det else 'ok', 'core VERSION or tag malformed' if det else f'this is the core ({have})', det)
+        if det:
+            return Result('core_pin', 'error', 'core VERSION or tag malformed', det)
+        level, why = core_release_tag(ctx, have)
+        return Result('core_pin', level, why if level != 'ok' else f'this is the core ({have}{"; " + why if why else ""})', [why] if level != 'ok' else [])
     if not want:
         return Result('core_pin', 'ok', 'no [core] version pinned in wsc.toml (nothing to check)')
     core = ctx.core_root
@@ -285,6 +324,35 @@ def gate_run_refs(ctx):
     return Result('run_refs', 'error' if errs else 'ok', f'{len(errs)} run README references not found ({tail})' if errs else f'every run README reference exists ({tail})', errs)
 
 
+def gate_doc_paths(ctx):
+    """Every backticked repo path in a living doc exists (W28, R11; `warscape/checks.py` stale_doc_paths): a tracked file or a folder above one, from
+    the root, the doc's folder or across the `core/` boundary, or git-ignored on purpose. Not checked: the job folders at any depth (a fixture game's
+    too) and the decisions file (records of their day; the decisions file is append only), fenced blocks, a line with `(was <path>)` or `(moved)`, a
+    `../` path, and `[docs] path_ignore`. An error (Liam, plan PR #87): a doc that names another repo's paths on purpose lists them in
+    `[docs] path_ignore`, prefix globs (`rml_mod/**`) where it can."""
+    tracked, subs = _tracked(ctx)
+    paths = checks.run_ref_index(tracked)[0]
+    skip = {ctx.config['policy']['decisions']}
+    jdir = ctx.config['jobs']['dir'].rstrip('/') + '/'
+    docs = {p: t for p in checks.living_docs(ctx.files(), ctx.config['docs'], _generated(ctx))
+            if p not in skip and not p.startswith(jdir) and f'/{jdir}' not in p and (t := _read(ctx, p)) is not None}
+    errs = checks.stale_doc_paths(docs, paths, ctx.config['docs']['path_ignore'])
+    tok = lambda e: e.rsplit(': ', 1)[1].rstrip('/')
+    errs = [e for e in errs if tok(e) != '..' and not tok(e).startswith('../')]   # outside the repo: one such name makes git check-ignore exit 128 for the whole batch
+    toks = sorted({tok(e) for e in errs})
+    try:   # one git call for every miss: build output and _scratch/ are git-ignored on purpose
+        p = subprocess.run(['git', '-C', str(ctx.root), 'check-ignore', '--stdin', '-z'], input='\0'.join(toks).encode('utf-8') + b'\0', env=git_env(),
+                           capture_output=True) if toks else None   # bytes, NUL-separated: text mode on Windows would send each name with a CR
+    except OSError as e:
+        return Result('doc_paths', 'error', f'git check-ignore could not run: {e}')
+    if p is not None and p.returncode not in (0, 1):   # 0: some ignored, 1: none; anything else is a failure, never "nothing is ignored" (W28 review 1)
+        return Result('doc_paths', 'error', f'git check-ignore exited {p.returncode}: {p.stderr.decode("utf-8", "replace").strip()[:300]}')
+    ignored = set(p.stdout.decode('utf-8', 'replace').split('\0')) if p is not None else set()
+    errs = [e for e in errs if tok(e) not in ignored]
+    return Result('doc_paths', 'error' if errs else 'ok', f'{len(errs)} backticked paths in living docs not found ({len(docs)} docs)' if errs
+                  else f'{len(docs)} living docs: every backticked path exists', errs)
+
+
 def gate_ci_render(ctx):
     """Every workflow listed in `[ci] workflows` equals its render from `<template_dir>/<name>.in` (`wsc ci render`). Skipped when none are listed."""
     if not ctx.config['ci']['workflows']:
@@ -343,35 +411,66 @@ def gate_tests(ctx):
 
 GATES = [
     ('schemas', gate_schemas), ('registries', gate_registries), ('tools', gate_tools), ('json', gate_json),
-    ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates),
+    ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates), ('doc_paths', gate_doc_paths),
     ('conflict_markers', gate_conflict_markers), ('eol', gate_eol), ('core_pin', gate_core_pin), ('hooks', gate_hooks),
     ('jobs', gate_jobs), ('ci_render', gate_ci_render), ('run_refs', gate_run_refs), ('tests', gate_tests),
 ]
 NAMES = [n for n, _ in GATES]
 
 
-def selected(ctx, fast=False, only=None):
+def skips(ctx):
+    """`{gate: decision id}` from `[gates] skip` (W28): each entry is `"<gate>:<decision id>"`, and the id is a row of the `[policy] decisions`
+    file, so a skip is never silent and always says why. A bare name, an empty id or an id the file lacks is a ValueError that names the fix."""
+    entries, out, errs = ctx.config['gates']['skip'], {}, []
+    path = ctx.config['policy']['decisions']
+    text = _read(ctx, path) if path else None
+    for e in entries:
+        gate, _, did = str(e).partition(':')
+        gate, did = gate.strip(), did.strip()
+        if not did:
+            errs.append(f'"{e}" has no decision id: write "{gate}:<decision id>", the {path or "[policy] decisions"} row that says why it is skipped')
+        elif text is None:
+            errs.append(f'"{e}": no decisions file to find {did} in (set [policy] decisions in wsc.toml)' if not path else f'"{e}": {path} is missing')
+        elif not re.search(rf'^\|\s*{re.escape(did)}\s*\|', text, re.M):
+            errs.append(f'"{e}": {did} is not a row of {path} (add the decision first, then skip under its id)')
+        else:
+            out[gate] = did
+    if errs:
+        raise ValueError('[gates] skip: ' + '; '.join(errs))
+    return out
+
+
+def selected(ctx, fast=False, only=None, skipped=None):
     """The gate names to run, core gates first, then the repo's `gates`-stage modules in load order. `--fast`: the core gates of
-    `[gates] fast` (default: all but `tests`) plus every game gate whose FAST is true or that `[gates] fast` names."""
+    `[gates] fast` (default: all but `tests`) plus every game gate whose FAST is true or that `[gates] fast` names. `[gates] skip`
+    (`skips`) drops a gate unless `--only` names it; `skipped`, a list, gets `(gate, decision id)` for each gate the skip dropped."""
     from . import gatemods
     gc = ctx.config['gates']
     mods = {m.name: m for m in gatemods.load(ctx) if 'gates' in m.stages}
     every = NAMES + list(mods)
-    unknown = [n for n in (only or []) + gc['fast'] + gc['skip'] if n not in every]
+    skip = skips(ctx)
+    unknown = [n for n in (only or []) + gc['fast'] + list(skip) if n not in every]
     if unknown:
         raise ValueError(f'unknown gate(s) {", ".join(unknown)}; gates are: {", ".join(every)}')
-    names = only or [n for n in every if n not in gc['skip']]
+    names = only or list(every)
     if fast and not only:
         core_fast = (lambda n: n in gc['fast']) if gc['fast'] else (lambda n: n != 'tests')
         names = [n for n in names if ((mods[n].fast or n in gc['fast']) if n in mods else core_fast(n))]
+    if not only:
+        if skipped is not None:
+            skipped += [(n, skip[n]) for n in names if n in skip]
+        names = [n for n in names if n not in skip]
     return names
 
 
 def run(ctx, fast=False, only=None):
     from . import gatemods
     mods = {m.name: m for m in gatemods.load(ctx)}
-    out = []
-    for name in selected(ctx, fast, only):
+    out, skipped = [], []
+    names = selected(ctx, fast, only, skipped)
+    # a skip is a warn line, never silent (W28): the gate, and the decision that skips it
+    out += [Result(n, 'warn', f'skipped {n}: {did}') for n, did in skipped]
+    for name in names:
         if name in mods:
             out.append(gatemods.call(mods[name], gatemods.StageCtx(ctx, 'gates', {})))
             continue

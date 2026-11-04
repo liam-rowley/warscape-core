@@ -15,6 +15,7 @@ struct DevKeys {
     std::wstring fileRules, ctlDir, captureDir;
     std::string autostart;
     int autostartDelayMs = 1500;
+    // the dev keys only: proxy.file_rules (the release file rules, W33) is not one and turns no dev feature on
     bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || capture || orders || !fileRules.empty() || !autostart.empty(); }
 };
 DevKeys& Dk();

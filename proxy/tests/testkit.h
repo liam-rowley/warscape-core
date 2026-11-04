@@ -1,6 +1,7 @@
 #pragma once
 // Host-test kit: a tiny check framework and a synthetic PE32 image builder (file layout and mapped layout, a .reloc table,
-// rebasing for ASLR). No Windows headers. Used by every proxy/tests/test_*.cpp (built and run by proxy/tools/build.sh tests).
+// rebasing for ASLR), and a page-protection mock for the patch writer (PageMem, W33). No Windows headers. Used by every
+// proxy/tests/test_*.cpp (built and run by proxy/tools/build.sh tests).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <string>
 #include <vector>
 #include "pe.h"
+#include "patch_engine.h"
 
 namespace tk {
 
@@ -139,5 +141,71 @@ inline wsp::ImageView MappedView(const std::vector<uint8_t>& m, wsp::PeInfo& pe)
     pe = wsp::ParsePe(m.data(), 0x1000);
     wsp::ImageView v; v.data = m.data(); v.size = m.size(); v.pe = &pe; v.file = false; return v;
 }
+
+// VirtualProtect with page semantics (W33, decision 5) over a mapped test image, for WritePlanAtomic. One protection per page of the image,
+// from the section characteristics: headers 0x02, exec+read 0x20, exec+read+write 0x40, read+write 0x04, read 0x02. Unprotect answers the
+// protection of the FIRST page of the range as `old` (as VirtualProtect does) and makes every page of the range 0x40; Reprotect sets every
+// page of the range; Query reads a page (queryKnown = false: unknown). It fails Unprotect or Reprotect call number failUnprotectAt /
+// failReprotectAt (0-based; failEveryReprotect fails them all), can report another page size (reportedPage) and leave chosen pages
+// changed by a Reprotect that succeeds (leaveChanged: what only the readback sees), and counts Unprotects per page and the flushes. The invariant every writer test checks: Restored() (every page at its initial
+// protection) and NoneTwice() (no page made writable twice).
+struct PageMem : wsp::MemOps {
+    const uint8_t* base;
+    uint32_t page;
+    std::vector<uint32_t> prot, initial;
+    std::vector<int> unprotects;
+    int failUnprotectAt = -1, failReprotectAt = -1, unprotectCalls = 0, reprotectCalls = 0, flushes = 0;
+    bool failEveryReprotect = false, queryKnown = true;
+    uint32_t reportedPage = 0;          // 0: the mock's own page size
+    std::vector<uint32_t> leaveChanged; // page RVAs a successful Reprotect leaves as they are
+    static uint32_t Prot(uint32_t c) {
+        const bool x = c & 0x20000000u, w = c & 0x80000000u, r = c & 0x40000000u;
+        return x ? (w ? 0x40u : 0x20u) : w ? 0x04u : r ? 0x02u : 0x01u;
+    }
+    PageMem(const Image& im, const uint8_t* mapped, uint32_t pageSize = 0x1000) : base(mapped), page(pageSize) {
+        prot.assign((im.sizeOfImage + page - 1) / page, 0x02u);   // headers (and any gap) read-only
+        for (const SecSpec& s : im.secs)
+            for (uint32_t a = s.rva / page * page; a < s.rva + s.vsize; a += page) if (a / page < prot.size()) prot[a / page] = Prot(s.characteristics);
+        initial = prot; unprotects.assign(prot.size(), 0);
+    }
+    bool Range(const uint8_t* p, size_t n, size_t& a, size_t& b) const {
+        if (n == 0 || p < base || (size_t)(p - base) + n > prot.size() * (size_t)page) return false;
+        a = (size_t)(p - base) / page; b = ((size_t)(p - base) + n - 1) / page; return true;
+    }
+    bool Unprotect(uint8_t* p, size_t n, uint32_t& old) override {
+        size_t a, b;
+        if (unprotectCalls++ == failUnprotectAt || !Range(p, n, a, b)) return false;
+        old = prot[a];
+        for (size_t i = a; i <= b; ++i) { prot[i] = 0x40u; ++unprotects[i]; }
+        return true;
+    }
+    bool Reprotect(uint8_t* p, size_t n, uint32_t old) override {
+        size_t a, b;
+        if (reprotectCalls++ == failReprotectAt || failEveryReprotect || !Range(p, n, a, b)) return false;
+        for (size_t i = a; i <= b; ++i)
+            if (std::find(leaveChanged.begin(), leaveChanged.end(), (uint32_t)(i * page)) == leaveChanged.end()) prot[i] = old;
+        return true;
+    }
+    void Flush(uint8_t*, size_t) override { ++flushes; }
+    uint32_t PageSize() const override { return reportedPage ? reportedPage : page; }
+    bool Query(uint8_t* p, uint32_t& out) override {
+        size_t a, b;
+        if (!queryKnown || !Range(p, 1, a, b)) return false;
+        out = prot[a]; return true;
+    }
+    bool Restored() const {
+        bool ok = true;
+        for (size_t i = 0; i < prot.size(); ++i)
+            if (prot[i] != initial[i]) { printf("    page 0x%05x is 0x%02x, was 0x%02x\n", (unsigned)(i * page), (unsigned)prot[i], (unsigned)initial[i]); ok = false; }
+        return ok;
+    }
+    bool NoneTwice() const {
+        bool ok = true;
+        for (size_t i = 0; i < unprotects.size(); ++i)
+            if (unprotects[i] > 1) { printf("    page 0x%05x made writable %d times\n", (unsigned)(i * page), unprotects[i]); ok = false; }
+        return ok;
+    }
+    int Changed() const { int c = 0; for (size_t i = 0; i < prot.size(); ++i) c += prot[i] != initial[i]; return c; }
+};
 
 } // namespace tk

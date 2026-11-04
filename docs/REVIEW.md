@@ -8,18 +8,21 @@ Every job branch gets an independent review before it merges; with a `merge` ver
 did not build the branch (a stronger model is allowed for independent checks). It starts cold from this file, the job's brief and the job's report.
 
 ## Starting a review
-`wsc jobs review` names the branch (`--id <id>` for a named one). You must not have built it: CI's `policy` check refuses a review written by a session that
-also wrote the report. The job's own brief is `jobs/<id>/brief.md` on that branch: it is what you check the work against, so nothing needs pasting.
+`wsc jobs review` names the branch (`--id <id>` for a named one) and claims the round first: the remote ref `refs/claims/<id>/round-<n>` (core W27). A round
+another session claimed within `[jobs] claim_hours` is refused naming it, so two reviewers never start one round; an unreadable origin refuses too. You must not
+have built it: CI's `policy` check refuses a review written by a session that also wrote the report. The job's own brief is `jobs/<id>/brief.md` on that branch: it is what you check the work against, so nothing needs pasting.
 
 ## Rounds
-A job gets at most 3 review rounds. Each round is a **fresh** session (never the builder, never an earlier round's fixer): `wsc jobs view --serve --auto`
+A job gets at most 3 review rounds. Each round is a **fresh** session (never the builder, never a fixer, never an earlier round's reviewer: CI's `policy`
+refuses a round whose session trailers meet the report's or an earlier round's, W27 rule B): `wsc jobs view --serve --auto`
 starts one whenever a job branch's row says `review`, and `wsc jobs review` names the round. A non-merge verdict in round 1 or 2 hands the branch to a fix
 session (`wsc jobs fix`), which appends `## Fix round N` to `report.md` and sets `review` again; the loop then starts the next round. Round 3 without
 `merge` blocks the job for the owner.
 
 ## Setup
 A **new** Claude Code session in the repo folder (never the one that built the branch): `git fetch`, check out the job branch, `git submodule update --init`
-in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/brief.md`, `jobs/<id>/report.md`, the repo's decisions file, then
+in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/brief.md`, `jobs/<id>/report.md`, `jobs/<id>/handback.md` when there is one (the builder
+subagent's own words; the report's `## Orchestrator additions` says what the orchestrator added, and `wsc jobs check` requires it), the repo's decisions file, then
 `git diff --stat main...HEAD`. You did not build this branch: do not trust its report. Budget about 60 tool calls.
 
 ## Steps
@@ -27,8 +30,9 @@ in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/b
    tests the branch adds. Note failures, and any red check `wsc jobs review` lists for the pull request. Do not spend calls re-checking anything a gate covers.
    `policy` judges with the base's rules, never the branch's (C24): `git fetch` first; a branch that changes the rules gets a note, and its new rule is
    proven by its host tests, not by its own `policy` run.
-2. **Claims against evidence.** Every claim in the report needs evidence you can open: a run report, a log, test output, a registry row with a date and run
-   id. A claim with no evidence is a finding, however plausible.
+2. **Claims against evidence.** Every claim in the report needs evidence you can open from `main`: a run report, a log, test output, a registry row with a
+   date and run id. A claim with no evidence is a finding, however plausible. `policy` refuses a cited `runs/` folder that is in neither the head nor the base,
+   and warns on a cited unmerged branch or unpushed commit (W27 rule D); a `merge` on a large diff whose round cites no run, CI run or test warns (rule E).
 3. **The brief.** Every deliverable present, every stated decision followed, kill criteria respected, nothing outside scope. A deviation is fine only if the
    report names it and says why.
 4. **Risk-first reading.** Pick the code where a mistake costs most (anything touching persistent data, install or uninstall, the PC, engine memory), say what
@@ -39,13 +43,16 @@ in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/b
 A verdict line, exactly `**Verdict: merge.**`, `**Verdict: merge after fixes.**` or `**Verdict: do not merge.**` (CI's `policy` check reads it: only `merge` lets
 the branch merge), and findings ranked **blocker**, **should-fix**, **later**, each with `file:line`, what fails, and how to see it fail.
 
-- Fix small should-fix items yourself on the branch: one commit each, with a test where the code allows, listed in the review.
+- Fix small should-fix items yourself on the branch only with the verdict `merge after fixes`: one commit each, with a test where the code allows, listed in
+  the review; a fresh round then reviews your change. `policy` warns on a `merge` round whose own commits change a file outside `jobs/<id>/` and the job's
+  row (W27 rule A).
 - Leave blockers and larger items as findings for the job chat.
 - **Later** items for the core go to warscape-core `docs/BACKLOG.md` through a warscape-core pull request; for the repo itself, into the review.
 - Write the review into `jobs/<id>/review.md` on the branch as a round section at the **top** of the file:
   `## Round N (YYYY-MM-DD, branch job/<id> at <sha>)`, with exactly one verdict line inside it. Rounds are newest first, numbered from 1 with no gap, at most 3;
   never edit an earlier round (in round 2 and 3, read it and check its findings were answered in `## Fix round N-1` of the report). `wsc jobs check`
-  enforces all of this, and CI's `policy` check reads the newest verdict.
+  enforces the shape, and CI's `policy` check reads the newest verdict and refuses an earlier round changed on any commit of the branch, even if restored
+  later (W27 rule C); only the newest round's own session edits it, until a newer round exists.
 - Then set the row (`wsc reg set jobs <id> ...`), which `wsc jobs check` checks against the newest round:
   - `merge`: `status=done review=jobs/<id>/review.md`, then merge (below).
   - `merge after fixes` or `do not merge` in round 1 or 2: `status=fix review=jobs/<id>/review.md`. A fix session answers it.

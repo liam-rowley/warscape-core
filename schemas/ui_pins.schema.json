@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/ui_pins.schema.json",
+  "title": "UI pins",
+  "description": "The RmlUi host's source pins (a game's viewer/pins.json or wsc.toml [proxy] ui_pins; a DLL input, the ui_pins role): proxy/tools/fetch_ui.py validates the file against this before any download (--check validates only). Not a registry. A game may pin more objects for its own tools (additionalProperties).",
+  "type": "object",
+  "required": [
+    "rmlui",
+    "freetype",
+    "lua",
+    "stb_image",
+    "stb_image_write"
+  ],
+  "additionalProperties": {
+    "type": "object"
+  },
+  "properties": {
+    "_doc": {
+      "type": "string"
+    },
+    "rmlui": {
+      "$ref": "#/$defs/git"
+    },
+    "freetype": {
+      "$ref": "#/$defs/git"
+    },
+    "lua": {
+      "type": "object",
+      "required": [
+        "version",
+        "url",
+        "sha256",
+        "licence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/text"
+        },
+        "url": {
+          "$ref": "#/$defs/https"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "licence": {
+          "$ref": "#/$defs/text"
+        },
+        "why": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "stb_image": {
+      "$ref": "#/$defs/file"
+    },
+    "stb_image_write": {
+      "$ref": "#/$defs/file"
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "https": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "git": {
+      "type": "object",
+      "required": [
+        "version",
+        "repo",
+        "commit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/text"
+        },
+        "repo": {
+          "$ref": "#/$defs/https"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "tag": {
+          "$ref": "#/$defs/text"
+        },
+        "licence": {
+          "$ref": "#/$defs/text"
+        },
+        "why": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "version",
+        "url",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/text"
+        },
+        "url": {
+          "$ref": "#/$defs/https"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "licence": {
+          "$ref": "#/$defs/text"
+        },
+        "why": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    }
+  }
+}

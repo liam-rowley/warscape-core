@@ -1,10 +1,13 @@
 // dev.cpp - the dev side of the proxy (J3): phase timeline, scene tracking and state file, D3D frame hooks, the control channel,
 // autostart and warm reset. Game-agnostic; the game's specifics come from Adapter().dev and the Lua files in its lua folder.
-// Every key defaults off (config_keys rows, release value off). With no dev key on, DevInit returns before doing anything and the
-// proxy behaves exactly as the skeleton; nothing here runs in pass-through (plan.engineHooks / plan.d3dHooks false).
+// Every key defaults off (config_keys rows, release value off). With no dev key on and no proxy.file_rules, DevInit returns before
+// doing anything and the proxy behaves exactly as the skeleton; nothing here runs in pass-through (plan.engineHooks / plan.d3dHooks false).
+// proxy.file_rules (W33, C29) is the release file rules: read here, it turns no dev feature on (no s_active, no timeline, no thread).
 //
 // Threads: the engine thread (Lua pumps, Present: one thread, empire-remastered fact), the state thread (state.json ~2/s, scene
-// updates, the config autostart), the control thread (one request at a time, FIFO by file time). Shared state is under s_cs.
+// updates), the control thread (one request at a time, FIFO by file time; it also runs the config autostart). Shared state is under
+// s_cs. No thread starts in DllMain (W33, C29): DevInit only decides which ones the keys need (DevThreadsFor) and they start, through
+// StartThread, at the first Direct3DCreate9 (DevOnDirect3DCreate).
 // Control protocol (proxy/README.md "Dev control channel"; the core's rules: docs/PROXY_CTL.md): <ctl_dir>\<id>.cmd -> <ctl_dir>\<id>.done
 // (JSON, written last). A request written before this process started is refused as stale, never run (W17).
 #include "dev.h"
@@ -524,6 +527,9 @@ DWORD WINAPI CtlThread(LPVOID) {
     }
 }
 
+DevThreads s_threads;   // which threads DevOnDirect3DCreate starts (DevInit decides, W33)
+volatile LONG s_threadsStarted = 0;
+
 DWORD WINAPI StateThread(LPVOID) {
     const std::wstring path = Rt().modDir + L"state.json";
     for (;;) {
@@ -611,6 +617,8 @@ void DevPresent() {
     if (ready) { std::string sc; { Lock l; sc = s_scene.scene; } TlMark("first_present_after_ready", sc); }
 }
 
+static void DevSideInit(const DevAdapter& adr, std::vector<FileRule>& rules);
+
 void DevInit() {
     Runtime& rt = Rt();
     DevKeys& k = Dk();
@@ -630,10 +638,37 @@ void DevInit() {
     k.ctlDir = WidenUtf8(rt.cfg.Str("dev.ctl_dir"));
     k.autostart = rt.cfg.Str("dev.autostart");
     k.autostartDelayMs = (int)rt.cfg.Int("dev.autostart_delay_ms");
-    if (!k.Any()) return;   // the skeleton's behaviour, exactly
-    if (!rt.plan.engineHooks || !rt.plan.d3dHooks) { LOGW("dev: dev keys are set but the plan forbids hooks (pass-through): dev side off"); return; }
-    const DevAdapter* ad = Adapter().dev;
-    if (!ad) { LOGW("dev: the adapter has no dev specifics: dev side off"); return; }
+    const std::wstring releaseRules = WidenUtf8(rt.cfg.Str("proxy.file_rules"));   // W33: the release file rules, not a dev key
+    if (!k.Any() && releaseRules.empty()) return;   // the skeleton's behaviour, exactly
+    if (!rt.plan.engineHooks || !rt.plan.d3dHooks) {
+        if (k.Any()) LOGW("dev: dev keys are set but the plan forbids hooks (pass-through): dev side off");
+        if (!releaseRules.empty()) LOGW("redirect: proxy.file_rules is set but the plan forbids hooks (pass-through): no rules");
+        return;
+    }
+    std::vector<FileRule> rules;
+    const DevAdapter* ad = k.Any() ? Adapter().dev : nullptr;
+    if (k.Any() && !ad) LOGW("dev: the adapter has no dev specifics: dev side off");
+    if (ad) DevSideInit(*ad, rules);
+    if (!releaseRules.empty()) {   // after the dev rules: the first match wins, so a dev rule on the same path wins in a dev launch
+        const std::wstring p = IsAbsolute(releaseRules) ? releaseRules : rt.gameDir + releaseRules;
+        std::string text;
+        if (!ReadFileBytes(p, text)) LOGW("redirect: rule file %ls not found (proxy.file_rules)", p.c_str());
+        else {
+            std::vector<std::string> w; auto more = ParseRules(text, w);
+            for (auto& x : w) LOGW("redirect: %ls: %s (proxy.file_rules)", p.c_str(), x.c_str());
+            for (auto& r : more) if (r.origin.rfind("rules line ", 0) == 0) r.origin = "proxy.file_rules line " + r.origin.substr(11);
+            rules.insert(rules.end(), more.begin(), more.end());
+            LOGI("redirect: %zu rules from %ls (proxy.file_rules)", more.size(), p.c_str());
+        }
+    }
+    if (ad || !rules.empty()) FilesInit(rules);
+}
+
+// The dev side proper (a dev key is on, the plan allows hooks, the adapter has dev specifics): DllMain, so it starts no thread.
+static void DevSideInit(const DevAdapter& adr, std::vector<FileRule>& rules) {
+    Runtime& rt = Rt();
+    DevKeys& k = Dk();
+    const DevAdapter* ad = &adr;
     InitializeCriticalSection(&s_cs);
     s_active = true;
     s_t0 = MonoS();
@@ -641,15 +676,17 @@ void DevInit() {
     FILETIME c, e, kt, u;
     s_tl.launchId = rt.launchId;
     if (GetProcessTimes(GetCurrentProcess(), &c, &e, &kt, &u)) s_tl.processStartMs = FileTimeToUnixMs(c);
-    LOGI("dev: timeline=%d log_files=%d skip_intro=%d state_json=%d lua_bridge=%d ctl=%d file_rules='%ls' ctl_dir='%ls' autostart='%s' delay=%d ms",
-         k.timeline, k.logFiles, k.skipIntro, k.stateJson, k.luaBridge, k.ctl, k.fileRules.c_str(), k.ctlDir.c_str(), k.autostart.c_str(), k.autostartDelayMs);
+    s_threads = DevThreadsFor(k.stateJson, k.timeline, k.ctl, !k.autostart.empty());
+    LOGI("dev: timeline=%d log_files=%d skip_intro=%d state_json=%d lua_bridge=%d ctl=%d file_rules='%ls' ctl_dir='%ls' autostart='%s' delay=%d ms; "
+         "threads at the first Direct3DCreate9: state=%d ctl=%d",
+         k.timeline, k.logFiles, k.skipIntro, k.stateJson, k.luaBridge, k.ctl, k.fileRules.c_str(), k.ctlDir.c_str(), k.autostart.c_str(), k.autostartDelayMs,
+         s_threads.state, s_threads.ctl);
     if (k.timeline) { s_tl.Add("process_start", "", s_tl.processStartMs); TlMark("dllmain"); }
     ConsoleInit(k.console, Adapter().console);
     CameraInit(k.camera, Adapter().camera);
     OrdersInit(k.orders, Adapter().orders);
     if (k.capture) CaptureInit();
 
-    std::vector<FileRule> rules;
     if (k.skipIntro) for (const char* const* m = ad->introMovies; m && *m; ++m) rules.push_back(MakeRule(RuleSpace::Movie, RuleAct::Fail, *m, "", "dev.skip_intro"));
     if (k.luaBridge) {
         std::string text; for (const char* const* r = ad->luaRules; r && *r; ++r) { text += *r; text += '\n'; }
@@ -662,26 +699,30 @@ void DevInit() {
         if (!ReadFileBytes(p, text)) LOGW("redirect: rule file %ls not found", p.c_str());
         else { std::vector<std::string> w; auto more = ParseRules(text, w); for (auto& x : w) LOGW("redirect: %ls: %s", p.c_str(), x.c_str()); rules.insert(rules.end(), more.begin(), more.end()); LOGI("redirect: %zu rules from %ls", more.size(), p.c_str()); }
     }
-    FilesInit(rules);
     s_frames = k.timeline || k.stateJson || k.ctl || k.capture || !k.autostart.empty();
     if (k.autostart.size()) s_autostartStatus = "waiting for the front end";
-    if (HANDLE h = CreateThread(nullptr, 0, StateThread, nullptr, 0, nullptr)) CloseHandle(h);
-    if (k.ctl || !k.autostart.empty()) {
+    if (s_threads.ctl) {
         if (k.ctl && k.ctlDir.empty()) LOGW("ctl: dev.ctl=1 but dev.ctl_dir is empty: no control channel");
         if (k.ctlDir.empty()) k.ctlDir = rt.modDir + L"ctl";   // the config autostart alone needs no folder; keep the thread's path valid
-        s_ctlWake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (HANDLE h = CreateThread(nullptr, 0, CtlThread, nullptr, 0, nullptr)) CloseHandle(h);
+        s_ctlWake = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // a kernel object, not a thread: DllMain may create it
     }
 }
 
 void DevOnDirect3DCreate(void* d3d) {
+    FilesOnDirect3DCreate();   // the deferred IAT slots, also for proxy.file_rules with the dev side off (W33)
     if (!s_active) return;
-    FilesOnDirect3DCreate();
     TlMarkOnce("d3d_create");
     ConsoleInstall();   // once, before any campaign (no-op with dev.console=0)
     CameraInstall();    // once (no-op with dev.camera=0)
     OrdersInstall();    // once (no-op with dev.orders=0)
     if (s_frames && d3d && !o_CreateDevice) VtableHook(*(void***)d3d, 16, (void*)hk_CreateDevice, (void**)&o_CreateDevice, "IDirect3D9::CreateDevice");
+    // W33 (C4): the dev threads start here, after every install above, so a ctl verb never meets a half-installed feature. The game's
+    // own call from its running code, never under the loader lock, before any device, Present or frame. Once: the game recreates
+    // its d3d9 object on a resolution change. Whatever the backend returned, null included.
+    if (InterlockedCompareExchange(&s_threadsStarted, 1, 0) == 0) {
+        if (s_threads.state) StartThread(StateThread, "dev.state");
+        if (s_threads.ctl) StartThread(CtlThread, "dev.ctl");
+    }
 }
 
 void DevOnDetach() {

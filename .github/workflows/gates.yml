@@ -106,8 +106,8 @@ jobs:
         run: python wsc.py gates
 
   # proxy (napoleon J12): the proxy core moved here. Build the DLL with the null game (proxy/tests/null_game), run every C++ host test,
-  # prove the DLL does not depend on the checkout path, and smoke it under wine. WSP_BUILD_ID: build_id.py hashes a game repo's inputs,
-  # and the null game is a folder inside this repo (backlog B16).
+  # prove the DLL does not depend on the checkout path, and smoke it under wine. The DLL carries the null game's real build id: build_id.py
+  # reads a game root nested in its repository under its prefix (W16, B16), so every push proves the nested id.
   # The toolchain (W24, C25): the mingw-w64 packages at the exact versions of proxy/tools/toolchain.py, a build-id input that build.sh checks
   # before it compiles (refused off the pin). The runner image stays outside the pass-marker key: with the toolchain pinned and checked it
   # cannot change the DLL's bytes; it can change the host tests' g++ and the smoke's wine, which the next proxy/ change exercises, and
@@ -119,7 +119,6 @@ jobs:
     timeout-minutes: 30   # J30: RmlUi and FreeType compile twice (mingw for the DLL, g++ for the host tests)
     env:
       WSP_GAME_ROOT: proxy/tests/null_game   # relative to the checkout: layout.py resolves it
-      WSP_BUILD_ID: nullgame-ci
     steps:
       - uses: actions/checkout@v5
         with:
@@ -129,6 +128,17 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends $(python3 proxy/tools/toolchain.py apt)
           dpkg-query -W -f '${Package}=${Version}\n' '*mingw-w64*'
+      - name: the adapter contract compiles (W29, proxy/tools/adapter_syntax.py -fsyntax-only); a copy without the gesture member must fail
+        run: |
+          python3 proxy/tools/adapter_syntax.py --adapter proxy/tests/null_game/proxy/null
+          python3 proxy/tools/adapter_syntax.py --adapter proxy/tests/null_game_no_gesture/proxy/null
+          T="$(mktemp -d)"; cp -a proxy/tests/null_game/proxy/null "$T/broken"
+          sed -i 's/, &kGesture };/ };/' "$T/broken/adapter.cpp"
+          if grep -q '&kGesture };' "$T/broken/adapter.cpp"; then echo "the guard copy still initialises gesture: update this step"; exit 1; fi
+          if python3 proxy/tools/adapter_syntax.py --adapter "$T/broken" > "$T/out.txt"; then
+            cat "$T/out.txt"; echo "a GameAdapter without its gesture initialiser compiled: the guard is broken"; exit 1
+          fi
+          cat "$T/out.txt"; grep -q "gesture" "$T/out.txt"
       # fetch cache (W21): the raw downloads (tarballs, RmlUi and FreeType checkouts), keyed by the pins and [ci] salt, never the patched
       # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte, and
       # the fetchers retry their own downloads and git fetches on a network flake inside build.sh (W24), never a wrong byte.

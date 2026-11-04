@@ -183,7 +183,7 @@ class Policy(Fixture):
         self.assertEqual(rc, 0, out + err)
         self.branch('foo/bar', {'docs/note.md': 'n'})
         rc, out, err = self.policy('foo/bar')
-        self.assertIn('is not job/F<n>, brief/F<n>, plan/* or meta/*', err)
+        self.assertIn('is not job/F<n>, brief/F<n>, plan/*, meta/* or release/vX.Y.Z', err)
 
     def test_the_fixtures_own_decision_prefix_and_its_policy_stage_apply(self):
         text = (FIXTURE / 'docs' / 'DECISIONS.md').read_text(encoding='utf-8')

@@ -36,9 +36,10 @@ DEFAULTS = {
         'living': ['**/*.md'],
         'records': ['**/records/**', '**/reports/**', '**/runs/**'],   # plus any file whose name carries a YYYY-MM-DD date
         'exempt': [],
+        'path_ignore': [],                 # doc_paths gate (W28): backticked tokens (exact, or globs) that look like a path but are not one of this repo's
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
-    'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`
+    'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`; skip: "<gate>:<decision id>" (a [policy] decisions row; W28)
               'dirs': [],                  # repo-relative folders of game gate modules (warscape/gatemods.py)
               'run_refs_since': ''},       # YYYY-MM-DD: the `run_refs` gate skips run folders dated before it ('' = checks every run README; C23)
     'cli': {'verb_dirs': []},              # repo-relative folders of extra verb modules
@@ -46,7 +47,8 @@ DEFAULTS = {
     # where a game's adapters are, for the proxy and harness tools (proxy/tools/layout.py, napoleon J12); empty = the one
     # proxy/*/adapter.cpp folder / the one harness/*/adapter.json in the repo
     'proxy': {'adapter': '',               # repo-relative folder: adapter.cpp, identity.json, generated/, the config file, lua/
-              'ui_pins': ''},              # repo-relative pin file of the RmlUi host's sources (empty: viewer/pins.json; J30)
+              'ui_pins': '',               # repo-relative pin file of the RmlUi host's sources (empty: viewer/pins.json; J30)
+              'tests': ''},                # repo-relative folder of the game's own C++ host tests (empty: proxy/tests when it holds a test_*.cpp; W16)
     'harness': {'adapter': ''},            # repo-relative file: the watcher's adapter.json (its profiles/ beside it)
     # the discovery passes (discovery/, `wsc discovery`; napoleon J64): empty = the one discovery/*/games.json folder in the repo
     'discovery': {'adapter': ''},          # repo-relative folder: games.json (target, reference, install paths) and the rules the tools read
@@ -59,6 +61,10 @@ DEFAULTS = {
         'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
         'failed_results': '',              # glob (relative to a run folder a report cites) of ctl result JSONs: one with status "failed" must be named in ## Deviations ('' = off)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
+        'pc_state': '',                    # the PC state folder ($VAR, ~ expanded): a needs_pc build is not ready where it is absent ('' = no gating; WSC_PC_STATE overrides, "" = no PC here; W26)
+        'semver_from': 0,                  # W29 (C27): job numbers from this one on carry `semver` (from status queued) and a `Semver:` brief line,
+                                           # and their job/ branches may not edit VERSION (the release workflow owns it); 0 = off
+        'claim_hours': 4,                  # a review claim (refs/claims/<id>/round-<n>, core W27) older than this may be taken over
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
             'policy': '{wsc} policy',      # the policy command, before ` --branch B --base REF`
@@ -74,6 +80,9 @@ DEFAULTS = {
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
+        'decisions_cite_job': False,       # a decisions row added on job/<id> must contain <id>, the brief that required it (core W27 rule F)
+        'thin_merge_lines': 500,           # a `merge` on more changed lines than this outside jobs/ and the registries...
+        'thin_merge_files': 20,            # ...or more files, whose newest round cites no evidence, is a warning (core W27 rule E)
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
         'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
                  'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
@@ -81,6 +90,13 @@ DEFAULTS = {
         # request that introduces the pipeline into a repo: it cannot be a job (no brief on the base, no independent review yet) and its files are
         # wider than any meta/ list. Remove the entry in the next change; an exemption that outlives its branch is inert but is a smell.
         'bootstrap': [],
+    },
+    # release tags by workflow (W29, C27; `wsc release`, warscape/release.py, ci/release.yml.in); used inside the core
+    'release': {
+        'consumers': [],                   # [{name, repo = "owner/name", adapter = "<repo-relative proxy adapter folder>", ref = "main"}]: compiled before a tag
+        'consumer_check': 'warn',          # warn: a failing consumer is in the tag message and an issue; block: no tag while one fails
+        'annotated_from': '',              # X.Y.Z: from this version on `core_pin` wants v<VERSION> to be an annotated tag ('' = any tag)
+        'grace_minutes': 120,              # a missing v<VERSION> on main is a warning this long after the commit, then an error
     },
     # CI helpers (`wsc ci`; warscape/ci.py)
     'ci': {
@@ -169,6 +185,20 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: gates.run_refs_since must be "" or a date YYYY-MM-DD')
     if not isinstance(cfg['policy']['commit_msg_hook'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.commit_msg_hook must be true or false')
+    rel, sf = cfg['release'], cfg['jobs']['semver_from']
+    if not isinstance(sf, int) or isinstance(sf, bool) or sf < 0:
+        raise ConfigError(f'{CONFIG_NAME}: jobs.semver_from must be a job number (0 = off)')
+    if rel['consumer_check'] not in ('warn', 'block'):
+        raise ConfigError(f'{CONFIG_NAME}: release.consumer_check must be "warn" or "block"')
+    if not isinstance(rel['annotated_from'], str) or (rel['annotated_from'] and not re.fullmatch(r'\d+\.\d+\.\d+', rel['annotated_from'])):
+        raise ConfigError(f'{CONFIG_NAME}: release.annotated_from must be "" or X.Y.Z')
+    if not isinstance(rel['consumers'], list) or not all(isinstance(c, dict) and set(c) <= {'name', 'repo', 'adapter', 'ref'} for c in rel['consumers']):
+        raise ConfigError(f'{CONFIG_NAME}: release.consumers must list tables with name, repo, adapter and ref')
+    if not isinstance(cfg['policy']['decisions_cite_job'], bool):
+        raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
+    for t, k in (('policy', 'thin_merge_lines'), ('policy', 'thin_merge_files'), ('jobs', 'claim_hours')):
+        if isinstance(cfg[t][k], bool) or not isinstance(cfg[t][k], (int, float)) or cfg[t][k] < 0:
+            raise ConfigError(f'{CONFIG_NAME}: {t}.{k} must be a number of at least 0')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     return cfg

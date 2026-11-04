@@ -16,6 +16,9 @@ Where an input lives (J12): each role names its places, looked up in order at th
 to warscape-core), then inside each submodule at the commit the revision's gitlink pins (after the move: the core's proxy/src and
 proxy/tools, read with `git -C <submodule> rev-parse <gitlink>:<path>`, since `git rev-parse HEAD:core/...` does not reach into a
 submodule). The proxy/core tree moves to proxy/src unchanged, so the core role keeps its object id and the DLL its build id.
+A game root nested inside its repository (W16, B16: the core's null game, proxy/tests/null_game) finds the game's own inputs (the
+`adapter` and `ui_pins` roles) under its prefix (`git rev-parse --show-prefix`) and the core's at the top, so its id in place is the id
+of the same files laid out as a separate game repo; the -dirty check reads the same paths.
 
 What the DLL compiles (W24, C25): the id hashes committed content, so build.sh compiles the tracked files only (`--sources`, read from
 `git -C <folder> ls-files`, the index of the repository that holds the folder, a submodule's own). An untracked or ignored source file
@@ -35,6 +38,7 @@ import layout  # noqa: E402
 ADAPTER = None   # the role 'adapter' is the game's proxy adapter folder (layout.proxy_adapter: wsc.toml [proxy] or proxy/*/adapter.cpp)
 UI_PINS = 'ui-pins'   # the role 'ui_pins' is the game's UI pin file (layout.ui_pins: wsc.toml [proxy] ui_pins or viewer/pins.json; J30)
 # The DLL inputs (rule 79's scope): role -> the places it may live, in lookup order. A change to any of them is a new DLL.
+# The game's own roles (GAME_ROLES) are paths relative to the game root; the others are relative to the top of the repository or submodule.
 INPUTS = [('core', ('proxy/core', 'proxy/src')), ('adapter', (ADAPTER,)), ('build_sh', ('proxy/tools/build.sh',)),
           ('fetch_lua', ('proxy/tools/fetch_lua.py',)), ('build_id', ('proxy/tools/build_id.py',)),
           # J30: RmlUi, FreeType and the host's Lua compile into the DLL from the pinned sources the fetcher takes from this pin file
@@ -42,6 +46,7 @@ INPUTS = [('core', ('proxy/core', 'proxy/src')), ('adapter', (ADAPTER,)), ('buil
           # W24 (C25): the image and the exact mingw-w64 package versions, a committed file: never the installed compiler measured into
           # the id, so rule 79 recomputes it with no compiler; build.sh refuses a toolchain off this pin (toolchain.py check)
           ('toolchain', ('proxy/tools/toolchain.py',))]
+GAME_ROLES = ('adapter', 'ui_pins')
 
 
 def _git(root, *args):
@@ -72,14 +77,17 @@ def locate(root, rev='HEAD'):
     except (layout.LayoutError, ValueError) as e:
         raise ValueError(f'build_id: {e}') from None
     name = lambda p: adapter if p is None else pins if p == UI_PINS else p
+    pr = _git(root, 'rev-parse', '--show-prefix')
+    prefix = pr.stdout.strip() if pr.returncode == 0 else ''   # '' at the top; 'proxy/tests/null_game/' for the core's null game (W16)
     subs = [(s, _oid(root, f'{rev}:{s}')) for s in _submodules(root)]
     out = []
     for role, places in INPUTS:
         hit = None
         for path in (name(p) for p in places):
-            oid = _oid(root, f'{rev}:{path}')
+            top = prefix + path if role in GAME_ROLES else path   # rev:path is read from the top of the repository, never from root
+            oid = _oid(root, f'{rev}:{top}')
             if oid:
-                hit = (role, path, oid, (root, rev, path)); break
+                hit = (role, top, oid, (root, rev, top)); break
             for sub, commit in subs:
                 oid = commit and (root / sub).is_dir() and _oid(root / sub, f'{commit}:{path}')
                 if oid:
@@ -111,8 +119,8 @@ def build_id(root=None, rev='HEAD', dirty=True):
     found = locate(root, rev)
     bid = content_id([(role, path, oid) for role, path, oid, _ in found])
     if dirty:
-        for repo, commit, path in {w for *_, w in locate(root, 'HEAD')}:
-            if _git(repo, 'diff', '--quiet', commit, '--', path).returncode != 0:
+        for repo, commit, path in {w for *_, w in locate(root, 'HEAD')}:   # path from the top: ':(top)' makes the pathspec say so
+            if _git(repo, 'diff', '--quiet', commit, '--', f':(top){path}').returncode != 0:
                 bid += '-dirty'; break
     return bid
 

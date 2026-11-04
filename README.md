@@ -30,6 +30,7 @@ python3 wsc.py --help                      # verbs: reg, find, gates, jobs, poli
 python3 wsc.py find shadow resolution      # one search across every registry
 python3 wsc.py reg add tools path/to/tool.py
 python3 wsc.py reg set engine_facts some.fact state=verified date=2026-10-28 evidence=runs/20261028_a
+python3 wsc.py reg remove engine_facts some.fact   # refused, nothing written, while any row, tool file or job folder points at it
 python3 wsc.py gates --fast                # what the pre-push hook runs; `gates` alone adds the host tests (CI)
 git config core.hooksPath .githooks        # once per clone
 ```
@@ -53,6 +54,8 @@ A repo declares its registries in `wsc.toml`; the core ships these schemas (`sch
 | `hotkeys` | binding, action, context, source, how a bare key fires (`fires_with`); clashes fail the gate |
 | `engine_facts` | claim, state (`verified`, `open`, `refuted`), evidence run, date |
 
+`schemas/ui_pins.schema.json` is not a registry: it is the UI pin file's schema (`proxy/tools/fetch_ui.py --check`, [docs/PROXY_HARNESS.md](docs/PROXY_HARNESS.md)).
+
 The schema subset and the registry extensions (`x-view`, `x-unique`, `x-wildcard`, `x-chord`, `x-ref`, `x-source`, `x-extends`) are
 documented in the docstrings of `warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
 Two of them in a sentence each: `x-chord` makes the `x-unique` check read a field as `Ctrl+Alt+Shift+Key` chords, so a bare key flagged
@@ -63,11 +66,16 @@ merged at load; canonical key order is then the core's fields first, then the ga
 ## Gates
 
 `wsc gates` runs, deterministically and without network: `schemas`, `registries`, `tools` (header and row for every tool), `json`
-(strict JSON and JSONL), `windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
-`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
+(strict JSON and JSONL: no NaN or Infinity, no key twice in one object; the registry loader, `jobq` and `gen_tables.py` read repo data the same way, W28),
+`windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
+`verified_dates` (a "verified" with no date or run id: only an ISO date, a compact `20YYMMDD` run id or a `reports/`, `runs/` or `records/` path dates it, W28),
+`doc_paths` (a backticked repo path in a living doc that is not a tracked file or folder, from the root, the doc's folder or across `core/`; job folders,
+the decisions file, fenced blocks, `(was <path>)` and `(moved)` lines, `../` paths and `[docs] path_ignore` are not checked), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
 unmodified, its `VERSION` is the pinned `vX.Y.Z`, and HEAD is that tag whenever the tag is in the checkout; a shallow checkout without
 it is compared by `VERSION` only, C21; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone), `jobs`, `ci_render`, `run_refs` (every repo path a run README names exists; `[gates] run_refs_since` grandfathers old runs) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.
+`[gates] skip` entries are `"<gate>:<decision id>"`: the id must be a row of the `[policy] decisions` file, each skipped gate prints `skipped <gate>: <id>`
+as a warning, and `--only <gate>` still runs it (W28). A rule inside a skippable gate (a game's host test inside `tests`) needs its own decision.
 A game adds its own checks as gate modules (`wsc.toml` `[gates] dirs`, `NAME` and `run(ctx) -> Result`: `docs/CONSUMING.md` "Game gates"), each its own line
 after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs view` page.
 
@@ -78,6 +86,7 @@ after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs vi
 | `CLAUDE.md` | rules for every chat and agent working here |
 | `docs/DECISIONS.md` | core decisions, dated, append only |
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
+| `docs/UPGRADING.md` | what a game changes when its core pin crosses 0.24.0, 0.26.0, 0.27.0 or 0.34.0 |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
 | `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |

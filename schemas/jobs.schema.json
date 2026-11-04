@@ -14,6 +14,7 @@
     "status": {"enum": ["needs_brief", "queued", "review", "fix", "done", "blocked"], "description": "fix: a review round asked for changes; only a reviewer sets it"},
     "model": {"enum": ["sonnet", "opus"], "description": "opus only with the reason in the brief"},
     "needs_pc": {"type": "boolean"},
+    "semver": {"enum": ["patch", "minor", "major", "none"], "description": "the release level the job's merge asks for (W29, C27: the release workflow owns VERSION); required from status queued on for ids at or above [jobs] semver_from; none = no release"},
     "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string", "x-ref": "jobs"}},
     "brief": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/brief\\.md$"},
     "report": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/report\\.md$"},

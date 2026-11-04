@@ -18,7 +18,7 @@ static const SiteDef kSites[kSiteCount + 1] = {   // id, kind, rva, anchorLen, a
     { nullptr, 0, 0, 0, { 0 }, 0, { 0 }, { 0 }, nullptr }   // sentinel (keeps the array non-empty)
 };
 
-static const size_t kKeyCount = 38;
+static const size_t kKeyCount = 39;
 static const KeySpec kKeys[kKeyCount + 1] = {
     { "controls.gestures", kBool, "0" },
     { "dev.autostart", kStr, "" },
@@ -50,6 +50,7 @@ static const KeySpec kKeys[kKeyCount + 1] = {
     { "proxy.enabled", kBool, "1" },
     { "proxy.exe_guard", kInt, "1" },
     { "proxy.exe_guard_force_mismatch", kInt, "0" },
+    { "proxy.file_rules", kStr, "" },
     { "proxy.log_level", kStr, "info" },
     { "proxy.minidump", kInt, "2" },
     { "proxy.runtime_patches", kBool, "1" },
