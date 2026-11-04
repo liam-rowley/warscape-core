@@ -47,6 +47,19 @@ Costs of the recommendation, and what covers them:
   folder, as the tail of a tracked path, inside a submodule, or git-ignored. `[gates] run_refs_since = "YYYY-MM-DD"` skips run folders dated before it (default `""`:
   all checked); set it to the pin-bump date when old READMEs name moved paths.
 
+## The build id names one DLL (0.27.0, W24, C24; [PROXY_BUILD.md](PROXY_BUILD.md))
+
+- **Rule 79: the build id changes** (roles `core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed; `toolchain` is new), **and so do the DLL's bytes**:
+  20 consecutive acceptance passes on the new id.
+- **CI:** the job that runs `build.sh` installs the pin instead of `g++-mingw-w64-i686`, then `python3 core/wsc.py ci render`:
+  `sudo apt-get install -y -q --no-install-recommends $(python3 core/proxy/tools/toolchain.py apt)`. Otherwise `build.sh` refuses as soon as the
+  archive's candidate differs from the pin. A job that uses `{{wsc fetch_cache}}` re-renders to two steps.
+- **Tests that build a throwaway game repo for `build_id.py`** copy `proxy/tools/toolchain.py` beside `build.sh`, `build_id.py` and `layout.py`
+  (else `locate` refuses: "toolchain is not tracked").
+- **On the PC** nothing changes: `build.sh --docker` installs the pins in the container, and `build/ui/obj/mingw32` rebuilds once. A native build
+  off the pin needs `WSP_TOOLCHAIN=any` and gives a `-dirty` DLL. An untracked source under `core/proxy/src` or the adapter folder refuses the build.
+- `proxy.log`'s second line is now `self_hash: ...`; `harness/ctl.py` `build_info()` returns `dll_sha256`. No adapter, config key or ini change.
+
 ## Wiring a game repo (the steps, once approved)
 
 ```sh
@@ -185,9 +198,9 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc fetch_cache}}`, `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
-- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.22.0): the fetchers run through
-  `proxy/tools/netfetch.py prefetch` with a retry on network flakes, and their raw downloads are cached by the pins (`ci-cache`), so a warm cache
-  makes the build offline. The fetchers' sha256 checks still judge every byte; a cache fault never fails the job.
+- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.22.0): two steps (0.27.0) that cache
+  the fetchers' raw downloads by the pins (`netfetch.py ci-cache`), so a warm cache makes the build offline. The fetchers retry their own network
+  flakes inside `build.sh` (0.27.0; the `netfetch.py prefetch` step is gone), and their sha256 checks still judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
 - **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
@@ -250,7 +263,8 @@ them through `proxy/tools/layout.py`: the game root is the superproject that pin
 are `wsc.toml` `[proxy] adapter` / `[harness] adapter` when set, else the one `proxy/*/adapter.cpp` / `harness/*/adapter.json`.
 Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh` and so on; `python3 core/proxy/tools/layout.py`
 prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
-the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
+the core, so moving them here kept every game build id (napoleon J12); the build contract (the roles, the toolchain pin and its check, tracked
+sources only, the DLL's `self_hash` log line, the CI step summary) is [PROXY_BUILD.md](PROXY_BUILD.md). The core's CI builds and tests them against the null game
 (`proxy/tests/null_game/README.md`); from 0.19.0 the tools' Python host tests run here too (`tests/test_pc_deploy.py`, `test_ctl.py`,
 `test_acceptance.py`, `test_saves.py`, `test_job_sh.py`; W8), so a game keeps only the tests over its own data (its scenario rows and
 battle presets for rule 78, its save map, recipes and staging, its real identity).
@@ -260,6 +274,10 @@ instead of keeping its own, and a host test that runs a shell script takes its b
 `$WSC_REQUIRE_BASH`).
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
 (watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+
+**The UI pin file** (`wsc.toml` `[proxy] ui_pins`, else `viewer/pins.json`; a DLL input, the `ui_pins` role) needs five keys: `rmlui` and
+`freetype` (`version`, `repo`, `commit`), `lua`, `stb_image` and `stb_image_write` (`version`, `url`, `sha256`; `stb_image_write` is the in-game
+host's PNG dump, required since 0.10.0). The reference is the null game's `proxy/tests/null_game/viewer/pins.json`: copy a missing entry from it.
 
 Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
 ([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
