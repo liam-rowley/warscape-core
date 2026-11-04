@@ -179,6 +179,16 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   makes the build offline. The fetchers' sha256 checks still judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
+- **Main health (0.23.0, core W22).** A red required check on `main` is no longer permanent and silent. (1) *Rerun:* the `changes` job has no diff base on a
+  push to `main` (`base=''`, the old `$BEFORE` is gone), so every set counts as changed and only a pass marker for its input tree skips it; a failed run saves
+  no marker, so the next push reruns the set (a squash merge is a new tree and runs; a docs-only push finds its predecessor's marker and skips; an evicted
+  cache costs one extra run, never a wrong skip). Branch pushes are unchanged. (2) *Report:* `{{wsc notify gates ...}}` also renders a `main_health` job
+  (`always()` on a push to `main`, `continue-on-error`, `issues: write`, not a required check) that runs `wsc ci main-health`: one issue per red required job,
+  titled `CI is red on main: <job>`, found by a hidden mark at the start of its body (no label), one comment per run and attempt, closed with a comment once the
+  job is green; a run that is not main's tip does nothing; a problem it can explain prints and exits 0. Required jobs are `[ci] required_checks` that the run
+  produced, else every job but `changes`, `notify` and `main_health`. (3) *Read:* `wsc jobs next|review|fix|view` print `main is RED: ...` lines first (the latest
+  completed push run of each workflow), "unknown" when `gh` cannot say, nothing when green; `--offline` skips it. Consumers re-render after the pin bump
+  (`python3 core/wsc.py ci render`; no template change) and enable Issues in the repository (`wsc ci check-settings` says when they are off).
 - **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
   jobs the repo has) and `policy` on `main`, allow auto-merge, require no approving review (one account cannot approve its own pull request), and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
   Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once. `wsc ci check-settings [--repo owner/name]` reads them
