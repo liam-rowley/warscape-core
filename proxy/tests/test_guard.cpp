@@ -134,12 +134,12 @@ int main(int argc, char** argv) {
         std::set<std::string> known; for (size_t i = 0; i < gen::kKeyCount; ++i) known.insert(gen::kKeys[i].id);
         const std::regex re("\"(proxy\\.[a-z_]+)\"");
         {   // the rebase delta never comes from the mapped header (the loader rewrites its ImageBase): pe.h LoadDelta with the file's base
-            const std::string pd = Strip(tk::ReadFile("core/patch_driver.cpp"));
-            CHECK(pd.find("LoadDelta(") != std::string::npos);
-            CHECK(pd.find("fileImageBase") != std::string::npos);
-            CHECK(pd.find("- pe.preferredBase") == std::string::npos);
-            CHECK(pd.find("WritePlanAtomic(") != std::string::npos);   // writes go through the all-or-nothing writer
-            CHECK(pd.find("memcpy(") == std::string::npos);            // ... and nowhere else
+            const std::string pdd = Strip(tk::ReadFile("core/patch_driver.cpp"));
+            CHECK(pdd.find("LoadDelta(") != std::string::npos);
+            CHECK(pdd.find("fileImageBase") != std::string::npos);
+            CHECK(pdd.find("- pe.preferredBase") == std::string::npos);
+            CHECK(pdd.find("WritePlanAtomic(") != std::string::npos);   // writes go through the all-or-nothing writer
+            CHECK(pdd.find("memcpy(") == std::string::npos);            // ... and nowhere else
         }
         for (const char* f : { "dllmain.cpp", "backend.cpp", "crash.cpp", "guard_driver.cpp", "patch_driver.cpp" }) {
             const std::string s = tk::ReadFile(std::string("core/") + f);
