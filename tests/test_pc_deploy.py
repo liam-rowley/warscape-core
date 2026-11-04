@@ -792,6 +792,9 @@ class AtomicWrite(DeployBase):
         self.ini = self.game / 'nullgame.ini'
         self.ini.write_bytes(b'; keep\r\n[proxy]\r\nbackend=dxvk\r\n')
         self.before = self.ini.read_bytes()
+        p = mock.patch.object(pd, 'default_identity', return_value=json.loads(self.ident.read_text()))   # the fake exe's identity
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_set_writes_through_a_same_folder_temp_file(self):
         calls, real = [], os.replace
@@ -836,6 +839,7 @@ class AtomicWrite(DeployBase):
         def spy(path, data):
             seen.append(Path(path).name)
             return real(path, data)
+        self.ini.unlink()   # nothing installed: a config file there would be a stray
         with mock.patch.object(pd, 'write_atomic', spy):
             quiet(pd.install, self.kit, self.game, self.state)
             quiet(pd.set_keys, self.game, ['proxy.backend=system'], None, self.state)
