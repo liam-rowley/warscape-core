@@ -3,10 +3,11 @@
   "description": "napoleon J64's required proxy job fails in proxy/tools/build.sh smoke step 6 (napoleon run 41801657509: 'gesture: on: drag 6 px' not in the log): steps 6, 7 and 8 assume the null game's adapter (a GestureAdapter, and the site null.dummy_hook). Make each step assert what the game being built must do, read from its own log and generated tables, with the null game's assertions unchanged and a no-gesture fixture smoke added to the core's CI. Blocks napoleon J64 (Liam, 2026-11-04: core fix first, then J64 bumps to its tag).",
   "title": "The proxy smoke runs for a game without gestures or the null game's sites",
   "phase": 1,
-  "status": "review",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
   "brief": "jobs/W37/brief.md",
-  "report": "jobs/W37/report.md"
+  "report": "jobs/W37/report.md",
+  "review": "jobs/W37/review.md"
 }
