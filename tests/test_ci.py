@@ -286,7 +286,9 @@ class Render(unittest.TestCase):
         self.assertIn('failure()', ifs['notify'])
         self.assertIn("github.event.action != 'ready_for_review'", ifs['notify'])
         self.assertIn('echo extra', text)
-        self.assertIn('policy --branch "${{ github.head_ref }}"', text)
+        # W23: the head's names reach the script through env (pull_request_target), and --head names the commit judged
+        self.assertIn('policy --branch "$HEAD_REF" --base "origin/$BASE_REF" --head "$HEAD_SHA"', text)
+        self.assertLess(text.index('refs/pull/$PR/head'), text.index('echo extra'))   # the extra steps can read the fetched head
 
     @staticmethod
     def run_scripts(text):
@@ -373,12 +375,15 @@ class Render(unittest.TestCase):
         self.assertEqual(ci_render.problems(Ctx.load(ROOT)), [])
 
     # W21: a game renders the same blocks; a byte that changes fails its `ci_render` gate after a pin bump. Hashes taken on main before W21.
+    # W23 changed three of them on purpose, in one commit: the `policy` block (pull_request_target: a base checkout, the head fetched as git
+    # objects, head names through env, --head) and `notify policy` (the branch through env), and the fixture's template switched its trigger.
+    # The fixture's gates.yml is unchanged.
     ALL_BLOCKS = ('jobs:\n{{wsc changes}}\n  a:\n{{wsc if native}}\n  b:\n{{wsc if host dispatch}}\n{{wsc pass_marker native}}\n'
                   '{{wsc pass_marker host shell=bash}}\n{{wsc policy}}\n{{wsc notify gates needs=changes,a,b}}\n{{wsc notify policy}}\n')
     GOLDEN = {'fixture_game gates.yml': '08df5d836f17dae07ffcb1e3a08ef17e152d82904397c44d679e9886d04855af',
-              'fixture_game policy.yml': 'fd4af2f072285b78862fec6b164003a5b6ce92d04b1cb56d82264c3fb5afbe9d',
-              'all blocks, a game': '53e941b58805bea2d3973ce0f5914ef85cfa2e8b0f472bf9fdcbc7fd294f8f7c',
-              'all blocks, the core': '7349ba6580dc6921190139b1257c028e9dbab54f3e8e64bc38a7d545483c7e15'}
+              'fixture_game policy.yml': '9707260ef4246236ae4acfa6e25493bdac0345b9ac576288fab35400cf1bd3e9',
+              'all blocks, a game': 'e7c81ab231768f735b0d4fdfd5f5b2720b043e5a7fee4ca854fc1ab28cd7b048',
+              'all blocks, the core': '9426d6428a79efc0443175ab8151b8094d11239b23e3b8cbe79374a91abdd8ca'}
 
     def test_the_existing_blocks_render_byte_for_byte_as_before(self):
         import hashlib
