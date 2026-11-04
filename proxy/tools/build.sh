@@ -64,7 +64,7 @@ fi
 # owned by one of them (toolchain.py check). Off the pin the build is refused (exit 2) unless WSP_TOOLCHAIN=any, which builds and marks the
 # id -dirty once: a DLL from another toolchain is not the DLL the committed id names. `id` above never gets here (rule 79 needs no compiler).
 # W24: the CI step summary, when $GITHUB_STEP_SUMMARY is set (every consumer's CI gets it with no template change; a PC build writes none)
-summary() { if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then printf '%s\n' "$@" >> "$GITHUB_STEP_SUMMARY"; fi; }
+summary() { if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then printf '%s\n' "$@" >> "$GITHUB_STEP_SUMMARY"; printf 'build.sh: step summary: %s\n' "$@"; fi; }
 TOOLCHAIN_LINE=""
 toolchain_check() {   # $1 = the mingw g++ the build will use
   [[ -n "$TOOLCHAIN_LINE" ]] && return 0
