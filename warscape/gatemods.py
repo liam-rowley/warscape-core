@@ -13,8 +13,12 @@ A module defines:
                        ((jid, row, text) for each row whose brief exists, skipping the legacy file's `brief_hooks` ids). An `error`
                        Result's details are queue problems; a `warn` Result's details print without failing; a non-empty summary is
                        appended to the `jobs check` line
-               policy  `wsc policy` only, never `wsc gates`. ctx.facts: warscape/policy.py collect_facts plus branch, kind, jid,
-                       changed and any extra facts the caller passes. An `error` Result's details are policy errors
+               policy  `wsc policy` only, never `wsc gates`, run from the base tree (core W23, C24): ctx.root and ctx.config are the
+                       base's rule inputs in a temporary folder (not a repository) and ctx.files() lists them. ctx.facts: branch,
+                       kind, jid, changed, merge_base, base and head (shas), base_ref, repo (the clone's absolute path: run git there; a
+                       game's submodule is <repo>/<[ci] core>) and any extra facts the caller passes. Read the head as data with
+                       `warscape.policy.show(sha, path, cwd=repo)`; never 'HEAD', never git in ctx.root, never import or run the
+                       head's files. An `error` Result's details are policy errors
                view    `wsc jobs view`. ctx.rows. Drawn at the top of the page: the Result's `html` as is when it is not empty,
                        else its escaped summary and details as a muted paragraph (an empty Result draws nothing)
              An unknown stage is a load error: a typo must never switch a rule off silently.
