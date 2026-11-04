@@ -464,30 +464,30 @@ PFN_DI8Create o_DI8Create; PFN_DICreateDevice o_DICreateDevice; PFN_DIState o_DI
 HRESULT WINAPI hk_DIState(void* dev, DWORD cb, void* data) {
     const HRESULT hr = o_DIState(dev, cb, data);
     if (FAILED(hr) || !data) return hr;
-    const uint32_t mask = (uint32_t)s_diMask;   // one read of the word the window thread published (B53): no route struct, no lock
+    const uint32_t dim = (uint32_t)s_diMask;   // one read of the word the window thread published (B53): no route struct, no lock
     if (dev == s_diMouse && cb >= 16) {
         InterlockedIncrement(&s_diStateReads);
         BYTE* b = (BYTE*)data + 12; const DWORD n = cb - 12;
-        unsigned mask = 0; for (DWORD i = 0; i < n && i < 8; ++i) if (b[i] & 0x80) mask |= 1u << i;
-        if (mask && mask != s_diMouseBtnPrev && InterlockedIncrement(&s_diStateButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceState)");
-        s_diMouseBtnPrev = mask;
-        if ((mask & kDiBlankButtons) || GestureOwnsMouse()) memset(b, 0, n);   // W6: a gesture holds the buttons
-        if ((mask & kDiBlankWheel)) ((LONG*)data)[2] = 0;
-    } else if (dev == s_diKeyboard && cb == 256 && (mask & kDiTextFocus)) memset(data, 0, cb);
+        unsigned btns = 0; for (DWORD i = 0; i < n && i < 8; ++i) if (b[i] & 0x80) btns |= 1u << i;
+        if (btns && btns != s_diMouseBtnPrev && InterlockedIncrement(&s_diStateButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceState)");
+        s_diMouseBtnPrev = btns;
+        if (UiDiBlankButtons(dim, GestureOwnsMouse())) memset(b, 0, n);   // W6: a gesture holds the buttons
+        if (UiDiBlankWheel(dim)) ((LONG*)data)[2] = 0;
+    } else if (dev == s_diKeyboard && cb == 256 && (dim & kDiTextFocus)) memset(data, 0, cb);
     return hr;
 }
 HRESULT WINAPI hk_DIData(void* dev, DWORD cbObj, DiData* rg, DWORD* inOut, DWORD flags) {
     const HRESULT hr = o_DIData(dev, cbObj, rg, inOut, flags);
     if (FAILED(hr) || !rg || !inOut || (flags & 1 /* DIGDD_PEEK */) || cbObj < sizeof(DWORD) * 2) return hr;
-    const uint32_t mask = (uint32_t)s_diMask;
+    const uint32_t dim = (uint32_t)s_diMask;
     for (DWORD i = 0; i < *inOut; ++i) {
         DiData* e = (DiData*)((BYTE*)rg + (size_t)i * cbObj);
         if (dev == s_diMouse) {
             InterlockedIncrement(&s_diDataReads);
             const bool btn = e->ofs >= 12 && e->ofs < 20, wheel = e->ofs == 8;
             if (btn && (e->data & 0x80) && InterlockedIncrement(&s_diDataButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceData)");
-            if ((btn && ((mask & kDiBlankButtons) || GestureOwnsMouse())) || (wheel && (mask & kDiBlankWheel))) memset(e, 0, cbObj);
-        } else if (dev == s_diKeyboard && (mask & kDiTextFocus)) memset(e, 0, cbObj);
+            if ((btn && UiDiBlankButtons(dim, GestureOwnsMouse())) || (wheel && UiDiBlankWheel(dim))) memset(e, 0, cbObj);
+        } else if (dev == s_diKeyboard && (dim & kDiTextFocus)) memset(e, 0, cbObj);
     }
     return hr;
 }

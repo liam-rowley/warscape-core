@@ -148,6 +148,14 @@ int main(int argc, char** argv) {
             }
         }
     }
+    {   // R1 finding 1: the blank decision over (word, gesture owner), every combination
+        for (uint32_t w = 0; w < 8; ++w) for (int g = 0; g < 2; ++g) {
+            CHECK(UiDiBlankButtons(w, g) == (((w & kDiBlankButtons) != 0) || g));
+            CHECK(UiDiBlankWheel(w) == ((w & kDiBlankWheel) != 0));
+        }
+        CHECK(!UiDiBlankButtons(0, false) && UiDiBlankButtons(kDiBlankButtons, false) && UiDiBlankButtons(0, true));
+        CHECK(!UiDiBlankWheel(kDiBlankButtons | kDiTextFocus) && UiDiBlankWheel(kDiBlankWheel));   // a held left button (bit 0 of the bitmap) is not the route word
+    }
     {   // W20 source lints (B53): the DirectInput hooks never touch s_route; every block that writes it publishes before it ends
         const std::string host = tk::ReadFile("core/ui_host.cpp");
         const size_t st = host.find("HRESULT WINAPI hk_DIState("), cr = host.find("HRESULT WINAPI hk_DICreateDevice(");
@@ -155,6 +163,9 @@ int main(int argc, char** argv) {
         const std::string di = host.substr(st, cr - st);
         CHECK(di.find("s_route") == std::string::npos && di.find("s_cs") == std::string::npos && di.find("Lock l") == std::string::npos);
         CHECK(di.find("s_diMask") != std::string::npos);
+        // R1 finding 1: the hooks decide through the pure functions, and no local named `mask` exists to shadow anything
+        CHECK(di.find("UiDiBlankButtons(dim, GestureOwnsMouse())") != std::string::npos && di.find("UiDiBlankWheel(dim)") != std::string::npos);
+        CHECK(di.find("mask ") == std::string::npos && di.find("mask&") == std::string::npos && di.find("(mask") == std::string::npos);
         CHECK(host.find("void Publish() {") != std::string::npos && host.find("InterlockedExchange(&s_diMask") != std::string::npos);
         const size_t wp = host.find("LRESULT CALLBACK WndProc("), act = host.find("case WM_ACTIVATEAPP:", wp), def = host.find("default:", act);
         CHECK(act != std::string::npos && def != std::string::npos);

@@ -127,3 +127,15 @@ the section "CI evidence (orchestrator)" gives the runs.
 - **Capture loss.** A gesture now cancels when the game window loses mouse capture to another window or to nothing.
 - **`gesture info`** gains `"reentered"`.
 - No adapter, config key or ini change is needed.
+
+## Fix round 1
+1. **Blocker, shadowed `mask` in `hk_DIState`.** Fixed: the blank decision is now the pure `UiDiBlankButtons(word, gestureOwns)` and
+   `UiDiBlankWheel(word)` in `ui_core.h`; the hooks read the published word as `dim` and the button bitmap is `btns`, so nothing shadows.
+   `test_ui_core.cpp` tests the functions over every combination (including a held left button not being the route word) and lints that the
+   hooks use them and declare no `mask`. The proxy and host tests now compile with `-Wshadow` (`tools/build.sh`). Commit: see `git log`
+   (one commit with the fix, tests and flag). Not compiled on the builder's PC (no compiler); CI is the compiler. If `-Wshadow` flags older
+   code, CI will say so on this branch.
+2. **Should-fix, coverage beyond text presence.** Closed by the same pure function and its exhaustive test.
+3. **Deviation 2, accepted.** No action.
+4. **Later (B58 e).** Left in the backlog as the review says.
+5. **Deviation 5, accepted.** No action.
