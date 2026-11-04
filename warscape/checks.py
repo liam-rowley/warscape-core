@@ -98,7 +98,10 @@ def oversize(sizes, max_kb):
 
 
 # ------------------------------------------------------------------ undated "verified" (empire audit_repo.py sot.verified_dates, 2026-10-28)
-VD_DATED = re.compile(r'\d{4}-\d\d-\d\d|\b20\d{6}|\b\d{1,2}-\d{2}\b|reports/|runs/|records/|\.md\)|session|\bv\d')
+# a date or a run id, nothing looser (W28): an ISO date, a compact date (a run folder such as 20261104_a), or a path under reports/ runs/ records/.
+# A link to a dated record passes through its date; "on PC", "in session", "3-10 times", "(see x.md)" and "v2" do not date a claim.
+VD_DATED = re.compile(r'\d{4}-\d\d-\d\d|\b20\d{6}|reports/|runs/|records/')
+VD_WORD = re.compile(r'\bverified\b', re.I)
 VD_NONCLAIM = re.compile(r'\bunverified\b|\bnot\W{0,4}(?:yet\W+)?verified|\b(?:nothing|never|none)\b[^.|]{0,40}\bverified|["“`]\s*verified\b|\[V\]|\bwhat\b[^.|]{0,12}\bverified\b'
                          r'|\b(?:sha\d*|md5|crc\d*|byte|hash|checksum)[- ]verified'
                          r'|\b(?:to be|must be|should be|will be|can be|needs? to be|be)\s+(?:re-?)?verified'
@@ -145,9 +148,9 @@ def undated_verified(lines):
             continue
         if fence:
             continue
-        if not re.search(r'\b[Vv]erified\b', l) or VD_DATED.search(l) or ctx.get(t) or item.get(t) or VD_NONCLAIM.search(l):
+        if not VD_WORD.search(l) or VD_DATED.search(l) or ctx.get(t) or item.get(t) or VD_NONCLAIM.search(l):
             continue
-        if all(VD_ATTRIB.match(l, m.start()) for m in re.finditer(r'\b[Vv]erified\b', l)):
+        if all(VD_ATTRIB.match(l, m.start()) for m in VD_WORD.finditer(l)):
             continue
         out.append(t + 1)
     return out

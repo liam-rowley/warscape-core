@@ -116,6 +116,13 @@ class VerifiedDates(unittest.TestCase):
         for l in ('verified.', 'verified in game', 'all four verified 0 px', '| x | verified |', 'verified by the user', 'verified live'):
             self.assertEqual(flagged(l), [1], l)
 
+    def test_only_a_date_or_run_id_dates_a_claim(self):
+        """W28: the loose alternatives (`\\d-\\d\\d`, 'session', '.md)', 'v<digit>') no longer pass; the case of "verified" does not matter."""
+        for l in ('VERIFIED on PC', 'verified in session', 'verified 3-10 times', 'verified (see x.md)', 'verified in v2'):
+            self.assertEqual(flagged(l), [1], l)
+        for l in ('verified 2026-11-04', 'verified, run 20261104_a', 'verified in game (docs/reports/x.md)', 'verified, see [run](records/r.md)'):
+            self.assertEqual(flagged(l), [], l)
+
 
 
 class CorePin(unittest.TestCase):
