@@ -56,6 +56,7 @@ DEFAULTS = {
         'dir': 'jobs',                     # jobs/<id>/brief.md, report.md, review.md
         'models': ['sonnet', 'opus'],      # the Model line of a brief; the first is the default, the others need a stated reason
         'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
+        'failed_results': '',              # glob (relative to a run folder a report cites) of ctl result JSONs: one with status "failed" must be named in ## Deviations ('' = off)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)

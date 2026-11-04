@@ -45,6 +45,54 @@ def files(**kw):
     return lambda p: m.get(p)
 
 
+class FailedResults(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = Path(self.tmp.name) / 'runs' / 'r1' / 'raw' / 'a'
+        d.mkdir(parents=True)
+        (d / 'ok.json').write_text('{"status": "ok"}', encoding='utf-8')
+        (d / 'bad.json').write_text('{"status": "failed"}', encoding='utf-8')
+        (d / 'junk.json').write_text('not json', encoding='utf-8')
+
+    def rep(self, dev, other='', cite='Evidence: runs/r1.'):
+        return '\n'.join(['# J1 report: t', '', cite, '', '## Deviations', dev, '', '## Open questions', other, ''])
+
+    def probs(self, text, glob='raw/**/*.json'):
+        return jv.failed_results_problems('J1', text, self.tmp.name, glob)
+
+    def test_unnamed_failure_is_one_problem(self):
+        e = self.probs(self.rep('none'))
+        self.assertEqual(len(e), 1, e)
+        self.assertIn('bad.json', e[0])
+        self.assertIn('runs/r1', e[0])
+
+    def test_named_by_file_name_or_relative_path(self):
+        self.assertEqual(self.probs(self.rep('bad.json failed, expected')), [])
+        self.assertEqual(self.probs(self.rep('raw/a/bad.json failed')), [])
+
+    def test_named_only_elsewhere_fails(self):
+        self.assertEqual(len(self.probs(self.rep('none', other='bad.json'))), 1)
+
+    def test_no_citation_or_rule_off(self):
+        self.assertEqual(self.probs(self.rep('none', cite='no folder')), [])
+        self.assertEqual(self.probs(self.rep('none'), glob=''), [])
+        self.assertEqual(self.probs(self.rep('none', cite='runs/missing')), [])
+
+    def test_problems_calls_it_only_when_configured(self):
+        rows = [row(status='review', brief='jobs/J1/brief.md', report='jobs/J1/report.md')]
+        read = files(jobs__J1__brief_md=BRIEF, jobs__J1__report_md=self.rep('none'))
+        old = jv.S.failed_results, jv.S.root
+        self.addCleanup(lambda: setattr(jv.S, 'failed_results', old[0]) or setattr(jv.S, 'root', old[1]))
+        jv.S.failed_results, jv.S.root = '', Path(self.tmp.name)
+        self.assertEqual(jv.problems(rows, read, ['J1']), [])
+        jv.S.failed_results = 'raw/**/*.json'
+        e = jv.problems(rows, read, ['J1'])
+        self.assertEqual(len(e), 1, e)
+        self.assertTrue(e[0].startswith('J1: report: failed ctl result'), e)
+
+
+
 class Check(unittest.TestCase):
     def errs(self, rows, read=None, folders=()):
         return jv.problems(rows, read or files(), folders)
