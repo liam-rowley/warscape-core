@@ -41,7 +41,7 @@ jobs:
   # proxy (napoleon J12): the proxy core moved here. Build the DLL with the null game (proxy/tests/null_game), run every C++ host test,
   # prove the DLL does not depend on the checkout path, and smoke it under wine. WSP_BUILD_ID: build_id.py hashes a game repo's inputs,
   # and the null game is a folder inside this repo (backlog B16).
-  # The toolchain (W24, C24): the mingw-w64 packages at the exact versions of proxy/tools/toolchain.py, a build-id input that build.sh checks
+  # The toolchain (W24, C25): the mingw-w64 packages at the exact versions of proxy/tools/toolchain.py, a build-id input that build.sh checks
   # before it compiles (refused off the pin). The runner image stays outside the pass-marker key: with the toolchain pinned and checked it
   # cannot change the DLL's bytes; it can change the host tests' g++ and the smoke's wine, which the next proxy/ change exercises, and
   # [ci] salt stays the manual lever. build.sh writes the job's step summary (the DLL's id, sha256, bytes, toolchain, repro and smoke lines).

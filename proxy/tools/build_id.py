@@ -17,7 +17,7 @@ to warscape-core), then inside each submodule at the commit the revision's gitli
 proxy/tools, read with `git -C <submodule> rev-parse <gitlink>:<path>`, since `git rev-parse HEAD:core/...` does not reach into a
 submodule). The proxy/core tree moves to proxy/src unchanged, so the core role keeps its object id and the DLL its build id.
 
-What the DLL compiles (W24, C24): the id hashes committed content, so build.sh compiles the tracked files only (`--sources`, read from
+What the DLL compiles (W24, C25): the id hashes committed content, so build.sh compiles the tracked files only (`--sources`, read from
 `git -C <folder> ls-files`, the index of the repository that holds the folder, a submodule's own). An untracked or ignored source file
 under the core sources or the adapter folder refuses the build instead of a -dirty id: it is a forgotten `git add` (the DLL silently lacks
 it) or a stray copy, and an untracked header can shadow a tracked one through -I. A staged new file is listed, and the id is -dirty.
@@ -39,7 +39,7 @@ INPUTS = [('core', ('proxy/core', 'proxy/src')), ('adapter', (ADAPTER,)), ('buil
           ('fetch_lua', ('proxy/tools/fetch_lua.py',)), ('build_id', ('proxy/tools/build_id.py',)),
           # J30: RmlUi, FreeType and the host's Lua compile into the DLL from the pinned sources the fetcher takes from this pin file
           ('fetch_ui', ('proxy/tools/fetch_ui.py',)), ('ui_pins', (UI_PINS,)),
-          # W24 (C24): the image and the exact mingw-w64 package versions, a committed file: never the installed compiler measured into
+          # W24 (C25): the image and the exact mingw-w64 package versions, a committed file: never the installed compiler measured into
           # the id, so rule 79 recomputes it with no compiler; build.sh refuses a toolchain off this pin (toolchain.py check)
           ('toolchain', ('proxy/tools/toolchain.py',))]
 

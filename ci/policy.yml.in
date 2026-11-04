@@ -1,15 +1,25 @@
-# purpose: CI's `policy` check on every pull request: the branch kind decides what it may change (`wsc policy`, docs/CONSUMING.md "The job pipeline");
-#          a failure comments on the pull request.
-# usage: runs on GitHub Actions; locally: python3 wsc.py policy --branch <branch> --base origin/main
+# purpose: CI's `policy` check on every pull request: the branch kind decides what it may change (`wsc policy`, docs/CONSUMING.md "The job pipeline"),
+#          judged with the base's rules; a failure comments on the pull request.
+# usage: runs on GitHub Actions; locally (after git fetch): python3 wsc.py policy --branch <branch> --base origin/main [--head <rev>]
 # when: automatic on pull requests; require the "policy" check in branch protection for main.
+# pull_request_target (W23, C24): GitHub runs this file as it is on main, never a pull request's copy, so a branch cannot edit its own check, and
+# `wsc policy` judges the head's commits with main's code and configuration. The job has the base's privileges: no step checks out, builds,
+# caches or runs the pull request's files (the policy block fetches the head as git objects; `wsc ci render` refuses a template without it).
 # Draft pull requests skip it: a job's builder opens its pull request as a draft when the job reaches review, so the review sees the branch's CI
 # without a `policy` that must fail until the review says merge. The reviewer marks the pull request ready BEFORE pushing the review commit
 # (a skipped policy counts as passed, and `gh pr merge --auto` merges at once when the checks have passed), so the pushed head gets a real
 # `policy` run; the ready_for_review run on the old head has no merge verdict and is red by design: the push cancels it, and `notify` stays silent.
 name: policy
 on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # The W23 bootstrap. main's copy of this file had no pull_request_target when W23's own pull request ran, so that pull request is judged by
+  # this trigger from its own copy (under decision 6 of jobs/W23/brief.md: the base predates W23). Only W23's report matches the path filter,
+  # and a workflow a path filter skips reports no check, so every other pull request gets one `policy` check, from main's file. W27 removes
+  # this trigger; `wsc ci render` and the `ci_render` gate warn until then.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths: ['jobs/W23/report.md']
 permissions:
   contents: read
 concurrency:

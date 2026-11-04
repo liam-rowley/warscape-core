@@ -535,7 +535,7 @@ class PcLaunch(unittest.TestCase):
 
 
 class BuildInfo(unittest.TestCase):
-    """W24 (C24): build_info() reads the DLL's own file sha256 from the self_hash line (the second line of proxy.log) beside the launch line's id."""
+    """W24 (C25): build_info() reads the DLL's own file sha256 from the self_hash line (the second line of proxy.log) beside the launch line's id."""
     HEX = 'ab' * 32
     LAUNCH = ('2026-11-04T09:00:00.000Z [INFO ] [t1] launch 20261104T090000Z-p1: Null proxy d3d9.dll build 0123456789ab loaded into '
               'C:\\g\\Null.exe (pid 1, base 00400000)\r\n')

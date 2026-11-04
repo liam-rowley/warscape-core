@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
             CHECK(s.find("PlanEngine(") == std::string::npos);
         }
         // the core names no game (it moves to warscape-core)
-        {   // W24 (C24, docs/PROXY_BUILD.md): the self_hash line exactly as W9 parses it, logged right after the launch line (nothing logged between:
+        {   // W24 (C25, docs/PROXY_BUILD.md): the self_hash line exactly as W9 parses it, logged right after the launch line (nothing logged between:
             // it is the second line of every log) and before the dll and config lines; the self-hash path loads nothing, starts no thread, waits for nothing
             const std::string raw = tk::ReadFile("core/dllmain.cpp");
             const size_t np = std::string::npos;

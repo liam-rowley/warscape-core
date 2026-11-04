@@ -47,18 +47,12 @@ Costs of the recommendation, and what covers them:
   folder, as the tail of a tracked path, inside a submodule, or git-ignored. `[gates] run_refs_since = "YYYY-MM-DD"` skips run folders dated before it (default `""`:
   all checked); set it to the pin-bump date when old READMEs name moved paths.
 
-## The build id names one DLL (0.27.0, W24, C24; [PROXY_BUILD.md](PROXY_BUILD.md))
-
-- **Rule 79: the build id changes** (roles `core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed; `toolchain` is new), **and so do the DLL's bytes**:
-  20 consecutive acceptance passes on the new id.
-- **CI:** the job that runs `build.sh` installs the pin instead of `g++-mingw-w64-i686`, then `python3 core/wsc.py ci render`:
-  `sudo apt-get install -y -q --no-install-recommends $(python3 core/proxy/tools/toolchain.py apt)`. Otherwise `build.sh` refuses as soon as the
-  archive's candidate differs from the pin. A job that uses `{{wsc fetch_cache}}` re-renders to two steps.
-- **Tests that build a throwaway game repo for `build_id.py`** copy `proxy/tools/toolchain.py` beside `build.sh`, `build_id.py` and `layout.py`
-  (else `locate` refuses: "toolchain is not tracked").
-- **On the PC** nothing changes: `build.sh --docker` installs the pins in the container, and `build/ui/obj/mingw32` rebuilds once. A native build
-  off the pin needs `WSP_TOOLCHAIN=any` and gives a `-dirty` DLL. An untracked source under `core/proxy/src` or the adapter folder refuses the build.
-- `proxy.log`'s second line is now `self_hash: ...`; `harness/ctl.py` `build_info()` returns `dll_sha256`. No adapter, config key or ini change.
+## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
+- **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
+- **CI:** install `$(python3 core/proxy/tools/toolchain.py apt)` with `--no-install-recommends` instead of `g++-mingw-w64-i686` (else `build.sh`
+  refuses once the archive moves), then `wsc ci render` (`{{wsc fetch_cache}}` is two steps). `build_id.py` test fixtures copy `toolchain.py`.
+- **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
+- `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
 
 ## Wiring a game repo (the steps, once approved)
 
@@ -184,7 +178,7 @@ decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD
 decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
-plan = [...]                       # globs a plan/* branch may touch; meta = [...] for a meta/* branch
+plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
 workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
@@ -195,12 +189,27 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
+- **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
+  `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
+  commit's tree; in a game, the core commit the base's `core` gitlink pins (read from the submodule's object store: `git submodule update --init`),
+  plus the base's `wsc.toml`, `[gates] dirs` and `[jobs] legacy` file. The head reaches it only as git objects: its diff, the blobs the rules read,
+  its trailers. A branch that changes the core, `wsc.toml`, a gate module, the legacy file or the policy workflow is judged by the old ones, with a
+  note. **`git fetch` first**: a stale `origin/main` judges with stale rules. The same two shas print the same lines anywhere; CI is the authority
+  (its parent is the base's code, a local one your checkout's). It judges the head commit against the base tip, not GitHub's merge commit, so a
+  branch behind the base on the decisions file is told to merge it. It fails closed, naming the fix: a ref that does not resolve, an unreadable base
+  `wsc.toml`, no gitlink, an uninitialised submodule or a missing pin (`git -C core fetch origin <pin>`), or a child with no verdict. A base whose
+  core predates W23 (no `JUDGE_API` line) is judged as before, with a note. `--commit-msg` stays a local check of the message being written.
+- **What the `policy` check does not prove.** Anyone with a write token can post a status named `policy`, and GitHub calls same-named jobs in two
+  workflows ambiguous, so a head that adds a workflow with a `policy` job can blur the result. No code in a user-owned repository closes this (an
+  organisation's "require workflows to pass" ruleset would); it is accepted for now (W23), and the reviewer reads any `.github/workflows/` change.
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc fetch_cache}}`, `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
-- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.22.0): two steps (0.27.0) that cache
-  the fetchers' raw downloads by the pins (`netfetch.py ci-cache`), so a warm cache makes the build offline. The fetchers retry their own network
-  flakes inside `build.sh` (0.27.0; the `netfetch.py prefetch` step is gone), and their sha256 checks still judge every byte; a cache fault never fails the job.
+  A template with `{{wsc policy}}` must trigger on `pull_request_target` (W23): GitHub then runs main's copy of the workflow, never the head's, so
+  a branch cannot edit its own check. `wsc ci render` and the `ci_render` gate refuse one without it and warn while a `pull_request` trigger remains.
+- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.22.0; two steps from 0.27.0): the
+  fetchers' raw downloads cached by the pins (`netfetch.py ci-cache`), so a warm cache builds offline. The fetchers retry their own network flakes
+  (0.27.0) and their sha256 checks judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
 - **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
@@ -231,8 +240,10 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
 ```
 - **Stages.** `gates`: its own line in `wsc gates`, after the core gates (`[gates] skip`, `fast` and `--only` take its name). `jobs`: the `jobs` gate and
   `wsc jobs check`, with `ctx.rows`, `ctx.read(path)` and `ctx.briefs()` (`(jid, row, text)` per brief, minus the legacy file's `brief_hooks` ids); an `error`
-  Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, with `ctx.facts`
-  (branch, kind, jid, changed, the merge base; the module runs from the branch's own head); an `error` Result's details are policy errors. `view`: `wsc jobs view`,
+  Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, run from the
+  **base tree** (W23): `ctx.root` and `ctx.config` are the base's rule inputs in a temporary folder, not a repository; `ctx.facts` has branch, kind, jid,
+  changed, merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
+  `show(sha, path, cwd=repo)`; never `'HEAD'`, never git in `ctx.root`, never run the head's files. An `error` Result's details are policy errors. `view`: `wsc jobs view`,
   with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
 - A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
   `run`, and a module that still defines one of the old hook names are load errors (`wsc` exits 2 naming the file).
@@ -255,6 +266,22 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
 
+## Moving to base-judged policy (0.26.0, core W23, C24)
+In the pin-bump commit itself, because the render guard and the new facts fail otherwise (napoleon: J78):
+1. **`ci/policy.yml.in`:** `on: pull_request_target` with the same types. For the bump's own pull request add a second trigger, `pull_request` with
+   the same types and `paths: ['jobs/<bump id>/report.md']` (main's copy has no `pull_request_target` yet, so without it nothing would run `policy`
+   on that pull request); remove it in the next change to the template (`ci_render` warns until then). Run `wsc ci render`.
+2. **`[ci] policy_extra_steps`** now run in the base checkout, where `HEAD` is the base. Take the head's sha from an `env:` value
+   (`${{ github.event.pull_request.head.sha }}`), never from an expression inside `run:`, and make both pins present in `core/` if a module compares them.
+3. **The `policy`-stage module** (napoleon `tools/gates/pipeline.py`): run git at `ctx.facts['repo']` with the `head`, `base` and `merge_base` shas
+   (`show`, `show_first`, `core_pin_diff`, `collect_acceptance`), never in `ctx.root` and never with `'HEAD'`; a module left as it is fails closed, as a
+   crash. `ctx.root/core/...` is now the base's core: a build id must come from the base's `build_id.py` over the head's blobs, never by running the
+   head's copy. When a bump changes `build_id.py` itself, the base's algorithm cannot reproduce the head's id: the game needs a rule for that, and the
+   default is a refusal.
+4. **Behaviour.** CI judges the pull request's head against the base tip, so a branch behind `main` on the decisions file must merge `main`. Globs
+   match by path segment: `registries/*` no longer covers `registries/<name>/<row>.json`. Until the bump merges, the game's pull requests are judged
+   as before, with the note.
+
 ## The proxy, the harness and the save tools (0.4.0)
 From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
 watcher kit (`harness/`) and the ESF save tools (`saves/`). A game keeps its adapters: `proxy/<game>/` (adapter.cpp, identity.json,
@@ -275,9 +302,8 @@ instead of keeping its own, and a host test that runs a shell script takes its b
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
 (watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
 
-**The UI pin file** (`wsc.toml` `[proxy] ui_pins`, else `viewer/pins.json`; a DLL input, the `ui_pins` role) needs five keys: `rmlui` and
-`freetype` (`version`, `repo`, `commit`), `lua`, `stb_image` and `stb_image_write` (`version`, `url`, `sha256`; `stb_image_write` is the in-game
-host's PNG dump, required since 0.10.0). The reference is the null game's `proxy/tests/null_game/viewer/pins.json`: copy a missing entry from it.
+**The UI pin file** (`[proxy] ui_pins`, else `viewer/pins.json`; the `ui_pins` input) needs `rmlui`, `freetype`, `lua`, `stb_image` and
+`stb_image_write` (the PNG dump, since 0.10.0); copy a missing entry from the null game's `proxy/tests/null_game/viewer/pins.json`.
 
 Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
 ([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer

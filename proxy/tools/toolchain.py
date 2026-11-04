@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The proxy DLL's toolchain pin: the build image and every mingw-w64 package at its exact version, a build-id input (W24, C24).
+"""The proxy DLL's toolchain pin: the build image and every mingw-w64 package at its exact version, a build-id input (W24, C25).
 
 purpose: hold the pinned ubuntu:24.04 image digest and the exact apt versions of the mingw-w64 packages that make the DLL; print them for apt and docker; check the installed toolchain against them
 usage: python3 proxy/tools/toolchain.py apt | image | installed | check <cxx>   (apt: `pkg=version ...` sorted on one line; image: the image reference; installed: the pinned packages' installed versions on one line; check: exit 0 with one `toolchain: pinned:` line, else one line per difference, the fix, and exit 2)

@@ -110,7 +110,9 @@ class Policy(unittest.TestCase):
         self.assertTrue(self.run_check('plan/x', ['tools/a.py']))
         self.assertTrue(self.run_check('plan/x', ['registries/tools/wsc.jobs.json']))
         self.assertEqual(self.run_check('meta/x', ['.github/workflows/gates.yml', 'tests/t.py',
-                                                   'registries/tools/wsc.jobs.json', 'registries/hotkeys.jsonl', 'docs/DECISIONS.md']), [])
+                                                   'registries/hotkeys.jsonl', 'docs/DECISIONS.md']), [])
+        # W23 (decision 11): globs match by segment, so `registries/*` no longer reaches a per-row registry file
+        self.assertTrue(self.run_check('meta/x', ['registries/tools/wsc.jobs.json']))
         errs = self.run_check('meta/x', ['proxy/core/guard.cpp'])
         self.assertTrue(errs and 'game code goes through a job' in errs[0])
 
@@ -149,6 +151,20 @@ class Policy(unittest.TestCase):
         fixer_reviews = lambda p: [{'S1'}, {'F1'}] if p.endswith('report.md') else [{'R1'}, {'F1'}]
         e = check('job/J1', ['x'], {'J1': ROW, 'J2': OTHER}, {'J1': done, 'J2': OTHER}, base, head, fixer_reviews)
         self.assertTrue(any('also wrote the report (F1)' in x for x in e), e)
+
+    def test_w23_globs_match_by_path_segment(self):
+        """Decision 11: `*` and `?` stay inside one segment and `**` spans folders (repo.matches), so `registries/*` no longer covers
+        per-row registry files."""
+        self.assertFalse(pp.allowed('registries/jobs/W1.json', ['registries/*']))
+        self.assertTrue(pp.allowed('registries/tools.jsonl', ['registries/*']))
+        self.assertTrue(pp.allowed('docs/a/b.md', ['docs/**']))
+        self.assertFalse(pp.allowed('docs/a/b.md', ['docs/*']))
+
+    def test_w23_a_branch_behind_the_base_on_the_decisions_file_is_told_to_merge(self):
+        base = '| D1 | 2026-10-28 | Liam | A. | yes |\n| D2 | 2026-10-28 | Liam | B. | no |\n'
+        self.assertEqual(pp.decisions_problems(base, base.splitlines(True)[0], CFG, 'origin/main'),
+                         ['docs/DECISIONS.md: merge origin/main: the base has rows this branch lacks (D2)'])
+        self.assertIn('append only', pp.decisions_problems(base, base.replace('B.', 'Bee.'), CFG, 'origin/main')[0])
 
     def test_a_commit_without_a_trailer_fails_closed(self):
         done = {'id': 'J1', 'status': 'done', 'brief': 'jobs/J1/brief.md', 'report': 'jobs/J1/report.md', 'review': 'jobs/J1/review.md'}
@@ -236,7 +252,8 @@ class PolicyOnGit(unittest.TestCase):
         self.git('init', '-q', '-b', 'main')
         self.git('config', 'user.email', 't@example.invalid')
         self.git('config', 'user.name', 'test')
-        self.commit('wsc.toml', '[policy]\ndecisions = "docs/DECISIONS.md"\n')
+        # [ci] core = "": a repo with no core of its own (no gitlink, no warscape/policy.py) is judged as before W23, with a note
+        self.commit('wsc.toml', '[policy]\ndecisions = "docs/DECISIONS.md"\n[ci]\ncore = ""\n')
         self.commit('jobs/J1/brief.md', 'brief')
         self.write_rows([ROW, OTHER], layout)
 

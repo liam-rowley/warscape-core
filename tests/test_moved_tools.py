@@ -126,7 +126,7 @@ class BuildId(Env):
         self.assertEqual(bi.build_id(g), flat_id + '-dirty')
 
     def test_failing_fixture_the_toolchain_pin_is_the_last_role_and_moves_the_id(self):
-        # W24 (C24): the toolchain is a committed build-id input, never a measured one; editing the pin is a new DLL
+        # W24 (C25): the toolchain is a committed build-id input, never a measured one; editing the pin is a new DLL
         bi = _load('build_id', 'proxy/tools/build_id.py')
         self.assertEqual([r for r, _ in bi.INPUTS][-1], 'toolchain')
         self.assertEqual(dict(bi.INPUTS)['toolchain'], ('proxy/tools/toolchain.py',))
@@ -143,7 +143,7 @@ class BuildId(Env):
 
 
 class Sources(Env):
-    """W24 (C24): the DLL compiles the core sources folder's tracked top-level *.cpp, byte-sorted; an untracked or ignored source file under the
+    """W24 (C25): the DLL compiles the core sources folder's tracked top-level *.cpp, byte-sorted; an untracked or ignored source file under the
     core sources or the adapter folder refuses the build (`build_id.py --sources`, exit 2), before any compile."""
     def repo(self):
         g = self.t / 'flat'
@@ -223,7 +223,7 @@ class Sources(Env):
 
 
 class Toolchain(unittest.TestCase):
-    """W24 (C24): toolchain.py pins the image and the mingw-w64 packages; `check` reads dpkg with an injected runner."""
+    """W24 (C25): toolchain.py pins the image and the mingw-w64 packages; `check` reads dpkg with an injected runner."""
     @classmethod
     def setUpClass(cls):
         cls.tc = _load('toolchain', 'proxy/tools/toolchain.py')

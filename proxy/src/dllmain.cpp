@@ -55,7 +55,7 @@ LogLevel LevelOf(const std::string& s) {
     return s == "debug" ? LogLevel::Debug : s == "warn" ? LogLevel::Warn : s == "error" ? LogLevel::Error : LogLevel::Info;
 }
 
-// The DLL's own FILE sha256 (W24, C24): what sha256sum, the kit manifest and build.sh's build line give for this d3d9.dll (the mapped image
+// The DLL's own FILE sha256 (W24, C25): what sha256sum, the kit manifest and build.sh's build line give for this d3d9.dll (the mapped image
 // is relocated and section-aligned, so only the file's hash compares). Synchronous under the loader lock, through the guard's read loop:
 // CreateFileW, ReadFile, CloseHandle and GetTickCount only; no library load, no crypto provider, no thread, no wait (test_guard lints it).
 // The line is W9's contract; its parser is harness/ctl.py SELF_HASH_RE.

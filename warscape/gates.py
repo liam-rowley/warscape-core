@@ -291,8 +291,11 @@ def gate_ci_render(ctx):
         return Result('ci_render', 'ok', 'no rendered workflows')
     from . import ci_render
     errs = ci_render.problems(ctx)
-    return Result('ci_render', 'error' if errs else 'ok', f'{len(errs)} workflows differ from their render' if errs else
-                  f"{len(ctx.config['ci']['workflows'])} workflows match their render", errs)
+    if errs:
+        return Result('ci_render', 'error', f'{len(errs)} workflow problems (render or guard)', errs)
+    warns = ci_render.guards(ctx)[1]   # W23: a bootstrap pull_request trigger left beside pull_request_target
+    return Result('ci_render', 'warn' if warns else 'ok', f"{len(ctx.config['ci']['workflows'])} workflows match their render"
+                  + (f'; {len(warns)} warnings' if warns else ''), warns)
 
 
 SKIPPED = re.compile(r"^(.*?) \.\.\. skipped '(.*)'$")

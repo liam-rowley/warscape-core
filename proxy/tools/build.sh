@@ -10,7 +10,7 @@ OWN="$(cd "$(dirname "$0")/../.." && pwd)"
 layout() { python3 "$OWN/proxy/tools/layout.py" "$1" || exit 2; }
 upath() { if command -v cygpath >/dev/null; then cygpath -u "$1"; else printf '%s\n' "$1"; fi; }
 DOCKER=0; [[ "${1:-}" == "--docker" ]] && { DOCKER=1; shift; }
-TC="$OWN/proxy/tools/toolchain.py"   # W24 (C24): the image and the mingw-w64 packages at exact versions, a build-id input
+TC="$OWN/proxy/tools/toolchain.py"   # W24 (C25): the image and the mingw-w64 packages at exact versions, a build-id input
 WHAT="${1:-all}"
 if [[ "${2:-}" == "--adapter" ]]; then WSP_PROXY_ADAPTER="$(cd "${3:?adapter folder}" && pwd)"; export WSP_PROXY_ADAPTER; fi
 ROOT="$(upath "$(layout game-root)")"; SRC="$(upath "$(layout proxy-src)")"; ADIR="$(upath "$(layout proxy-adapter)")"; ADAPTER="$(basename "$ADIR")"
@@ -23,7 +23,7 @@ else
   BUILD_ID="$(python3 "$OWN/proxy/tools/build_id.py")" || { echo "build.sh: no build id (above)"; exit 4; }
 fi
 [[ "$WHAT" == id ]] && { echo "$BUILD_ID"; exit 0; }   # the id this checkout's DLL would carry (tests: build.sh and rule 79 agree)
-# W24 (C24): the DLL compiles the tracked top-level *.cpp of the core sources (build_id.py --sources, byte-sorted, the link order of
+# W24 (C25): the DLL compiles the tracked top-level *.cpp of the core sources (build_id.py --sources, byte-sorted, the link order of
 # `LC_ALL=C ls`); an untracked or ignored source under the core sources or the adapter refuses the build here (exit 2), before
 # gen_tables.py and the fetchers, with no compiler. Inside --docker the host's list comes in as WSP_SOURCES (as WSP_BUILD_ID: the
 # container cannot read a worktree's .git).
@@ -60,7 +60,7 @@ if [[ $DOCKER == 1 ]]; then
   exit $?
 fi
 
-# W24 (C24): the toolchain is checked before the first mingw compile of dll, all and repro: every pinned package at its version and $CXX
+# W24 (C25): the toolchain is checked before the first mingw compile of dll, all and repro: every pinned package at its version and $CXX
 # owned by one of them (toolchain.py check). Off the pin the build is refused (exit 2) unless WSP_TOOLCHAIN=any, which builds and marks the
 # id -dirty once: a DLL from another toolchain is not the DLL the committed id names. `id` above never gets here (rule 79 needs no compiler).
 # W24: the CI step summary, when $GITHUB_STEP_SUMMARY is set (every consumer's CI gets it with no template change; a PC build writes none)
@@ -239,7 +239,7 @@ if [[ "$WHAT" == smoke ]]; then
   # 1) default config: the stand-in exe is not the pinned build -> MISMATCH, pass-through, notice, system fallback (no DXVK), clean detach
   run; check "exe_guard: MISMATCH"; check "PASS-THROUGH"; check "patch_engine: not run"; check "backend: dxvk unavailable"; check "process detach"
   [[ -f "$G/$MOD/EXE_MISMATCH.txt" ]] || { echo "build.sh smoke: no notice"; exit 1; }
-  #    W24 (C24): the second log line is the DLL's own file sha256, and it is the copied d3d9.dll's: sha256, bytes and the launch line's build
+  #    W24 (C25): the second log line is the DLL's own file sha256, and it is the copied d3d9.dll's: sha256, bytes and the launch line's build
   SELF="$(sed -n 2p "$G/$MOD/logs/proxy.log" | grep -o 'self_hash: sha256 [0-9a-f]\{64\} bytes [0-9]* build [^ ]* (hashed in [0-9]* ms)' || true)"
   [[ -n "$SELF" ]] || { echo "build.sh smoke: line 2 of the log is not a self_hash line"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
   read -r _ _ SH_HEX _ SH_BYTES _ SH_BUILD _ _ SH_MS _ <<< "$SELF"
