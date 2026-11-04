@@ -17,20 +17,6 @@ tags but not the pinned one fails and names the fix, `git -C core fetch --tags` 
 
 The options weighed against it (subtree, a vendored copy, `pip install`) and the costs of the recommendation: [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md).
 
-## Older pin bumps
-What a game does when its pin crosses 0.24.0 (commit-msg hook, `run_refs` gate), 0.26.0 (base-judged policy) or 0.27.0 (the build id names one DLL): [CONSUMING_UPGRADES.md](CONSUMING_UPGRADES.md).
-
-## DLL changes in 0.34.0 (W33, C29)
-- **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
-  row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
-  tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".
-- **Migration:** a release that set `dev.file_rules` for shipped data rules moves them to `proxy.file_rules`; the player ini then sets no
-  dev key. A dev launch's `dev.file_rules` stays and wins on the same path.
-- **New log lines:** `patch_engine: protections restored on <n> page(s): ...` (and `... left changed` per bad page), `thread: <name> started
-  (tid N)`, the `dev:` line's `threads at the first Direct3DCreate9: state=<0|1> ctl=<0|1>`, `redirect: <n> rules from <path> (proxy.file_rules)`.
-- **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
-  `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
-
 ## Wiring a game repo (the steps, once approved)
 
 ```sh
@@ -102,26 +88,28 @@ jobs:
 
 ## Upgrading and releasing
 
-- **Core release:** a PR bumps `VERSION`; after Liam merges it, the tag `vX.Y.Z` is cut on that merge commit. Tags are never moved.
-- **Game upgrade:** `git -C core fetch --tags && git -C core checkout vX.Y.Z`, set `[core] version` to the same tag, run
-  `python3 core/wsc.py gates`, commit `core` and `wsc.toml` together on a branch.
+- **Releases (0.36.0, W29, C27):** the `release` workflow tags; nobody else does. After `gates` passes on `main` it computes the version from the
+  rows done since the last tag (`semver` on each row; `[jobs] semver_from` on), opens `release/vX.Y.Z` (VERSION only), auto-merges it and puts an
+  annotated tag on the merge commit; each `[release] consumers` adapter is compiled first (`warn`: a failure goes in the tag message and an issue).
+  `python3 wsc.py release plan` says what the next run does. The secret, the tag ruleset and the manual 1.0.0 path: [RELEASES.md](RELEASES.md).
+- **Game upgrade:** `python3 core/wsc.py core bump vX.Y.Z` (from 0.36.0 on; a bump to 0.36.0 itself is the hand steps: `git -C core fetch --tags`,
+  check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
+- **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
+  0.34.0 (DLL changes, C29) or 0.38.0 (crash maps, guarded verbs, C35) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
-Two `wsc.toml` tables, both off by default (a repo that sets neither keeps one JSONL per registry and committed views):
-```toml
-[storage]
-dir = ["jobs", "tools"]     # these keep one file per row: registries/<name>/<id_to_file(id)>.json
-[views]
-commit = false              # views go to the git-ignored dir (default "_scratch/registries"); a committed registries/<name>.md fails
-```
-- **Why:** two branches in flight that each add a row to one JSONL, or re-render one committed view, conflict on GitHub (it ignores
-  `merge=union` on pull-request merges), so auto-merge stalls until someone merges `main` by hand. One file per row and uncommitted
-  views remove both causes (napoleon J55).
-- **Switching:** `python3 core/wsc.py reg migrate <name> --to dir` moves the rows and rewrites `[storage] dir`; `--to jsonl` goes back.
-  With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
-  registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
-  either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
+Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
+
+## Tool retirement (0.37.0, core W15, C33; opt-in)
+A tool's last use is the later of its row's `last_used` (the floor: the day the row was added, or `wsc reg set tools <id> last_used=<date>`)
+and the newest `done` job whose `jobs/<id>/report.md` cites it, dated by the newest `## Round N (YYYY-MM-DD, ...)` heading of its `review.md`
+(a legacy review: the first date in its first 5 lines). It is derived from the working tree at check time; nothing writes it into rows.
+- **Citation:** the tool's `path` as a whole path (`core/` before it still counts; xharness/job.sh or harness/job.sh.bak does not), or,
+  for a verb, `wsc <verb>`, `wsc.py <verb>` or `wsc.<verb>`.
+- **Opt in:** `[tools] retire_after_days = 90` (default 0: off; the core keeps 0, its tools' uses are in its consumers' reports). Then
+  `python3 core/wsc.py reg check tools` warns per stale live tool, naming where its date came from (the report's path in brackets, or `(row)`):
+  supersede it, `reg remove` it after deleting the file, or cite it in the next report that uses it.
 
 ## Extending a core schema (0.17.0)
 A game that needs a field a core schema lacks does not copy the schema (its copy would miss every later core change): its own schema
@@ -155,13 +143,17 @@ dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
 models = ["sonnet", "opus"]        # the Model line of a brief; models after the first need a stated reason
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
+pc_state = "$LOCALAPPDATA/game_state"  # optional (W26): a needs_pc build is not ready where this folder is absent; WSC_PC_STATE overrides ("" = no PC here)
 failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
+claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
 decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
-session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
+session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
+decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
+thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
 plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
@@ -169,9 +161,17 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
 required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.22.0)
 ```
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
-  `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
+  jobs view (`[views] commit = true`; the core's view is `_scratch/registries/jobs.md`, never committed) changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
+- **The `jobs view` page** loads marked 12.0.2 from cdnjs with its Subresource Integrity hash (`jobq.MARKED_SRI`), shows raw HTML in a brief, report or
+  review as text (marked's `html` renderer escapes it), and carries a Content-Security-Policy: scripts from that one URL and the page's inline script by hash,
+  styles by hash, `connect-src 'self'` (W28). A new marked version is a new URL, hash and test.
+- **Claim and autopilot (core W26, C32).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
+  (`brief/<id>`); a lost race moves on, any other failure exits 1. `--peek` and `--offline` claim nothing. Order is (phase, number). An empty claim
+  older than 24 h is listed with its release command. `--auto` starts a review only on a green head, a fix once CI has finished, one `needs_pc` row
+  at a time, and prunes dead worktrees each tick. A game: sets `[jobs] pc_state` and has its `setup` verb print
+  `warscape.worktrees.report(root, rows, branches)`; `wsc jobs worktrees [--prune]` prints the same.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
   `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
@@ -240,7 +240,7 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   `wsc jobs check`, with `ctx.rows`, `ctx.read(path)` and `ctx.briefs()` (`(jid, row, text)` per brief, minus the legacy file's `brief_hooks` ids); an `error`
   Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, run from the
   **base tree** (W23): `ctx.root` and `ctx.config` are the base's rule inputs in a temporary folder, not a repository; `ctx.facts` has branch, kind, jid,
-  changed, merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
+  changed, `added_decision_rows` ([{id, text}], W27), merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
   `show(sha, path, cwd=repo)`; never `'HEAD'`, never git in `ctx.root`, never run the head's files. An `error` Result's details are policy errors. `view`: `wsc jobs view`,
   with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
 - A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
@@ -257,12 +257,20 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      rule 76 message names `tools/gates/pipeline.py`.
   3. `python3 core/wsc.py reg add tools tools/gates/pipeline.py --id tools.jobs_hooks` (the row keeps its id) after updating the header (`[gates] dirs`, `not-a-verb:
      a gate module, run by wsc gates`), then `reg add tools` for the two headers that name the file (`tools/usage_reader.py`, `discovery/core/briefpaths.py`).
-  4. Tests that load the file by path or call the old names: `tests/test_jobs_hooks.py` (module path, the three source-text reads, the renamed functions),
-     `tests/test_build_id.py`, `tests/test_registry_merge.py`, `tests/test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `tests/test_usage_reader.py`
-     (`sys.path` gains `tools/gates`, `import pipeline as hk`), `tests/test_proxy_host.py`.
+  4. Tests in the game's `tests/` that load the file by path or call the old names: `test_jobs_hooks.py` (module path, the three source-text reads, the
+     renamed functions), `test_build_id.py`, `test_registry_merge.py`, `test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `test_usage_reader.py`
+     (`sys.path` gains `tools/gates`, `import pipeline as hk`), `test_proxy_host.py`.
   5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside dated job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
+
+## Review integrity (0.35.0, core W27, C30)
+`wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
+lines and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
+`## Orchestrator additions`. A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
+
+## Gate changes in 0.36.0 (W28, C31)
+Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap): `[gates] skip` ids, `verified_dates`, strict `json`, `doc_paths`, `gen_tables.py`.
 
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher
@@ -287,10 +295,6 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 - Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
 - Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
 - `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
-## Crash symbolisation and guarded verbs (0.35.0, core W35, C30)
-Pin bump: a new build id (`build.sh` changed: 20 passes); delete game verbs named `crash` or `agent-settings`; put `{{wsc proxy_map step=dll}}`
-after the proxy build step (give it `id: dll`) and `wsc ci render`; attach `d3d9.map` and `d3d9.map.json` to each release; set `[agent_settings] safe` (`exact_only = true`: only those rules).
-What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROXY_HARNESS.md](PROXY_HARNESS.md) "Guarded verbs".
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
@@ -303,5 +307,8 @@ From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discover
   x86 tools (`x86re`, `console_cmds`, `exe_strings build`) need capstone and pefile in the RE environment: `python3 core/discovery/re_env.py <dir outside the repo>` downloads the
   wheels pinned by sha256 in that file and builds the venv, then run the tool with `<dir>/venv/.../python -I`. A tool that lacks its extra stops with a message that names this fix;
   the host tests skip the capstone cases without it.
+- **`find` and the exe index (0.37.0, W15):** `python3 core/wsc.py find <word>` also searches the adapter's `exe_strings.tsv.gz` for exe-shaped
+  words (4+ characters with an inner `_` or a lower-to-upper case change: `gfx_hardware_shadows`, `CampaignUI`; every word must appear, as literals,
+  case-insensitively); `--exe` forces it for any word, `--in exe_strings` searches only it. Without the table `find` prints what it always did.
 - **Re-run steps:** `python3 core/wsc.py discovery all` on the PC, then `discovery check` and `git diff --stat` (empty when nothing changed in the game); `discovery check` and
   `discovery gate` need only committed files and belong in the game's thin real-repo test.

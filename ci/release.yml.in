@@ -1,0 +1,92 @@
+# purpose: release tags by workflow (W29, C27): after `gates` passes on main, compute the next version from the job rows done since the last
+#          tag, open and auto-merge release/vX.Y.Z (VERSION only), and on that merge commit's own green run put the annotated tag vX.Y.Z
+# usage: runs on GitHub Actions; by hand: python3 wsc.py release plan (read-only); the owner's manual lever is "Run workflow" with a version
+# when: automatic after every `gates` run on main; manual dispatch only to cut 1.0.0 or to retag after an outage (docs/CONSUMING.md, Releases)
+# The token: a GitHub App token from the secrets RELEASE_APP_CLIENT_ID and RELEASE_APP_KEY, else the secret RELEASE_TOKEN. It is never
+# GITHUB_TOKEN: events caused by GITHUB_TOKEN start no workflow runs, so a release pull request opened with it would never get `gates` or
+# `policy` and auto-merge would wait forever. No token: the run fails at its first step with the named message and does nothing else.
+# Never moves a tag: `wsc release tag` refuses an existing remote tag unless it is already the annotated tag on this commit (a no-op).
+# Not a required check (`policy` and the gates are): a red release run is the signal, so no step has continue-on-error.
+# No placeholders: `wsc ci render` copies this file under its generated header, and the `ci_render` gate compares the two.
+name: release
+on:
+  workflow_run:
+    workflows: [gates]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "X.Y.Z, the owner's manual release (1.0.0, or a retag after an outage); empty = computed from the rows"
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HAS_APP: ${{ secrets.RELEASE_APP_CLIENT_ID != '' && secrets.RELEASE_APP_KEY != '' }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      VERSION_IN: ${{ inputs.version }}
+    steps:
+      - name: the release token from the GitHub App (RELEASE_APP_CLIENT_ID, RELEASE_APP_KEY)
+        id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+      - name: RELEASE_TOKEN must be set (before the checkout, which would otherwise fall back to the workflow's own token)
+        env:
+          RELEASE_TOKEN: ${{ steps.app.outputs.token || secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then echo "::error::RELEASE_TOKEN is not set: see docs/CONSUMING.md, Releases"; exit 1; fi
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.app.outputs.token || secrets.RELEASE_TOKEN }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: every required check on the commit is green, and it is still main's tip
+        id: green
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.RELEASE_TOKEN }}
+        run: python3 wsc.py release check-green --sha "$SHA" --repo "${{ github.repository }}"
+      - name: plan (the version is computed from the rows and the floor, never taken from a branch)
+        id: plan
+        if: steps.green.outputs.go == 'true'
+        run: python3 wsc.py release plan --ref "$SHA" --version "$VERSION_IN"
+      - name: open release/vX.Y.Z (VERSION only) and auto-merge it
+        if: steps.plan.outputs.action == 'release'
+        env:
+          RELEASE_TOKEN: ${{ steps.app.outputs.token || secrets.RELEASE_TOKEN }}
+        run: python3 wsc.py release open --sha "$SHA" --version "$VERSION_IN"
+      - name: the consumer toolchain (the pinned mingw-w64 packages)
+        if: steps.plan.outputs.action == 'tag'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends $(python3 proxy/tools/toolchain.py apt)
+      - name: each consumer's adapter compiles against this commit ([release] consumers, -fsyntax-only)
+        if: steps.plan.outputs.action == 'tag'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.RELEASE_TOKEN }}
+        run: >-
+          python3 wsc.py release check-consumers --candidate "$SHA" --json "$RUNNER_TEMP/consumers.json"
+          --tag "v${{ steps.plan.outputs.version }}" --repo "${{ github.repository }}"
+      - name: the annotated tag vX.Y.Z on this commit
+        if: steps.plan.outputs.action == 'tag'
+        env:
+          RELEASE_TOKEN: ${{ steps.app.outputs.token || secrets.RELEASE_TOKEN }}
+        run: python3 wsc.py release tag --sha "$SHA" --version "$VERSION_IN" --consumers "$RUNNER_TEMP/consumers.json"
+      - name: core_pin on the tagged commit (v<VERSION> exists and is annotated)
+        if: steps.plan.outputs.action == 'tag'
+        run: python3 wsc.py gates --only core_pin

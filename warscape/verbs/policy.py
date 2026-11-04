@@ -9,7 +9,8 @@ The judge (core W23, C24): `wsc policy` writes the base's rule inputs into a tem
 so a local run and CI print the same lines for the same two shas (CI is the authority: its parent is the base's code, a local parent is your
 checkout's). Internal flags of that child, hidden from --help: `--judge` (judge in this process: `--root` is the base tree, the rules are
 its config and gate modules), `--repo <clone>` (where git reads the head; shas only), `--base-ref <name>` (the base's name in messages).
-Their set is versioned by `JUDGE_API` in warscape/policy.py; the parent is warscape/policy_base.py.
+Their set is versioned by `JUDGE_API` in warscape/policy.py; the parent is warscape/policy_base.py. Warnings (core W27: evidence the clone
+cannot prove, a thin `merge`) print as `policy: warning: ...` lines before the verdict line and never change the exit code.
 """
 import argparse
 import sys
@@ -51,14 +52,16 @@ def run(args, ctx):
     if not args.repo:
         print('policy: --judge needs --repo', file=sys.stderr)
         return 2
-    base_ref = args.base_ref or args.base
+    base_ref, warns = args.base_ref or args.base, []
     try:
-        errs, changed = P.run_check(ctx, args.branch, args.base, args.head, args.repo, base_ref=base_ref)
+        errs, changed = P.run_check(ctx, args.branch, args.base, args.head, args.repo, base_ref=base_ref, warnings=warns)
     except P.Refusal as e:
         errs, changed = [str(e)], []
     note = P.rule_input_note(ctx.config, changed, base_ref)
     if note:
         print(note)
+    for w in warns:   # W27: before the verdict line, never the exit code
+        print(f'policy: warning: {w}')
     for e in errs:
         print(f'policy: {e}', file=sys.stderr)
     print(f'policy: {args.branch}: {"REFUSED" if errs else "ok"} ({len(changed)} files changed)')

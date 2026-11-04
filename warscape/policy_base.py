@@ -120,7 +120,10 @@ def judge(ctx, branch, base='origin/main', head='HEAD'):
         m = JUDGE_API_RE.search(show(pin, 'warscape/policy.py', cwd) or '')
         if not m:
             print(f"policy: note: the base's core predates base-judged policy (no JUDGE_API at {pin[:12]}): judged with this checkout's rules, as before W23")
-            errs, changed = run_check(ctx, branch, b, h, repo, base_ref=base)
+            warns = []
+            errs, changed = run_check(ctx, branch, b, h, repo, base_ref=base, warnings=warns)
+            for w in warns:
+                print(f'policy: warning: {w}')
             for e in errs:
                 print(f'policy: {e}', file=sys.stderr)
             print(f'policy: {branch}: {"REFUSED" if errs else "ok"} ({len(changed)} files changed)')

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Generate the proxy adapter's C++ tables (exe identity, engine sites, config keys) and its default config file from the registries.
 
-purpose: turn the game repo's registries/engine_sites.jsonl, registries/config_keys.jsonl and its proxy adapter's identity.json into <adapter>/generated/tables.h and the shipped default config file, validating every site (hex, lengths, overlaps, config key, exe pin; value_key rows: the key's explicit int/float type, default 0, a max, 4 stock bytes that round-trip) and every key (type, default, release value, min/max range); docs/PROXY_SITES.md
+purpose: turn the game repo's engine_sites and config_keys registries (read through the core's registry loader, so either storage works) and its proxy adapter's identity.json into <adapter>/generated/tables.h and the shipped default config file, validating every site (hex, lengths, overlaps, config key, exe pin; value_key rows: the key's explicit int/float type, default 0, a max, 4 stock bytes that round-trip) and every key (type, default, release value, min/max range); docs/PROXY_SITES.md
 usage: python3 proxy/tools/gen_tables.py [--adapter <repo-relative adapter folder>] [--check]   (default adapter: proxy/tools/layout.py)
 when: after any change to the engine_sites or config_keys registry or identity.json (then rebuild the DLL); --check runs in the gates (tests/test_proxy_tables.py) and fails when the generated files are stale or a site is invalid
 not-a-verb: games cannot add wsc verbs for the proxy yet (wsc.toml verb_dirs is empty and the generator moves to warscape-core with proxy/core at the end of phase 1); the gates reach it through tests/
 """
 import argparse
-import json
 import math
 import re
 import struct
@@ -17,16 +16,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402  (the game repo and its adapter, before and after the move to warscape-core)
 
+if str(layout.own_root()) not in sys.path:   # the core's library (warscape/), beside this tool's own wsc.toml
+    sys.path.insert(1, str(layout.own_root()))
+from warscape.checks import strict_loads  # noqa: E402  (W28: repo data refuses NaN and duplicate keys)
+
 ROOT = layout.game_root()
 MAX_BYTES = 32   # patch_engine.h kMaxSiteBytes
 HEX = re.compile(r'^[0-9a-f]{2}( [0-9a-f]{2})*$')
 
 
-def jsonl(path):
-    p = ROOT / path
-    if not p.exists():
-        return []
-    return [json.loads(l) for l in p.read_text(encoding='utf-8').splitlines() if l.strip()]
+def registry_rows(name):
+    """(rows, errors) of registry `name` in the game repo, read through the core's registry loader (W28): its wsc.toml `[registries]`,
+    `registries_dir` and `[storage]` decide where the rows are (JSON Lines or one file per row), so `wsc reg migrate` keeps this tool working.
+    A game root without a wsc.toml, or one that does not declare `name`, reads `core:<name>` at the default place. A missing registry is empty."""
+    import copy
+    from warscape.registry import RegistryError, load_from_config
+    from warscape.repo import DEFAULTS, ConfigError, load_config
+    try:
+        cfg = load_config(ROOT) if (ROOT / 'wsc.toml').is_file() else copy.deepcopy(DEFAULTS)
+        cfg['registries'].setdefault(name, f'core:{name}')
+        reg = load_from_config(cfg, ROOT, only=name)[name]
+    except (ConfigError, RegistryError) as e:
+        return [], [str(e)]
+    return reg.rows, reg.parse_errors
 
 
 def hexbytes(s):
@@ -317,9 +329,14 @@ def main():
             print(f'gen_tables: {e}')
             return 2
     adapter = ROOT / a.adapter
-    ident = json.loads((adapter / 'identity.json').read_text(encoding='utf-8'))
-    sites = sorted(jsonl('registries/engine_sites.jsonl'), key=lambda s: int(s['rva'], 16))
-    keys = sorted(jsonl('registries/config_keys.jsonl'), key=lambda k: k['id'])
+    ident = strict_loads((adapter / 'identity.json').read_text(encoding='utf-8'))
+    sites, errs = registry_rows('engine_sites')
+    keys, kerrs = registry_rows('config_keys')
+    if errs or kerrs:
+        print('gen_tables: INVALID\n  ' + '\n  '.join(errs + kerrs))
+        return 1
+    sites = sorted(sites, key=lambda s: int(s['rva'], 16))
+    keys = sorted(keys, key=lambda k: k['id'])
     errs = validate_sites(sites, keys, ident)
     for k in keys:
         errs += validate_key(k)
@@ -329,7 +346,7 @@ def main():
     want = {adapter / 'generated' / 'tables.h': render_header(ident, sites, keys, a.adapter),
             adapter / ident['config_file']: render_ini(ident, keys)}
     if (adapter / 'console_sources.json').exists():
-        src = json.loads((adapter / 'console_sources.json').read_text(encoding='utf-8'))
+        src = strict_loads((adapter / 'console_sources.json').read_text(encoding='utf-8'))
         want[adapter / 'generated' / 'console_table.h'] = render_console(a.adapter, src)
     stale = []
     for p, text in want.items():

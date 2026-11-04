@@ -37,7 +37,7 @@ with the same flags plus `-I<game tests>`, and prints `core test <name>` / `game
 `layout.py proxy-tests` prints it). It must sit outside the adapter folder (a build-id input: a test edit would be a new DLL). A game's console and
 camera numbers (opcodes and offsets in its sites' stock bytes, its command tables) live there: `#include "adapter_checks.h"` and `"adapter.cpp"`, run
 `adck::ConsoleAdapterProblems` / `adck::CameraAdapterProblems` with `adck::TableLookup(a.sites, a.nSites)` (the contract the core's reads need),
-then the literal checks. The null game's `proxy/tests/test_null_adapter.cpp` is the smallest example.
+then the literal checks. The null game's `proxy/tests/null_game/proxy/tests/test_null_adapter.cpp` is the smallest example.
 `build.sh --docker` mounts the outer of the game root and the core (the game repo holding the core, or the core holding its null game) and refuses
 two separate trees; `build_id.py` reads a game root nested in its repository under its prefix, so the null game's id in place is a real one.
 
@@ -54,7 +54,7 @@ generated tables are byte-identical); after the pin bump run `python3 core/proxy
 The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
 `stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
 
-## Guarded verbs (W35, C30)
+## Guarded verbs (W35, C35)
 Two permissions sessions kept asking for are verbs whose guard holds the judgement; an agent runs them without a one-off ask.
 - **`wsc agent-settings allow|remove "<rule>" [...] [--file .claude/settings.json]`** adds a rule to `permissions.allow` only when a
   `[agent_settings] safe = [...]` pattern in `wsc.toml` covers it: the pattern itself, or the pattern extended by whole words

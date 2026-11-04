@@ -68,7 +68,7 @@ under wine)`. A PC build writes nothing.
 `fetch_lua.py` and `fetch_ui.py` retry each download and `git fetch` on a network flake (`netfetch.retry`, one stderr line each), never a
 sha256 mismatch or a failed patch; `fetch_ui.py` trusts a checkout only when HEAD is the pin and the working tree equals HEAD.
 
-## Symbolising a crash (W35, C30)
+## Symbolising a crash (W35, C35)
 - **The map.** `build.sh dll` links with `-Wl,-Map` (no `--cref`: the verb reads sections and symbols only) and writes, beside the DLL in
   `build/proxy/<adapter>/`, `d3d9.map` (checkout paths become the labels `core/`, `adapter/`, `out/`, `ui/`; gcc's temporary objects are named
   after their sources in link order), `d3d9.map.json` (`{dll, build_id, dll_sha256, image_base, size, size_of_image}`, the id and sha256 of

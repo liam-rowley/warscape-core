@@ -61,9 +61,11 @@ class GatesStage(unittest.TestCase):
         self.assertIn('house_rule', out)
 
     def test_skip_and_only_accept_game_gate_names(self):
-        self.repo.write('wsc.toml', TOML + 'skip = ["house_rule"]\n')
+        self.repo.write('docs/DECISIONS.md', '| D1 | 2026-11-04 | o | skip the house rule | yes |\n')
+        self.repo.write('wsc.toml', TOML + 'skip = ["house_rule:D1"]\n[policy]\ndecisions = "docs/DECISIONS.md"\n')
         rc, out = self.repo.wsc('gates', '--fast')
-        self.assertNotIn('house_rule', out)
+        self.assertNotIn('no bad files', out)
+        self.assertIn('skipped house_rule: D1', out)
         rc, out = self.repo.wsc('gates', '--only', 'nope')
         self.assertEqual(rc, 2)
         self.assertIn('unknown gate(s) nope', out)
@@ -81,6 +83,41 @@ class GatesStage(unittest.TestCase):
         self.repo.write('checks/a_first.py', "from warscape.gates import Result\nNAME = 'zed'\n\ndef run(ctx):\n    return Result(NAME, 'ok', 'z')\n")
         mods = gatemods.load(Ctx.load(self.repo.root))
         self.assertEqual([m.name for m in mods], ['zed', 'house_rule'])   # file-name order: a_first.py, house.py
+
+
+class SkipIsNeverSilent(unittest.TestCase):
+    """W28: `[gates] skip` entries are `"<gate>:<decision id>"`; each skipped gate is a warn line naming the decision, and the id must be a row
+    of the `[policy] decisions` file."""
+    SKIP_TOML = TOML + 'fast = ["json"]\nskip = [{}]\n[policy]\ndecisions = "docs/DECISIONS.md"\n'
+
+    def gates(self, skip, *args):
+        repo = TempRepo({'checks/house.py': mod(GOOD), 'docs/DECISIONS.md': '| D7 | 2026-11-04 | o | the house rule is off for now | yes |\n'},
+                        toml=self.SKIP_TOML.format(skip))
+        self.addCleanup(repo.close)
+        return repo.wsc('gates', *args)
+
+    def test_a_skip_with_a_decision_id_is_a_warn_line_and_the_run_passes(self):
+        rc, out = self.gates('"house_rule:D7"', '--fast')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('WARN house_rule', out)
+        self.assertIn('skipped house_rule: D7', out)
+        self.assertNotIn('no bad files', out)
+
+    def test_a_bare_name_is_a_config_error_that_names_the_fix(self):
+        rc, out = self.gates('"house_rule"', '--fast')
+        self.assertEqual(rc, 2, out)
+        self.assertIn('"house_rule" has no decision id: write "house_rule:<decision id>"', out)
+
+    def test_an_unknown_decision_id_is_an_error(self):
+        rc, out = self.gates('"house_rule:D99"', '--fast')
+        self.assertEqual(rc, 2, out)
+        self.assertIn('D99 is not a row of docs/DECISIONS.md', out)
+
+    def test_only_still_runs_a_skipped_gate(self):
+        rc, out = self.gates('"house_rule:D7"', '--only', 'house_rule')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('ok   house_rule', out)
+        self.assertNotIn('skipped house_rule', out)
 
 
 class LoadErrors(unittest.TestCase):
@@ -245,6 +282,33 @@ class PolicyStage(unittest.TestCase):
         rc, out = self.repo.wsc('gates', '--only', 'house_policy')
         self.assertEqual(rc, 2)
         self.assertIn('unknown gate(s) house_policy', out)
+
+
+class DocPathsGate(unittest.TestCase):
+    """W28 review 1: the gate is an error, and a git-ignored path passes even when a `../` path sits in the same doc (one such name made
+    `git check-ignore --stdin` exit 128 for the whole batch, read as "nothing is ignored")."""
+
+    def setUp(self):
+        self.repo = TempRepo({'.gitignore': '_scratch/\n', 'README.md': '# r\n`_scratch/registries/tools.md`, `../` and `../other/x.md`\n'},
+                             toml=TOML.replace('dirs = ["checks"]', 'dirs = []'))
+        self.addCleanup(self.repo.close)
+        subprocess.run(['git', 'add', '-A'], cwd=self.repo.root, check=True, capture_output=True)
+
+    def test_an_ignored_path_passes_beside_a_path_outside_the_repo(self):
+        rc, out = self.repo.wsc('gates', '--only', 'doc_paths')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('every backticked path exists', out)
+
+    def test_a_missing_path_is_an_error_and_a_nested_jobs_folder_is_a_record(self):
+        self.repo.write('README.md', '# r\n`_scratch/a.md`, `../other/x.md` and `docs/gone.md`\n')
+        self.repo.write('game/jobs/F1/brief.md', 'Write `jobs/F1/report.md`.\n')   # a fixture game's brief names the report its job will write
+        subprocess.run(['git', 'add', '-A'], cwd=self.repo.root, check=True, capture_output=True)
+        rc, out = self.repo.wsc('gates', '--only', 'doc_paths')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('FAIL doc_paths', out)
+        self.assertIn('README.md:2: path not found: docs/gone.md', out)
+        for gone in ('_scratch/a.md', '../other', 'F1/report.md'):
+            self.assertNotIn(gone, out)
 
 
 VIEW_MOD = '''

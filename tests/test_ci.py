@@ -350,15 +350,17 @@ class Render(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('ok   ci_render', out)
 
-    def test_w23_this_repos_policy_workflow_is_pull_request_target_with_the_bootstrap_trigger(self):
+    def test_w27_this_repos_policy_workflow_is_pull_request_target_only(self):
+        """W27 removed W23's bootstrap `pull_request` trigger once a `pull_request_target` run of policy was recorded (run 41871905211)."""
         text = (ROOT / '.github' / 'workflows' / 'policy.yml').read_text(encoding='utf-8')
         on = text[text.index('\non:\n'):text.index('\npermissions:')]
         self.assertIn('\n  pull_request_target:\n    types: [opened, synchronize, reopened, ready_for_review]', on)
-        self.assertIn("\n  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    paths: ['jobs/W23/report.md']", on)
+        self.assertNotRegex(on, r'(?m)^  pull_request:')
+        self.assertNotIn('jobs/W23/report.md', text)
         self.assertEqual([s for s in self.run_scripts(text) if '${{' in s], [])
         fixture = (ROOT / 'tests' / 'fixture_game' / 'ci' / 'policy.yml.in').read_text(encoding='utf-8')
         self.assertIn('  pull_request_target:', fixture)
-        self.assertNotRegex(fixture, r'(?m)^  pull_request:')   # the fixture switches with no bootstrap trigger
+        self.assertNotRegex(fixture, r'(?m)^  pull_request:')
 
     def test_notify_of_a_push_workflow_waits_for_the_named_jobs(self):
         text = self.render('jobs:\n{{wsc notify gates needs=changes,gates,proxy}}\n')
@@ -626,6 +628,18 @@ class CheckSettings(unittest.TestCase):
                    'repos/o/core/rules/branches/main': (0, json.dumps(BASIC + [rule_checks(*CORE_REQUIRED)]), '')}
         rc, out = self.go(answers, CORE_WF, CORE_REQUIRED)
         self.assertEqual((rc, self.problems(out)), (0, []), out)
+
+    def test_the_release_workflow_adds_the_manual_line_and_no_problem(self):
+        answers = {**CORE_ANSWERS, 'repos/o/core': (0, json.dumps({'allow_auto_merge': True}), ''),
+                   'repos/o/core/rules/branches/main': (0, json.dumps(BASIC + [rule_checks(*CORE_REQUIRED)]), '')}
+        rel = 'name: release\njobs:\n  release:\n    runs-on: ubuntu-24.04\n'
+        rc, out = self.go(answers, {**CORE_WF, 'release.yml': rel}, CORE_REQUIRED)
+        self.assertEqual((rc, self.problems(out)), (0, []), out)
+        manual = [l for l in out.splitlines() if l.startswith('manual:')]
+        self.assertEqual(len(manual), 1, out)
+        for want in ('RELEASE_APP_CLIENT_ID', 'RELEASE_TOKEN', 'allow_auto_merge', 'refs/tags/v*', 'deletion'):
+            self.assertIn(want, manual[0])
+        self.assertNotIn('manual:', self.go(answers, CORE_WF, CORE_REQUIRED)[1])
 
     def test_the_game_explicit_only_notes_viewer(self):
         rc, out = self.go(GAME_ANSWERS, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')

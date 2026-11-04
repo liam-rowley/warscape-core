@@ -165,7 +165,7 @@ for 1-6 interleave in one file and its tests, so they are one commit.
   decides those.
 - **6. `.bak` once per run** (`91649e1`): the `--file` help, the module docstring and `docs/PROXY_HARNESS.md` say each writing run replaces the `.bak`,
   so two runs keep only the second original.
-- **Docs:** `docs/PROXY_HARNESS.md` "Guarded verbs" and the C30 row describe the new rules (`91649e1`). The report's round-0 claims ("never follows a
+- **Docs:** `docs/PROXY_HARNESS.md` "Guarded verbs" and the C35 row (C30 when written) describe the new rules (`91649e1`). The report's round-0 claims ("never follows a
   symlink", "writes only directly inside `.claude/`") hold now in the form above.
 - **Not asked, needed for green gates** (`5b84c27`): main is red on `doc_size` since W16 and W33 merged (CONSUMING.md 31,527 bytes, run 41893656670);
   with W35's section it was 32,086. The three oldest pin-bump sections (0.24.0, 0.26.0, 0.27.0) move unchanged to `docs/CONSUMING_UPGRADES.md` behind a
@@ -175,3 +175,16 @@ for 1-6 interleave in one file and its tests, so they are one commit.
   and the write would take the temporary file and the replace with it. That needs a writer racing the verb inside the repo; not guarded further.
 - **Machines** (this checkout, Windows, 2026-11-04): `wsc gates` 13 ok, 2 warn (`ci_render`'s old W23 note; `tests` 809 passed, 5 skipped: no POSIX sh,
   no capstone), 0 failed. `wsc policy --branch job/W35 --base origin/main` refuses only on the missing merge verdict and the `done` row.
+
+## Merge of main (2026-11-04, after review round 2)
+By a fresh session (Claude-Session 093c90b3-4252-44cd-881c-4110db4eb366) on the merge verdict, because PR 94 conflicted with main (W27, W28, W29, W26, W15 had merged). No W35 behaviour changed.
+
+- **Decision:** W27 took C30, so W35's row is now **C35**, after main's C30 to C34, and every `(W35, C30)` reference follows (code comments, `docs/`, `wsc.toml`,
+  `harness/job.sh`, `proxy/tools/build.sh`, the rendered workflow). The C30 in "Fix round 1" above is what it was then.
+- **VERSION 0.38.0:** the next after main's 0.37.0, as the brief's VERSION section says. W35 is below `[jobs] semver_from` (40), so C27's rule leaves it a legacy row that bumps by hand, as W15 did after W29.
+- **Docs:** W35 and W28 each moved the same three pin-bump sections out of `docs/CONSUMING.md`; main's `docs/UPGRADING.md` holds them and more, so W35's copy (was `docs/CONSUMING_UPGRADES.md`)
+  is gone. W35's pin-bump section moved to `docs/UPGRADING.md` with its version and decision updated, since it put CONSUMING.md 232 bytes over the cap.
+- **`CORE_VERBS`:** both sides' verbs; `crash` and `agent_settings` go before `release` and `core`, which `test_core_verbs_read_as_text` wants last. `[agent_settings]` sits beside main's `[gates]` comment in `warscape/repo.py`.
+- **`doc_paths` (W28) on W35's docs:** the map labels `adapter/`, `out/`, `ui/` and the untracked `.claude/` are not paths of this repo, so they join `[docs] path_ignore` in `wsc.toml`. `registries/tools.jsonl` re-rendered after the union merge.
+- **Seen, not changed:** `wsc core bump` (W29) matches a game verb's `NAME` against `CORE_VERBS`, which holds module names, so a game verb named `agent-settings` is not listed by the bump.
+  It still fails loudly at the next `wsc` run (`verb 'agent-settings' already exists`). Left for a later job: it is outside a merge.

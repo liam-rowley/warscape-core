@@ -19,7 +19,7 @@ text, which carries its own indentation). Blocks:
   notify gates needs=a,b,c     the failure-comment job of a push workflow, after the jobs a, b, c, then the `main_health` job (W22: on main, one
                                issue per red required job, `wsc ci main-health`)
   notify policy                the failure-comment job of the policy workflow (the branch name through `env:`)
-  proxy_map [step=S]           two steps after a proxy build step with `id: S` (default dll; W35, C30): upload the linker map, its sidecar and
+  proxy_map [step=S]           two steps after a proxy build step with `id: S` (default dll; W35, C35): upload the linker map, its sidecar and
                                the build line as `proxy-map-<build id>` (the name build.sh wrote to the step's outputs, never computed again;
                                upload-artifact pinned to a commit sha, kept 90 days), then a step-summary line linking the artifact
 The first line of a rendered file says it is generated. Slow job bodies stay in the template, outside the blocks.
@@ -125,7 +125,7 @@ def block_proxy_map(cfg, step='dll'):
     o = f'steps.{step}.outputs'
     when = f"        if: success() && {o}.map_name != ''"
     return '\n'.join([
-        "      # proxy map (W35, C30): the linker map, its sidecar and the build line of this job's DLL as proxy-map-<build id>, the name build.sh",
+        "      # proxy map (W35, C35): the linker map, its sidecar and the build line of this job's DLL as proxy-map-<build id>, the name build.sh",
         "      # printed into the build step's outputs; 90 days is GitHub's maximum, a release attaches its own (docs/PROXY_BUILD.md).",
         '      - id: proxy_map', when, f'        uses: {REF_UPLOAD}', '        with:', f'          name: ${{{{ {o}.map_name }}}}',
         f'          path: ${{{{ {o}.map_files }}}}', '          retention-days: 90', '          if-no-files-found: error',
