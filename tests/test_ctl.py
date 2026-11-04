@@ -534,6 +534,42 @@ class PcLaunch(unittest.TestCase):
         self.assertEqual(len([c for c in calls if c[1] and c[1].startswith('launch')]), 1)
 
 
+class BuildInfo(unittest.TestCase):
+    """W24 (C24): build_info() reads the DLL's own file sha256 from the self_hash line (the second line of proxy.log) beside the launch line's id."""
+    HEX = 'ab' * 32
+    LAUNCH = ('2026-11-04T09:00:00.000Z [INFO ] [t1] launch 20261104T090000Z-p1: Null proxy d3d9.dll build 0123456789ab loaded into '
+              'C:\\g\\Null.exe (pid 1, base 00400000)\r\n')
+    SELF = f'2026-11-04T09:00:00.020Z [INFO ] [t1] self_hash: sha256 {HEX} bytes 1048576 build 0123456789ab (hashed in 7 ms)\r\n'
+
+    def info(self, log):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            game = Path(d) / 'game'
+            (game / 'nullmod' / 'logs').mkdir(parents=True)
+            (game / 'null.ini').write_text('[proxy]\nbackend=system\n', encoding='utf-8')
+            if log is not None:
+                (game / 'nullmod' / 'logs' / 'proxy.log').write_bytes(log.encode())
+            p = ctl.Pc('o', 'a.json', {'game': 'nullgame', 'game_dir': str(game), 'state_dir': d}, sh=lambda *a, **k: (0, ''))
+            p.ini_name = 'null.ini'
+            with mock.patch.object(ctl, 'ident_mod', lambda a: 'nullmod'):
+                return p.build_info()
+
+    def test_failing_fixture_the_self_hash_line_gives_dll_sha256(self):
+        m = ctl.SELF_HASH_RE.search(self.SELF)
+        self.assertEqual(m.groups(), (self.HEX, '1048576', '0123456789ab', '7'))
+        b = self.info(self.LAUNCH + self.SELF + '2026-11-04T09:00:00.021Z [INFO ] [t1] dll C:\\g\\d3d9.dll\r\n')
+        self.assertEqual((b['build'], b['dll_sha256']), ('0123456789ab', self.HEX))
+
+    def test_an_older_dll_or_no_log_gives_none(self):
+        self.assertIsNone(self.info(self.LAUNCH)['dll_sha256'])   # a DLL older than W24 logs no self_hash line
+        self.assertIsNone(self.info(None)['dll_sha256'])
+        warn = '2026-11-04T09:00:00.020Z [WARN ] [t1] self_hash: unavailable: cannot open the DLL (error 5)\r\n'
+        self.assertIsNone(self.info(self.LAUNCH + warn)['dll_sha256'])
+        for bad in (self.SELF.replace(self.HEX, self.HEX.upper()), self.SELF.replace(self.HEX, self.HEX[:-1])):
+            self.assertIsNone(ctl.SELF_HASH_RE.search(bad), bad)
+
+
 ORDERS = {'status': 'reachable', 'why': 'wsp.order_move', 'fact': 'f.o', 'chunk': 'ctl/orders.lua',
           'tolerance': {'pos_m': 1.0, 'facing_deg': 1.0, 'width_m': 0.5, 'centre_lateral_m': 1.5, 'centre_ahead_m': [-1.0, 30.0]},
           'settle': {'poll_s': 1.0, 'rest_reads': 3, 'eps_m': 0.1, 'eps_deg': 0.2, 'min_wait_s': 3, 'base_s': 60, 'min_speed_mps': 0.6, 'max_s': 400},

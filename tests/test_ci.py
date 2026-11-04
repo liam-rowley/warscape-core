@@ -322,19 +322,21 @@ class Render(unittest.TestCase):
         self.assertEqual({k: hashlib.sha256(v.encode()).hexdigest() for k, v in got.items()}, self.GOLDEN)
 
     def test_fetch_cache_keys_on_the_pins_and_never_fails_the_job(self):
+        # W24 (B62): two steps; the fetchers retry themselves inside build.sh, so the `netfetch.py prefetch` step is gone
         for core, prefix in (('core', 'core/'), ('', '')):
             text = self.render('    steps:\n{{wsc fetch_cache}}\n', {**self.CFGR, 'core': core, 'salt': '3'})
             steps = re.split(r'^      - ', text, flags=re.M)[1:]
-            self.assertEqual(len(steps), 3, text)
-            key, cache, pre = steps
+            self.assertEqual(len(steps), 2, text)
+            key, cache = steps
             self.assertIn('id: fetch_key', key)
             self.assertIn(f'run: python3 {prefix}proxy/tools/netfetch.py ci-cache >> "$GITHUB_OUTPUT"', key)
             self.assertIn('uses: actions/cache@v5', cache)
             self.assertIn('continue-on-error: true', cache)
             self.assertIn('path: ${{ steps.fetch_key.outputs.paths }}', cache)
             self.assertIn('key: fetch-3-${{ steps.fetch_key.outputs.key }}', cache)
-            self.assertIn(f'run: python3 {prefix}proxy/tools/netfetch.py prefetch', pre)
-            self.assertNotIn('continue-on-error', key + pre)   # a failed prefetch fails the job: the fetchers' sha checks judge every byte
+            self.assertNotIn('prefetch', text)
+            self.assertIn('retry', text)   # the comment says where the retry is now
+            self.assertNotIn('continue-on-error', key)
 
 
 class CoreConfig(unittest.TestCase):
