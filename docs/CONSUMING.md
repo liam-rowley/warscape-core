@@ -293,6 +293,15 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 - A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
 
+## pc_deploy takes the lock; exe_check is a start-time setting (0.32.0, core W25, C29)
+- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh FILE`; defaults as above), or use one the caller `holds` and leave it held;
+  another holder: exit 2. No `<state>/watcher` folder: no lock, one line says so. `--assume-closed` skips only the is-a-game-running check; `set` now makes it too.
+- The ini and `install.json` are written to a same-folder temp file and replaced (a reader holding the file: 5 retries, then refused, file intact). `owned` is the union of every installed kit.
+- With nothing installed, the mod's config file or mod folder in the game folder is a stray: `status` fails (exit 1), `install` refuses before its snapshot; `--move-stray` moves it to `<state>/_to_delete/stray_<stamp>/`.
+- The watcher (**1.5.0**) never weakens `exe_check` on a `watcher.ini` reload or across a `restart`/`update` job (`restart.carry`); `watcher.status` shows `exe_check_refused`. To run with
+  `warn`, Liam stops the watcher and starts it by hand. The launch gate hashes the exe every launch.
+- `esf_edit.set_value(container, index, v)` takes the child position `@N` among all nodes (as `esf_dump` prints it), no longer the Val-only index: move a caller of the old index.
+
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
 - **Adapter files a game provides:** `wsc.toml` `[discovery] adapter = "<folder>"` (else the one `discovery/*/games.json`) holding `games.json` with `"target"` and `"reference"`
