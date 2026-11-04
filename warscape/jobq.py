@@ -22,12 +22,13 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from . import gatemods
+from . import ci, gatemods
 from .policy import verdict
 from .repo import DEFAULTS
 
@@ -379,6 +380,73 @@ def red_prs(root, offline, run=subprocess.run):
         return [f'(could not read gh pr list output: {x})']
 
 
+def _gh_json(run, root, path):
+    """The parsed JSON of one `gh api` GET; raises RuntimeError with a short reason (the caller turns it into one "unknown" line)."""
+    try:
+        p = run(['gh', 'api', path], cwd=str(root), capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as x:
+        raise RuntimeError(f'cannot run gh: {x}') from None
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or p.stdout).strip()[:200] or f'gh exited {p.returncode}')
+    try:
+        return json.loads(p.stdout)
+    except ValueError as x:
+        raise RuntimeError(f'bad JSON from gh: {x}') from None
+
+
+def main_state(cfg, root, offline, run=subprocess.run):
+    """W22: what main's CI looks like, never an exception. {'state': off | unknown | red | green, 'lines': [...], 'runs': [run ids]}.
+    For each workflow in `[ci] workflows`, the latest completed push run on main (a workflow with none, like the pull-request-only policy.yml,
+    is skipped) and that run's required jobs (`ci.required_jobs`); a red one gives a line. A newer run still in progress is not read."""
+    if offline:
+        return {'state': 'off', 'lines': [], 'runs': []}
+    red, runs = [], []
+    try:
+        for wf in cfg['workflows']:
+            q = f'repos/{{owner}}/{{repo}}/actions/workflows/{wf}/runs?branch=main&event=push&status=completed&per_page=1'
+            found = _gh_json(run, root, q)['workflow_runs']
+            if not found:
+                continue
+            r = found[0]
+            runs.append(r['id'])
+            jobs = _gh_json(run, root, f'repos/{{owner}}/{{repo}}/actions/runs/{r["id"]}/jobs?per_page=100')['jobs']
+            for j in ci.required_jobs(cfg, jobs):
+                if j.get('conclusion') in ci.RED:
+                    when = (r.get('updated_at') or r.get('created_at') or '')[:10] or 'date unknown'
+                    red.append(f'main is RED: {j["name"]} failed in run {r["id"]} ({r.get("html_url", "")}), commit {str(r.get("head_sha", ""))[:7]}, '
+                               f'{when}: rerun it or push to main; an issue tracks it')
+    except (RuntimeError, KeyError, TypeError, AttributeError) as x:
+        return {'state': 'unknown', 'runs': [], 'lines': [f"(main's CI state is unknown: {x}; --offline skips this)"]}
+    return {'state': 'red' if red else 'green', 'lines': red, 'runs': runs}
+
+
+def main_health(cfg, root, offline, run=subprocess.run):
+    """The lines for a red main, one "unknown" line when it cannot be read, [] when green or offline."""
+    return main_state(cfg, root, offline, run)['lines']
+
+
+def print_main_health(cfg, root, offline, run=subprocess.run):
+    """Print main's CI state first (before the pull requests): the red lines, or the unknown line; green prints nothing. Returns the state."""
+    st = main_state(cfg, root, offline, run)
+    if st['state'] == 'red':
+        print('Main CI is red (fix or rerun before a merge verdict):\n  ' + '\n  '.join(st['lines']))
+    elif st['state'] == 'unknown':
+        print('\n'.join(st['lines']))
+    return st
+
+
+def main_html(st):
+    """The one line (or red lines) at the head of the queue page; '' when offline or no state."""
+    if not st or st['state'] == 'off':
+        return ''
+    e = html.escape
+    if st['state'] == 'red':
+        return ''.join(f'<p class="note warn">{e(l)}</p>' for l in st['lines'])
+    if st['state'] == 'unknown':
+        return f'<p class="muted">main CI: unknown. {e(st["lines"][0])}</p>'
+    return f'<p class="muted">main CI: green (run {", ".join(str(r) for r in st["runs"]) or "none yet"})</p>'
+
+
 def print_red_prs(root, offline):
     lines = red_prs(root, offline)
     if lines:
@@ -602,12 +670,12 @@ def panel_html(r):
     return f'<p class="muted">{"<br>".join(html.escape(str(x)) for x in lines)}</p>' if lines else ''
 
 
-def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None):
+def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None, main_html=''):
     """The queue as one HTML page. `read(path)`: file text or None; `branches`: remote branch names; `generated`: timestamp text;
     `on_branch`: see branch_rows (review and fix buttons need it). Brief, report and review are embedded as escaped Markdown and rendered by
     marked.js when it loads (plain text otherwise). A card gets a button for each action not_ready() allows: with `token` (served by
     `--serve`) it posts (id, action) to /launch; without, it copies the command line (run in `root`). `auto`: the autopilot's state
-    ({'interval', 'last', 'dry_run'}) when `--auto` runs."""
+    ({'interval', 'last', 'dry_run'}) when `--auto` runs. `main_html`: main's CI line(s) for the page head (`main_html(state)`, W22)."""
     e = html.escape
     by = {r['id']: r for r in rows}
     order = sorted(rows, key=lambda r: num(r['id']))
@@ -622,6 +690,8 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
         head = f'Nothing queued is ready. Next brief to write: <a href="#{e(nxt["id"])}">{e(nxt["id"])} {e(nxt["title"])}</a>'
     else:
         head = 'Nothing is ready to pick up or brief.'
+    if main_html:
+        head += '</p>' + main_html + '<p>'
     if ctx is not None:
         panel = ''.join(panel_html(r) for r in gatemods.run_stage(ctx, 'view', rows=rows))   # a game's own status lines (`view`-stage gate modules)
         if panel:
@@ -837,11 +907,13 @@ class JobServer(ThreadingHTTPServer):
     daemon_threads = True
     log = True   # one stderr line per request
 
-    def __init__(self, snapshot, agents, launch, which=shutil.which, port=0, dry_run=False, root=None, log_path=None, ctx=None):
+    def __init__(self, snapshot, agents, launch, which=shutil.which, port=0, dry_run=False, root=None, log_path=None, ctx=None,
+                 main_line=None, clock=time.monotonic):
         super().__init__(('127.0.0.1', port), _Handler)
         self.snapshot, self.agents, self.launch, self.which, self.dry_run, self.root = snapshot, agents, launch, which, dry_run, root
         self.log_path = log_path
         self.ctx = ctx
+        self.main_line, self.clock, self._main = main_line, clock, None   # main's CI line: `main_line()` -> html, memoised for 60 s (W22)
         self.token = secrets.token_urlsafe(32)
         self.host = f'127.0.0.1:{self.server_address[1]}'
         self.url = f'http://{self.host}/'
@@ -852,7 +924,15 @@ class JobServer(ThreadingHTTPServer):
     def page(self):
         rows, read, branches, on_branch = self.snapshot()
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-        return render_view(rows, read, branches, stamp, on_branch, self.token, self.root, self.auto, self.ctx)
+        return render_view(rows, read, branches, stamp, on_branch, self.token, self.root, self.auto, self.ctx, self.main_html_cached())
+
+    def main_html_cached(self):
+        if not self.main_line:
+            return ''
+        now = self.clock()
+        if self._main is None or now - self._main[0] >= 60:
+            self._main = (now, self.main_line())
+        return self._main[1]
 
     def start(self, jid, action, by, branches, on_branch, family=False, agents=None):
         """The one launch path (buttons and --auto): (code, message, extra). Readiness 409; a live session of the same name 429 (with
