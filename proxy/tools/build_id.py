@@ -33,7 +33,10 @@ UI_PINS = 'ui-pins'   # the role 'ui_pins' is the game's UI pin file (layout.ui_
 INPUTS = [('core', ('proxy/core', 'proxy/src')), ('adapter', (ADAPTER,)), ('build_sh', ('proxy/tools/build.sh',)),
           ('fetch_lua', ('proxy/tools/fetch_lua.py',)), ('build_id', ('proxy/tools/build_id.py',)),
           # J30: RmlUi, FreeType and the host's Lua compile into the DLL from the pinned sources the fetcher takes from this pin file
-          ('fetch_ui', ('proxy/tools/fetch_ui.py',)), ('ui_pins', (UI_PINS,))]
+          ('fetch_ui', ('proxy/tools/fetch_ui.py',)), ('ui_pins', (UI_PINS,)),
+          # W24 (C24): the image and the exact mingw-w64 package versions, a committed file: never the installed compiler measured into
+          # the id, so rule 79 recomputes it with no compiler; build.sh refuses a toolchain off this pin (toolchain.py check)
+          ('toolchain', ('proxy/tools/toolchain.py',))]
 
 
 def _git(root, *args):

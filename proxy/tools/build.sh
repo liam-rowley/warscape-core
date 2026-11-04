@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # purpose: build the proxy d3d9.dll (mingw-w64 i686, the release route) and/or build and run the host tests (g++)
-# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; --docker: the same target inside ubuntu:24.04 pinned by digest with CI's packages, the PC route (D31); smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; needs g++-mingw-w64-i686 for dll, or Docker Desktop with --docker)
+# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31); smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
 # when: after any change to the proxy sources or the adapter (CI runs `all` on every push); on the PC always with --docker; the DLL in <game repo>/build/proxy/<adapter name>/d3d9.dll is what proxy/tools/pc_deploy.py kits
 # not-a-verb: a compiler driver for C++ sources, not a registry operation; CI and agents call it directly
 set -euo pipefail
@@ -10,9 +10,7 @@ OWN="$(cd "$(dirname "$0")/../.." && pwd)"
 layout() { python3 "$OWN/proxy/tools/layout.py" "$1" || exit 2; }
 upath() { if command -v cygpath >/dev/null; then cygpath -u "$1"; else printf '%s\n' "$1"; fi; }
 DOCKER=0; [[ "${1:-}" == "--docker" ]] && { DOCKER=1; shift; }
-# D31: the container CI's proxy job runs in (ubuntu-24.04), pinned by digest, with the packages CI installs or its runner image has
-IMAGE="ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852"   # ubuntu:24.04, pinned 2026-10-29
-APT="g++-mingw-w64-i686 g++ python3 ca-certificates git"   # git: fetch_ui.py fetches RmlUi and FreeType by commit (J30)
+TC="$OWN/proxy/tools/toolchain.py"   # W24 (C24): the image and the mingw-w64 packages at exact versions, a build-id input
 WHAT="${1:-all}"
 if [[ "${2:-}" == "--adapter" ]]; then WSP_PROXY_ADAPTER="$(cd "${3:?adapter folder}" && pwd)"; export WSP_PROXY_ADAPTER; fi
 ROOT="$(upath "$(layout game-root)")"; SRC="$(upath "$(layout proxy-src)")"; ADIR="$(upath "$(layout proxy-adapter)")"; ADAPTER="$(basename "$ADIR")"
@@ -28,6 +26,11 @@ fi
 
 if [[ $DOCKER == 1 ]]; then
   docker info >/dev/null 2>&1 || { echo "build.sh --docker: Docker is not answering: start Docker Desktop (Linux containers); fallback: the CI artifact (proxy/README.md \"Build\")"; exit 2; }
+  # D31: the container is CI's (ubuntu-24.04), both from toolchain.py: the image by digest and the mingw-w64 packages at their pins, so the
+  # PC's DLL is CI's by construction; g++ (host tests), python3, ca-certificates, git (fetch_ui.py, J30) and the smoke's wine stay unpinned
+  # (they do not make the DLL). The container runs the same toolchain check before it compiles.
+  IMAGE="$(python3 "$TC" image)" || exit 2
+  APT="$(python3 "$TC" apt) g++ python3 ca-certificates git" || exit 2
   # smoke: the same container plus the wine packages CI's proxy job installs (J42); it runs the DLL `--docker all` left in build/proxy/
   PRE=":"
   if [[ "$WHAT" == smoke ]]; then
@@ -42,9 +45,28 @@ if [[ $DOCKER == 1 ]]; then
   # MSYS_NO_PATHCONV: Git Bash would rewrite /src and the -v argument into Windows paths
   MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_GAME_ROOT=/src -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "$IMAGE" bash -c \
     "set -e; $PRE; apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $APT >/dev/null
-     i686-w64-mingw32-g++-win32 --version | head -1; $(rel "$OWN")/proxy/tools/build.sh $WHAT"
+     $(rel "$OWN")/proxy/tools/build.sh $WHAT"
   exit $?
 fi
+
+# W24 (C24): the toolchain is checked before the first mingw compile of dll, all and repro: every pinned package at its version and $CXX
+# owned by one of them (toolchain.py check). Off the pin the build is refused (exit 2) unless WSP_TOOLCHAIN=any, which builds and marks the
+# id -dirty once: a DLL from another toolchain is not the DLL the committed id names. `id` above never gets here (rule 79 needs no compiler).
+TOOLCHAIN_LINE=""
+toolchain_check() {   # $1 = the mingw g++ the build will use
+  [[ -n "$TOOLCHAIN_LINE" ]] && return 0
+  local out rc=0
+  out="$(python3 "$TC" check "$1")" || rc=$?
+  echo "$out"
+  if [[ $rc == 0 ]]; then TOOLCHAIN_LINE="$out"; return 0; fi
+  [[ $rc == 2 ]] || { echo "build.sh: toolchain.py check failed (exit $rc)"; exit 2; }
+  if [[ "${WSP_TOOLCHAIN:-}" == any ]]; then
+    [[ "$BUILD_ID" == *-dirty ]] || BUILD_ID="$BUILD_ID-dirty"
+    TOOLCHAIN_LINE="toolchain: off the pin (WSP_TOOLCHAIN=any): build $BUILD_ID"
+    echo "build.sh: WSP_TOOLCHAIN=any: building off the pin as $BUILD_ID (not the DLL the committed id names)"; return 0
+  fi
+  echo "build.sh: the toolchain is not the pinned one (above): refused (exit 2)"; exit 2
+}
 
 # One compile line for every build (dll and repro): $1 = core sources, $2 = adapter folder, $3 = output DLL. Uses $CXX, $BUILD_ID.
 # File names in the DLL are fixed labels (core/, adapter/, lua/), never checkout paths: the same inputs give the same bytes from any
@@ -58,10 +80,13 @@ LUA_CORE="lapi lcode ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lpars
 # autofit, psnames, smooth; no zlib, bzip2, png, harfbuzz or brotli) and, for the Lua binding, RmlUi's Lua plugin plus a second Lua 5.1.1
 # (the viewer's: float numbers, collector and dummynode untouched). They depend only on the pinned sources and these flags, so they are
 # cached per compiler under build/ui/obj/<tag> (a stamp of the pin file, the flags and the compiler); file names in them are labels (ui/).
+# The mingw32 stamp also holds the installed versions of the pinned toolchain packages (W24: the compiler's first line names neither the
+# package revision nor mingw-w64-i686-dev), so a toolchain change rebuilds build/ui/obj/mingw32, which persists between --docker builds.
 # $1 compiler (g++), $2 C compiler, $3 tag. Prints the object folder.
 ui_objs() {   # $4 core sources (the compat header)
-  local CXXU="$1" CCU="$2" U="$ROOT/build/ui/obj/$3" stamp; export UIS="$4"
-  stamp="$( { sha256sum "$(layout ui-pins)" "$4/ui_lua51_compat.h" | cut -c1-64; "$CXXU" --version | head -1; echo "${UI_DEFS[*]} O2 v2"; } | sha256sum | cut -c1-16)"
+  local CXXU="$1" CCU="$2" U="$ROOT/build/ui/obj/$3" stamp tc=""; export UIS="$4"
+  if [[ "$3" == mingw32 ]]; then tc="$(python3 "$TC" installed)" || exit 2; fi
+  stamp="$( { sha256sum "$(layout ui-pins)" "$4/ui_lua51_compat.h" | cut -c1-64; "$CXXU" --version | head -1; echo "${UI_DEFS[*]} O2 v2"; [[ -z "$tc" ]] || echo "$tc"; } | sha256sum | cut -c1-16)"
   if [[ -f "$U/STAMP" && "$(cat "$U/STAMP")" == "$stamp" ]]; then echo "$U"; return; fi
   rm -rf "$U"; mkdir -p "$U/rml" "$U/ft" "$U/lua" "$U/rmllua" "$U/ftconf"
   # FreeType configuration: the stock options without zlib (as the viewer's CMake FT_DISABLE_ZLIB), and only the TrueType modules
@@ -136,7 +161,8 @@ if [[ "$WHAT" == dll || "$WHAT" == all || "$WHAT" == repro || "$WHAT" == tests ]
 
 if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
   CXX="$(command -v i686-w64-mingw32-g++-win32 || command -v i686-w64-mingw32-g++ || true)"
-  [[ -n "$CXX" ]] || { echo "build.sh: no i686 mingw-w64 g++ (apt-get install g++-mingw-w64-i686)"; exit 2; }
+  [[ -n "$CXX" ]] || { echo "build.sh: no i686 mingw-w64 g++ (sudo apt-get install -y --no-install-recommends \$(python3 $TC apt), or build.sh --docker)"; exit 2; }
+  toolchain_check "$CXX"
   build_dll "$SRC" "$ADIR" "$OUT/$ADAPTER/d3d9.dll"
   echo "build.sh: $OUT/$ADAPTER/d3d9.dll build $BUILD_ID sha256 $(sha256sum "$OUT/$ADAPTER/d3d9.dll" | cut -c1-64)"
   if command -v i686-w64-mingw32-objdump >/dev/null; then
@@ -177,6 +203,7 @@ if [[ "$WHAT" == repro ]]; then
   R="$(mktemp -d)/elsewhere_$RANDOM"; mkdir -p "$R"
   cp -a "$SRC" "$R/src"; cp -a "$ADIR" "$R/adapter"   # the build id was computed above
   CXX="$(command -v i686-w64-mingw32-g++-win32 || command -v i686-w64-mingw32-g++)"
+  toolchain_check "$CXX"
   build_dll "$R/src" "$R/adapter" "$R/other.dll"
   if cmp -s "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll"; then echo "build.sh repro: identical from another path"; rm -rf "$(dirname "$R")"
   else echo "build.sh repro: FAILED: the DLL depends on the checkout path"; cmp -l "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll" | head -5; exit 1; fi
