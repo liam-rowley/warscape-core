@@ -284,6 +284,22 @@ class PolicyStage(unittest.TestCase):
         self.assertIn('unknown gate(s) house_policy', out)
 
 
+class DocPathsGate(unittest.TestCase):
+    """W28 review 1: the gate is an error, and a git-ignored path passes even when a `../` path sits in the same doc (one such name made
+    `git check-ignore --stdin` exit 128 for the whole batch, read as "nothing is ignored")."""
+
+    def setUp(self):
+        self.repo = TempRepo({'.gitignore': '_scratch/\n', 'README.md': '# r\n`_scratch/registries/tools.md` and `../other/x.md`\n'},
+                             toml=TOML.replace('dirs = ["checks"]', 'dirs = []'))
+        self.addCleanup(self.repo.close)
+        subprocess.run(['git', 'add', '-A'], cwd=self.repo.root, check=True, capture_output=True)
+
+    def test_an_ignored_path_passes_beside_a_path_outside_the_repo(self):
+        rc, out = self.repo.wsc('gates', '--only', 'doc_paths')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('every backticked path exists', out)
+
+
 VIEW_MOD = '''
 from warscape.gates import Result
 NAME = 'panel'

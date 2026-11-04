@@ -288,8 +288,8 @@ def gate_run_refs(ctx):
 def gate_doc_paths(ctx):
     """Every backticked repo path in a living doc exists (W28, R11; `warscape/checks.py` stale_doc_paths): a tracked file or a folder above one, from
     the root, the doc's folder or across the `core/` boundary, or git-ignored on purpose. Not checked: the job folders and the decisions file (records
-    of their day; the decisions file is append only), fenced blocks, a line with `(was <path>)` or `(moved)`, and `[docs] path_ignore`. A warn: the
-    core's docs name game-repo and empire paths on purpose, more than a short ignore list holds (W28 kill criterion)."""
+    of their day; the decisions file is append only), fenced blocks, a line with `(was <path>)` or `(moved)`, a `../` path, and `[docs] path_ignore`.
+    A warn: the core's docs name game-repo and empire paths on purpose, more than a short ignore list holds (W28 kill criterion)."""
     tracked, subs = _tracked(ctx)
     paths = checks.run_ref_index(tracked)[0]
     skip = {ctx.config['policy']['decisions']}
@@ -297,14 +297,18 @@ def gate_doc_paths(ctx):
     docs = {p: t for p in checks.living_docs(ctx.files(), ctx.config['docs'], _generated(ctx))
             if p not in skip and not p.startswith(jdir) and (t := _read(ctx, p)) is not None}
     errs = checks.stale_doc_paths(docs, paths, ctx.config['docs']['path_ignore'])
-    toks = sorted({e.rsplit(': ', 1)[1].rstrip('/') for e in errs})
+    tok = lambda e: e.rsplit(': ', 1)[1].rstrip('/')
+    errs = [e for e in errs if not tok(e).startswith('../')]   # outside the repo: one such name makes git check-ignore exit 128 for the whole batch
+    toks = sorted({tok(e) for e in errs})
     try:   # one git call for every miss: build output and _scratch/ are git-ignored on purpose
         p = subprocess.run(['git', '-C', str(ctx.root), 'check-ignore', '--stdin', '-z'], input='\0'.join(toks).encode('utf-8') + b'\0', env=git_env(),
-                           capture_output=True)   # bytes, NUL-separated: text mode on Windows would send each name with a CR
-        ignored = set(p.stdout.decode('utf-8', 'replace').split('\0')) if p.returncode in (0, 1) else set()
-    except OSError:
-        ignored = set()
-    errs = [e for e in errs if (t := e.rsplit(': ', 1)[1].rstrip('/')) not in ignored and not t.startswith('../')]
+                           capture_output=True) if toks else None   # bytes, NUL-separated: text mode on Windows would send each name with a CR
+    except OSError as e:
+        return Result('doc_paths', 'error', f'git check-ignore could not run: {e}')
+    if p is not None and p.returncode not in (0, 1):   # 0: some ignored, 1: none; anything else is a failure, never "nothing is ignored" (W28 review 1)
+        return Result('doc_paths', 'error', f'git check-ignore exited {p.returncode}: {p.stderr.decode("utf-8", "replace").strip()[:300]}')
+    ignored = set(p.stdout.decode('utf-8', 'replace').split('\0')) if p is not None else set()
+    errs = [e for e in errs if tok(e) not in ignored]
     return Result('doc_paths', 'warn' if errs else 'ok', f'{len(errs)} backticked paths in living docs not found ({len(docs)} docs)' if errs
                   else f'{len(docs)} living docs: every backticked path exists', errs)
 
