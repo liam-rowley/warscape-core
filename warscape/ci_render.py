@@ -13,7 +13,7 @@ text, which carries its own indentation). Blocks:
   fetch_cache                  three steps of a job that builds the proxy, before the build: the fetch cache key from the pins
                                (proxy/tools/netfetch.py ci-cache), actions/cache of the raw downloads (continue-on-error: a cache
                                fault never fails the job), then `netfetch.py prefetch` (the fetchers with a retry on network flakes)
-  policy                       the `policy` job (pull requests; skips drafts) for `on: pull_request_target` (W23, C25): the default checkout
+  policy                       the `policy` job (pull requests; skips drafts) for `on: pull_request_target` (W23, C24): the default checkout
                                (the base), setup-python, `git fetch` of refs/pull/<n>/head, [ci] policy_extra_steps, then
                                `wsc policy --branch --base --head` with the head's names in `env:`; no step checks out, caches or runs the head
   notify gates needs=a,b,c     the failure-comment job of a push workflow, after the jobs a, b, c
@@ -117,7 +117,7 @@ def block_fetch_cache(cfg):
 
 
 def block_policy(cfg):
-    """The `policy` job for `on: pull_request_target` (W23, C25): the default checkout is the base, the head is fetched as git objects only,
+    """The `policy` job for `on: pull_request_target` (W23, C24): the default checkout is the base, the head is fetched as git objects only,
     and every name the head controls reaches a script through `env:` (a branch name may hold `$(...)`; this job has the base's privileges)."""
     wsc = _wsc(cfg).replace('python3', 'python')
     out = ['  policy:',
@@ -202,7 +202,7 @@ _PLAIN = re.compile(r'(?<![\w.-])pull_request(?![\w.-])')   # the trigger, not g
 
 
 def guard(template, src):
-    """(errors, warnings) of the render guard (W23, C25) for one template. A template with the `policy` block must trigger on
+    """(errors, warnings) of the render guard (W23, C24) for one template. A template with the `policy` block must trigger on
     `pull_request_target`, so GitHub runs the base's copy of the workflow and the head cannot edit its own check; a game that bumps the core
     switches in the bump commit. A `pull_request` trigger beside it is the one-off bootstrap for the pull request that switches: a warning
     until the next change to the template removes it. Comments do not count."""
@@ -212,7 +212,7 @@ def guard(template, src):
     body = '\n'.join(re.sub(r'(^|\s)#.*$', '', l) for l in lines)
     if not _TARGET.search(body):
         return [f"{src} has {{{{wsc policy}}}} but no pull_request_target trigger: the policy job must run the base's workflow, or a branch "
-                'edits its own check (W23, C25; docs/CONSUMING.md "The job pipeline")'], []
+                'edits its own check (W23, C24; docs/CONSUMING.md "The job pipeline")'], []
     if _PLAIN.search(body):
         return [], [f'{src} also has a pull_request trigger beside pull_request_target: the bootstrap of the pull request that switched '
                     '(W23); remove it in the next change to the template']

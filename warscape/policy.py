@@ -15,7 +15,7 @@ YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names th
 the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the decisions check: an `error`
 Result's details are policy errors.
 
-A pull request is judged with its base's rules (core W23, C25). The verb's parent (warscape/policy_base.py `judge`) writes the base's rule
+A pull request is judged with its base's rules (core W23, C24). The verb's parent (warscape/policy_base.py `judge`) writes the base's rule
 inputs into a fresh temporary folder outside every repository and runs the base's code there in a child process (`wsc policy --judge`,
 which calls `run_check` here):
   - the base tree: inside the core, the base commit's tree; in a game, the core commit the base's gitlink pins at the base's `[ci] core`, read
