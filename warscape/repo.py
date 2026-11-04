@@ -47,7 +47,8 @@ DEFAULTS = {
     # where a game's adapters are, for the proxy and harness tools (proxy/tools/layout.py, napoleon J12); empty = the one
     # proxy/*/adapter.cpp folder / the one harness/*/adapter.json in the repo
     'proxy': {'adapter': '',               # repo-relative folder: adapter.cpp, identity.json, generated/, the config file, lua/
-              'ui_pins': ''},              # repo-relative pin file of the RmlUi host's sources (empty: viewer/pins.json; J30)
+              'ui_pins': '',               # repo-relative pin file of the RmlUi host's sources (empty: viewer/pins.json; J30)
+              'tests': ''},                # repo-relative folder of the game's own C++ host tests (empty: proxy/tests when it holds a test_*.cpp; W16)
     'harness': {'adapter': ''},            # repo-relative file: the watcher's adapter.json (its profiles/ beside it)
     # the discovery passes (discovery/, `wsc discovery`; napoleon J64): empty = the one discovery/*/games.json folder in the repo
     'discovery': {'adapter': ''},          # repo-relative folder: games.json (target, reference, install paths) and the rules the tools read

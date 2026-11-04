@@ -310,7 +310,7 @@ try {
         Assert-Eq $ro.d.status 'ok' 'read-only tasklist is never blocked'
         Clear-Lock
     }
-    Test-Case 'exe check (J18): a fake game whose sha1 is not the identity is refused (-2), exe_check=warn launches it with a warning, watcher.status has the verdict' {
+    Test-Case 'exe check (J18, W25): a mismatched fake game is refused (-2); watcher.ini exe_check=warn is refused by the running watcher and by a restart job; a fresh start honours it with a warning' {
         Set-Lock 'ci18'
         [IO.File]::WriteAllText($identityPath, '{"sha1": "0000000000000000000000000000000000000000"}', $Utf8NoBom)
         try {
@@ -319,11 +319,29 @@ try {
             Assert-Match $r.d.reason 'EXE CHECK: MISMATCH' 'reason'
             Assert-True ((Fake-Procs).Count -eq 0) 'nothing started'
             Wait-Until { $x = Get-St; $x -and $x.exe -and $x.exe.ok -eq $false } 10 'watcher.status exe.ok false' | Out-Null
+            # W25 (H1): an ini edit never weakens a running watcher's exe_check
             $mark = Log-Mark
             [IO.File]::AppendAllText((Join-Path $root 'watcher.ini'), "`r`nexe_check=warn`r`n", $Utf8NoBom)
-            Wait-LogMatch 'watcher.ini reloaded' 20 'the settings reload' $mark
+            Wait-LogMatch 'asks exe_check=warn; refused, a running watcher never weakens it' 20 'the refused reload' $mark
+            $w = Run-Job 'launch visible=1 owner=ci18' 'exeini' 40
+            Assert-Eq $w.d.status 'refused' "the ini edit did not weaken the gate ($($w.out))"; Assert-Match $w.d.reason 'EXE CHECK: MISMATCH' 'with the exe check text'
+            Wait-Until { $x = Get-St; $x -and $x.exe_check_refused -eq 'warn' } 10 'watcher.status exe_check_refused' | Out-Null
+            # a restart job carries the value in force across watch.cmd's relaunch (restart.carry)
+            $pid0 = Pid-Of-Watcher; $mark = Log-Mark
+            Run-Job 'restart' 'exerestart' 30 | Out-Null
+            Wait-LogMatch 'watcher [0-9.a-z-]+ started \(pid' 150 'the restarted watcher' $mark
+            Wait-Until { $x = Get-St; $x -and [int]$x.pid -ne $pid0 } 40 'a new watcher pid' | Out-Null
+            Wait-Watcher 40 | Out-Null
+            $w = Run-Job 'launch visible=1 owner=ci18' 'exerestarted' 40
+            Assert-Eq $w.d.status 'refused' "a restart job did not weaken the gate ($($w.out))"; Assert-Match $w.d.reason 'EXE CHECK: MISMATCH' 'still the exe check'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'restart.carry'))) 'the carry was read and removed'
+            # Liam's way: stop the watcher and start it by hand; the start reads the ini as written
+            Stop-TestWatcher
+            $mark = Log-Mark
+            Start-TestWatcher | Out-Null
+            Assert-Match (Get-LogSince $mark) 'exe_check=warn at start' 'the start says so loudly'
             $w = Run-Job 'launch visible=1 owner=ci18' 'exewarn' 40
-            Assert-Eq $w.d.status 'ok' "warn launches ($($w.out))"; Assert-Match $w.out 'WARNING \(watcher\): exe check failed' 'with a warning'
+            Assert-Eq $w.d.status 'ok' "a fresh start with warn launches ($($w.out))"; Assert-Match $w.out 'WARNING \(watcher\): exe check failed' 'with a warning'
             Assert-Eq (Run-Job 'kill owner=ci18' 'exekill' 40).d.status 'ok' 'kill'
         } finally {
             $ini = [IO.File]::ReadAllText((Join-Path $root 'watcher.ini')) -replace "`r`nexe_check=warn`r`n", ''
@@ -331,6 +349,7 @@ try {
             [IO.File]::WriteAllText($identityPath, "{`"sha1`": `"$fakeSha1`"}", $Utf8NoBom)
             Stop-Fakes; Clear-Lock
         }
+        Wait-Until { $x = Get-St; $x -and -not $x.exe_check_refused -and $x.exe_check -eq 'refuse' } 20 'back to exe_check=refuse (a reload may strengthen)' | Out-Null
         $st = Run-Job 'status' 'exestatus' 20
         Assert-Match $st.out '"ok":\s+true' 'a status job runs the check and shows the verdict'
     }

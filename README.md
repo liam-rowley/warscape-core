@@ -53,6 +53,8 @@ A repo declares its registries in `wsc.toml`; the core ships these schemas (`sch
 | `hotkeys` | binding, action, context, source, how a bare key fires (`fires_with`); clashes fail the gate |
 | `engine_facts` | claim, state (`verified`, `open`, `refuted`), evidence run, date |
 
+`schemas/ui_pins.schema.json` is not a registry: it is the UI pin file's schema (`proxy/tools/fetch_ui.py --check`, [docs/PROXY_HARNESS.md](docs/PROXY_HARNESS.md)).
+
 The schema subset and the registry extensions (`x-view`, `x-unique`, `x-wildcard`, `x-chord`, `x-ref`, `x-source`, `x-extends`) are
 documented in the docstrings of `warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
 Two of them in a sentence each: `x-chord` makes the `x-unique` check read a field as `Ctrl+Alt+Shift+Key` chords, so a bare key flagged

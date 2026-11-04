@@ -142,6 +142,36 @@ class Codec(unittest.TestCase):
             self.assertEqual(E.Esf.load(out).select('ROOT')[0][3].get(), 9)
 
 
+class OneIndex(unittest.TestCase):
+    """W25 (audit H12): one ESF index convention, the child position @N among all of a container's nodes, as esf_dump and esf_diff print it
+    and the CLI `set` takes it; set_value used to count Val nodes only."""
+
+    def test_set_value_takes_the_child_position_and_a_record_in_front_shifts_nothing(self):
+        e = E.Esf(encode(16))
+        c = [E.Rec(0, 0, []), E.Val(0x04, struct.pack('<i', 1)), E.Val(0x04, struct.pack('<i', 2))]
+        e.set_value(c, 1, 7)
+        self.assertEqual([n.get() for n in c[1:]], [7, 2])
+
+    def test_set_value_refuses_a_record(self):
+        e = E.Esf(encode(16))
+        root = e.select('ROOT')[0]
+        at = next(i for i, n in enumerate(root) if isinstance(n, E.Rec))
+        with self.assertRaises(ValueError) as cm:
+            e.set_value(root, at, 1)
+        self.assertIn('@%d' % at, str(cm.exception))
+
+    def test_the_cli_and_the_api_agree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = write(tmp, 'a.save', encode(16))
+            out = os.path.join(tmp, 'b.save')
+            sys.argv = ['esf_edit.py', 'set', p, 'ROOT', '@3', '9', '-o', out]
+            with contextlib.redirect_stdout(io.StringIO()):
+                E.main()
+            e = E.Esf(encode(16))
+            e.set_value(e.select('ROOT')[0], 3, 9)
+            self.assertEqual(e.dumps(), E.Esf.load(out).dumps())
+
+
 class Diff(unittest.TestCase):
     def run_diff(self, a, b, skip=''):
         with tempfile.TemporaryDirectory() as tmp:
