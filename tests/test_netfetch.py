@@ -1,4 +1,6 @@
-"""Host tests for proxy/tools/netfetch.py (W21, backlog B45b): the retry around the fetchers, `prefetch` and `ci-cache`.
+"""Host tests for proxy/tools/netfetch.py (W21, backlog B45b) and the retry inside the fetchers (W24, B62): `retry`, `ci-cache`, and
+fetch_lua.py and fetch_ui.py retrying their own downloads and git fetches, removing a checkout they cannot trust, and never retrying a
+wrong byte or a failed patch.
 
 No network: tarballs are file:// URLs and the RmlUi and FreeType pins point at a local git repository in a temporary game root.
 """
@@ -47,10 +49,11 @@ def http_error(code):
 
 class Retry(unittest.TestCase):
     def go(self, fn, **kw):
-        slept, out = [], io.StringIO()
-        with contextlib.redirect_stdout(out):
+        slept, out, err = [], io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             got = netfetch.retry(fn, 'lua', sleep=slept.append, jitter=random.Random(7).uniform, **kw)
-        return got, slept, out.getvalue()
+        self.assertEqual(out.getvalue(), '')   # W24: build.sh discards the fetchers' stdout, so the retry lines go to stderr
+        return got, slept, err.getvalue()
 
     def test_transient_errors_are_retried_with_the_delay_schedule_and_one_line_each(self):
         fn = Flaky(urllib.error.URLError('timed out'), ConnectionResetError(104, 'reset'), TimeoutError('connect'))
@@ -94,14 +97,21 @@ class Retry(unittest.TestCase):
             self.go(fn, tries=2)
         self.assertEqual(fn.calls, 2)
 
+    def test_prefetch_and_clean_checkouts_are_gone(self):
+        # W24 (B62): the fetchers retry themselves, so the CI-only wrapper went with the render block's third step
+        self.assertFalse(hasattr(netfetch, 'prefetch'))
+        self.assertFalse(hasattr(netfetch, 'clean_checkouts'))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(netfetch.main(['prefetch']), 64)
+
 
 # ------------------------------------------------------------------ a temporary game root with local sources
 LUACONF = ('/* luaconf */\n#define LUA_NUMBER_DOUBLE\n#define LUA_NUMBER\tdouble\n#define LUA_NUMBER_SCAN\t\t"%lf"\n'
            '#define LUA_NUMBER_FMT\t\t"%.14g"\n#define lua_str2number(s,p)\tstrtod((s), (p))\n')
 
 
-def lua_tarball():
-    files = {'luaconf.h': LUACONF, 'ltable.c': '#define dummynode\t\t(&dummynode_)\n', 'lgc.h': 'if (G(L)->totalbytes >= G(L)->GCthreshold)\n'}
+def lua_tarball(luaconf=LUACONF):
+    files = {'luaconf.h': luaconf, 'ltable.c': '#define dummynode\t\t(&dummynode_)\n', 'lgc.h': 'if (G(L)->totalbytes >= G(L)->GCthreshold)\n'}
     for n in fetch_lua.CORE:
         files.setdefault(n, f'/* {n} */\n')
     buf = io.BytesIO()
@@ -125,8 +135,20 @@ def sha(b):
     return hashlib.sha256(b).hexdigest()
 
 
-@unittest.skipUnless(GIT, 'git is not installed: prefetch fetches RmlUi and FreeType with git')
-class Prefetch(unittest.TestCase):
+class FlakyUrlopen:
+    """urlopen that raises a network error on its first `fail` calls, then opens the URL for real (file://)."""
+    def __init__(self, fail=1):
+        self.real, self.fail, self.urls = urllib.request.urlopen, fail, []
+
+    def __call__(self, url, *a, **k):
+        self.urls.append(url)
+        if len(self.urls) <= self.fail:
+            raise urllib.error.URLError('timed out')
+        return self.real(url, *a, **k)
+
+
+@unittest.skipUnless(GIT, 'git is not installed: fetch_ui.py fetches RmlUi and FreeType with git')
+class Fetchers(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         t = Path(self._tmp.name)
@@ -152,11 +174,14 @@ class Prefetch(unittest.TestCase):
         for k in ('stb_image', 'stb_image_write'):
             f = src / f'{k}.h'
             pins[k] = {'version': '1', 'url': f.as_uri(), 'sha256': sha(f.read_bytes())}
+        self.pins = pins
         (self.game / 'viewer').mkdir(parents=True)
         (self.game / 'viewer' / 'pins.json').write_text(json.dumps(pins, indent=1), encoding='utf-8')
         self.lua_pin = {'version': '5.1.1', 'url': lua.as_uri(), 'sha256': pins['lua']['sha256']}
+        self.slept = []
         self.patches = [mock.patch.dict(os.environ, {'WSP_GAME_ROOT': str(self.game)}),
-                        mock.patch.object(fetch_lua, 'ROOT', self.game), mock.patch.dict(fetch_lua.PIN, self.lua_pin)]
+                        mock.patch.object(fetch_lua, 'ROOT', self.game), mock.patch.dict(fetch_lua.PIN, self.lua_pin),
+                        mock.patch.object(netfetch.time, 'sleep', self.slept.append)]
         for p in self.patches:
             p.start()
 
@@ -165,14 +190,22 @@ class Prefetch(unittest.TestCase):
             p.stop()
         self._tmp.cleanup()   # TemporaryDirectory clears read-only git objects itself
 
-    def prefetch(self):
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            netfetch.prefetch(sleep=lambda s: None)
-        return out.getvalue()
+    def fetch(self, urlopen=None, gitfn=None):
+        """fetch_lua.fetch and fetch_ui.main as build.sh runs them: (stdout, stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.ExitStack() as st:
+            if urlopen:
+                st.enter_context(mock.patch.object(urllib.request, 'urlopen', urlopen))
+            if gitfn:
+                st.enter_context(mock.patch.object(fetch_ui, 'git', gitfn))
+            st.enter_context(contextlib.redirect_stdout(out))
+            st.enter_context(contextlib.redirect_stderr(err))
+            fetch_lua.fetch(self.game / 'build' / 'lua')
+            self.assertEqual(fetch_ui.main(['--out', str(self.game / 'build' / 'ui' / 'src')]), 0)
+        return out.getvalue(), err.getvalue()
 
     def offline(self):
-        """fetch_lua.fetch and fetch_ui.main as build.sh runs them, with every network route raising."""
+        """The fetchers with every network route raising."""
         real = fetch_ui.git
 
         def no_fetch(*args, cwd):
@@ -182,15 +215,38 @@ class Prefetch(unittest.TestCase):
 
         def no_url(*a, **k):
             raise AssertionError(f'network call: urlopen {a}')
+        return self.fetch(no_url, no_fetch)[0]
 
-        out = io.StringIO()
-        with mock.patch.object(urllib.request, 'urlopen', no_url), mock.patch.object(fetch_ui, 'git', no_fetch), contextlib.redirect_stdout(out):
+    def test_failing_fixture_a_flaky_download_is_retried_inside_fetch_lua_and_fetch_ui(self):
+        flaky = FlakyUrlopen(1)
+        with mock.patch.object(urllib.request, 'urlopen', flaky), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
             fetch_lua.fetch(self.game / 'build' / 'lua')
-            self.assertEqual(fetch_ui.main(['--out', str(self.game / 'build' / 'ui' / 'src')]), 0)
-        return out.getvalue()
+        self.assertEqual(len(flaky.urls), 2)
+        self.assertRegex(err.getvalue(), r'netfetch: fetch_lua .*timed out.*; retry 2 of 4')
+        self.assertEqual(len(self.slept), 1)
+        flaky = FlakyUrlopen(1)
+        out, err = self.fetch(urlopen=flaky)
+        self.assertRegex(err, r'netfetch: fetch_ui .*lua-5\.1\.1\.tar\.gz.*timed out.*; retry 2 of 4')
+        self.assertNotIn('netfetch:', out)   # build.sh discards stdout: a retry line there would never be seen
+        self.assertTrue((self.game / 'build' / 'ui' / 'src' / 'stb' / 'stb_image_write.h').is_file())
 
-    def test_after_prefetch_the_fetchers_make_no_network_call(self):
-        self.prefetch()
+    def test_failing_fixture_a_flaky_git_fetch_is_retried_inside_fetch_ui(self):
+        real, fails = fetch_ui.git, []
+
+        def flaky_git(*args, cwd):
+            if 'fetch' in args and not fails:
+                fails.append(args)
+                raise subprocess.CalledProcessError(128, ['git', *args], stderr='fatal: unable to access: Connection reset')
+            return real(*args, cwd=cwd)
+        out, err = self.fetch(gitfn=flaky_git)
+        self.assertEqual(len(fails), 1)
+        self.assertRegex(err, r'netfetch: fetch_ui rmlui: CalledProcessError.*Connection reset.*; retry 2 of 4')
+        self.assertTrue((self.game / 'build' / 'ui' / 'src' / 'rmlui' / 'Include' / 'a.h').is_file())
+        self.assertTrue((self.game / 'build' / 'ui' / 'src' / 'freetype' / 'README').is_file())
+
+    def test_after_one_fetch_the_fetchers_make_no_network_call(self):
+        self.fetch()
         self.assertTrue((self.game / 'build' / 'downloads' / 'lua-5.1.1.tar.gz').is_file())
         self.assertTrue((self.game / 'build' / 'lua' / 'src' / 'lapi.c').is_file())
         self.assertTrue((self.game / 'build' / 'ui' / 'src' / 'rmlui' / 'Include' / 'a.h').is_file())
@@ -200,7 +256,7 @@ class Prefetch(unittest.TestCase):
 
     def test_a_restored_cache_without_the_patched_trees_needs_no_network(self):
         """What CI's fetch cache holds: the raw downloads and the git checkouts, never build/lua or build/ui/src/lua."""
-        self.prefetch()
+        self.fetch()
         shutil.rmtree(self.game / 'build' / 'lua')
         shutil.rmtree(self.game / 'build' / 'ui' / 'src' / 'lua')
         shutil.rmtree(self.game / 'build' / 'ui' / 'src' / 'stb')
@@ -208,27 +264,56 @@ class Prefetch(unittest.TestCase):
         self.assertIn('extracted and patched', out)
         self.assertIn('fetched and patched to float numbers', out)
 
-    def test_a_half_restored_or_half_fetched_checkout_is_removed_and_fetched_again(self):
-        self.prefetch()
+    def test_failing_fixture_fetch_ui_removes_a_half_restored_or_half_fetched_checkout_itself(self):
+        self.fetch()
         rml = self.game / 'build' / 'ui' / 'src' / 'rmlui'
         (rml / 'Include' / 'a.h').unlink()   # a restore that stopped part way: HEAD is right, a file is missing
-        out = self.prefetch()
-        self.assertIn('rmlui: removed', out)
+        out, err = self.fetch()
+        self.assertIn('fetch_ui: rmlui: removed', err)
         self.assertTrue((rml / 'Include' / 'a.h').is_file())
         shutil.rmtree(self.game / 'build' / 'ui' / 'src' / 'freetype', onexc=netfetch._force_remove)
         ft = self.game / 'build' / 'ui' / 'src' / 'freetype'
         ft.mkdir()
-        git(ft, 'init', '-q')   # a fetch that failed after `git init`: HEAD is unborn, and fetch_ui's own check would fail on every try
-        out = self.prefetch()
-        self.assertIn('freetype: removed', out)
+        git(ft, 'init', '-q')   # a fetch that failed after `git init`: HEAD is unborn
+        out, err = self.fetch()
+        self.assertIn('fetch_ui: freetype: removed', err)
         self.assertTrue((ft / 'README').is_file())
+        out, err = self.fetch()   # a good checkout is trusted and kept
+        self.assertNotIn('removed', err)
+        self.assertIn('freetype 2.13.3 at', out)
 
-    def test_a_sha_mismatch_is_never_retried(self):
-        with mock.patch.dict(fetch_lua.PIN, {'sha256': '0' * 64}):
-            slept = []
-            with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                netfetch.prefetch(sleep=slept.append)
-        self.assertEqual(slept, [])
+    def test_failing_fixture_a_sha_mismatch_or_a_failed_patch_is_never_retried(self):
+        with mock.patch.dict(fetch_lua.PIN, {'sha256': '0' * 64}), self.assertRaises(SystemExit) as e, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            fetch_lua.fetch(self.game / 'build' / 'lua')
+        self.assertIn('refusing', str(e.exception))
+        bad = dict(self.pins, stb_image=dict(self.pins['stb_image'], sha256='1' * 64))
+        (self.game / 'viewer' / 'pins.json').write_text(json.dumps(bad), encoding='utf-8')
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            fetch_ui.main(['--out', str(self.game / 'build' / 'ui' / 'src')])
+        self.assertIn('refusing', str(e.exception))
+        tb = Path(self._tmp.name) / 'srv' / 'lua-5.1.1.tar.gz'
+        tb.write_bytes(lua_tarball(luaconf='/* no double here */\n'))
+        with mock.patch.dict(fetch_lua.PIN, {'sha256': sha(tb.read_bytes())}), self.assertRaises(SystemExit) as e, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            fetch_lua.fetch(self.game / 'build' / 'lua2')
+        self.assertIn('did not apply', str(e.exception))
+        self.assertEqual(self.slept, [])
+
+    def test_failing_fixture_a_missing_pin_names_the_five_keys_and_the_reference_file(self):
+        # C2 of the 2026-11-03 audit: the refusal said only `has no "stb_image_write" pin`
+        pins = {k: v for k, v in self.pins.items() if k != 'stb_image_write'}
+        (self.game / 'viewer' / 'pins.json').write_text(json.dumps(pins), encoding='utf-8')
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()):
+            fetch_ui.main(['--out', str(self.game / 'build' / 'ui' / 'src')])
+        msg = str(e.exception)
+        self.assertIn('has no "stb_image_write" pin', msg)
+        self.assertIn('rmlui, freetype, lua, stb_image, stb_image_write', msg)
+        self.assertIn('PNG dump', msg)
+        self.assertIn('0.10.0', msg)
+        self.assertIn('proxy/tests/null_game/viewer/pins.json', msg)
+        self.assertIn('The UI pin file', msg)
+        self.assertNotRegex(msg, r'(?i)napoleon|empire')
 
     def test_ci_cache_prints_a_pin_key_and_the_raw_download_paths(self):
         text = netfetch.ci_cache(cwd=self.game.parent)
@@ -262,7 +347,7 @@ class Dxvk(unittest.TestCase):
             raise SystemExit('fetch_dxvk: sha mismatch')
 
         with tempfile.TemporaryDirectory() as t, mock.patch.object(fetch_dxvk, 'get', get), \
-                mock.patch.object(netfetch.time, 'sleep', lambda s: None), contextlib.redirect_stdout(io.StringIO()) as out:
+                mock.patch.object(netfetch.time, 'sleep', lambda s: None), contextlib.redirect_stderr(io.StringIO()) as out:
             with self.assertRaises(SystemExit):
                 fetch_dxvk.fetch(t)
         self.assertEqual(calls, [fetch_dxvk.PIN['tarball_url']] * 2)

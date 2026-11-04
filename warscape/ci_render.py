@@ -10,9 +10,9 @@ text, which carries its own indentation). Blocks:
   if <set> [dispatch]          the `if:` line of a slow job: runs whenever `changes` failed, else when the set changed and has no pass marker
                                (`dispatch`: also on every workflow_dispatch run)
   pass_marker <set> [shell=S]  the last two steps of a slow job: write and save the pass marker for the set's input tree
-  fetch_cache                  three steps of a job that builds the proxy, before the build: the fetch cache key from the pins
-                               (proxy/tools/netfetch.py ci-cache), actions/cache of the raw downloads (continue-on-error: a cache
-                               fault never fails the job), then `netfetch.py prefetch` (the fetchers with a retry on network flakes)
+  fetch_cache                  two steps of a job that builds the proxy, before the build: the fetch cache key from the pins
+                               (proxy/tools/netfetch.py ci-cache), then actions/cache of the raw downloads (continue-on-error: a cache
+                               fault never fails the job); the fetchers retry their own network flakes inside build.sh (W24, B62)
   policy                       the `policy` job (pull requests; skips drafts) for `on: pull_request_target` (W23, C24): the default checkout
                                (the base), setup-python, `git fetch` of refs/pull/<n>/head, [ci] policy_extra_steps, then
                                `wsc policy --branch --base --head` with the head's names in `env:`; no step checks out, caches or runs the head
@@ -108,12 +108,11 @@ def block_fetch_cache(cfg):
     tool = f"python3 {cfg['core'] + '/' if cfg['core'] else ''}proxy/tools/netfetch.py"
     return '\n'.join([
         '      # fetch cache (W21): the raw downloads (tarballs, RmlUi and FreeType checkouts), keyed by the pins and [ci] salt, never the patched',
-        "      # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte.",
+        "      # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte, and",
+        '      # the fetchers retry their own downloads and git fetches on a network flake inside build.sh (W24), never a wrong byte.',
         '      - id: fetch_key', f'        run: {tool} ci-cache >> "$GITHUB_OUTPUT"',
         '      - uses: actions/cache@v5', '        continue-on-error: true', '        with:', '          path: ${{ steps.fetch_key.outputs.paths }}',
-        f"          key: fetch-{cfg['salt']}-${{{{ steps.fetch_key.outputs.key }}}}",
-        '      # every source build.sh compiles, each fetcher retried on a network flake (build.sh then makes no network call)',
-        f'      - run: {tool} prefetch'])
+        f"          key: fetch-{cfg['salt']}-${{{{ steps.fetch_key.outputs.key }}}}"])
 
 
 def block_policy(cfg):

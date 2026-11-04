@@ -11,12 +11,17 @@ build from the same sources (the consumer's decision D37), so both read one pin 
 fetcher. The Lua copy is the viewer's: float lua_Number (the engine's number type) and nothing else; the proxy's engine-patched core
 (fetch_lua.py: the engine's dummynode, no GC step) is a different copy for the engine's own lua_State. The host links this one with
 its symbols made local (build.sh), so the two never meet.
-Needs git (RmlUi, FreeType) and network; downloads are cached under the output folder.
+Needs git (RmlUi, FreeType) and network; downloads are cached under the output folder. Each download and git fetch is retried on a
+network flake (netfetch.retry, W24, B62; one stderr line per retry), never a sha mismatch or a failed patch. A checkout is trusted only
+when HEAD is the pinned commit and the working tree equals HEAD; anything else (a fetch that failed after `git init`, a cache restored in
+part, another pin) is removed and fetched again.
 """
 import argparse
 import hashlib
 import io
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -25,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import netfetch  # noqa: E402  (not a DLL input: it changes whether a download succeeds, never a byte)
 
 LUACONF = [
     ('#define LUA_NUMBER_DOUBLE\n#define LUA_NUMBER\tdouble', '#define LUA_NUMBER\tfloat   /* Warscape engine build */'),
@@ -39,15 +45,25 @@ def git(*args, cwd):
                           capture_output=True, text=True).stdout.strip()
 
 
+def _head(d):
+    try:
+        return git('rev-parse', '--verify', '--quiet', 'HEAD', cwd=d)
+    except subprocess.CalledProcessError:
+        return None
+
+
 def fetch_git(name, pin, out):
     d = out / name
-    if (d / '.git').exists() and git('rev-parse', 'HEAD', cwd=d) == pin['commit']:
-        print(f'fetch_ui: {name} {pin["version"]} at {pin["commit"][:12]} already')
-        return
+    if (d / '.git').exists():
+        if _head(d) == pin['commit'] and netfetch._git_ok(d):
+            print(f'fetch_ui: {name} {pin["version"]} at {pin["commit"][:12]} already')
+            return
+        shutil.rmtree(d, onexc=netfetch._force_remove)   # git's objects are read-only, which Windows refuses to delete
+        print(f'fetch_ui: {name}: removed {d} (HEAD not the pinned {pin["commit"][:12]}, unreadable, or a working tree that differs '
+              f'from it); fetching again', file=sys.stderr, flush=True)
     d.mkdir(parents=True, exist_ok=True)
-    if not (d / '.git').exists():
-        git('init', '-q', cwd=d)
-    git('fetch', '-q', '--depth', '1', pin['repo'], pin['commit'], cwd=d)
+    git('init', '-q', cwd=d)
+    netfetch.retry(lambda: git('fetch', '-q', '--depth', '1', pin['repo'], pin['commit'], cwd=d), f'fetch_ui {name}')
     git('checkout', '-q', '--force', 'FETCH_HEAD', cwd=d)
     head = git('rev-parse', 'HEAD', cwd=d)
     if head != pin['commit']:
@@ -55,11 +71,15 @@ def fetch_git(name, pin, out):
     print(f'fetch_ui: {name} {pin["version"]} at {head[:12]}')
 
 
+def _get(url):
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
 def download(url, sha, cache):
     data = cache.read_bytes() if cache.exists() else None
     if data is None or hashlib.sha256(data).hexdigest() != sha:
-        with urllib.request.urlopen(url, timeout=120) as r:
-            data = r.read()
+        data = netfetch.retry(lambda: _get(url), f'fetch_ui {url}')   # the sha check below is outside the retry
         got = hashlib.sha256(data).hexdigest()
         if got != sha:
             sys.exit(f'fetch_ui: {url} has sha256 {got}, pinned {sha}: refusing')
@@ -112,11 +132,11 @@ def main(argv=None):
     if not pins_path.is_file():
         sys.exit(f'fetch_ui: no pin file {pin_hint(pins_path)}')
     pins = json.loads(pins_path.read_text(encoding='utf-8'))
+    for k in KEYS:
+        if k not in pins:
+            sys.exit(missing_pin(pins_path, k))
     out = Path(a.out) if a.out else layout.game_root() / 'build' / 'ui' / 'src'
     out.mkdir(parents=True, exist_ok=True)
-    for k in ('rmlui', 'freetype', 'lua', 'stb_image', 'stb_image_write'):
-        if k not in pins:
-            sys.exit(f'fetch_ui: {pins_path} has no "{k}" pin')
     fetch_git('rmlui', pins['rmlui'], out)
     fetch_git('freetype', pins['freetype'], out)
     fetch_lua(pins['lua'], out)
@@ -127,6 +147,25 @@ def main(argv=None):
 
 def pin_hint(p):
     return f'{p} (set wsc.toml [proxy] ui_pins, or keep viewer/pins.json in the game repo)'
+
+
+# The UI pin file's keys (docs/CONSUMING.md "The UI pin file"), each with what it is for
+KEYS = {'rmlui': 'RmlUi, the UI library', 'freetype': "RmlUi's font engine", 'lua': "the host's own Lua 5.1.1 (float numbers)",
+        'stb_image': 'image loading', 'stb_image_write': "the in-game host's PNG dump, required since 0.10.0"}
+# the reference pin file to copy an entry from: the null game's, beside these tools in the core
+REFERENCE = Path(__file__).resolve().parents[1] / 'tests' / 'null_game' / 'viewer' / 'pins.json'
+
+
+def missing_pin(pins_path, key):
+    """The refusal for a pin file without `key` (C2 of the 2026-11-03 audit): the key, the five keys, what it is for, the entry to copy."""
+    try:
+        ref = Path(os.path.relpath(REFERENCE, layout.game_root())).as_posix()
+        ref = ref if not ref.startswith('..') else REFERENCE.as_posix()
+    except (ValueError, layout.LayoutError):   # another drive (Windows), or no game root
+        ref = REFERENCE.as_posix()
+    return (f'fetch_ui: {pins_path} has no "{key}" pin ({KEYS[key]}). The UI pin file needs all five keys: {", ".join(KEYS)} '
+            f'(docs/CONSUMING.md "The UI pin file"; it is a DLL input, the ui_pins role). Copy the "{key}" entry from the reference pin file, '
+            f'the null game\'s {ref}')
 
 
 if __name__ == '__main__':
