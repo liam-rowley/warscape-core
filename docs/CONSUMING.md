@@ -205,7 +205,7 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   makes the build offline. The fetchers' sha256 checks still judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
-- **The proxy job runs the smoke on your adapter** (`build.sh smoke`, 0.28.0): each step asserts what that game's build must do. A game without a
+- **The proxy job runs the smoke on your adapter** (`build.sh smoke`, 0.27.0): each step asserts what that game's build must do. A game without a
   `GestureAdapter` passes steps 6 and 7 on the inert path (the log says "no adapter"), and step 8 peeks the first engine site in the game's
   generated tables (a game with no engine sites checks the stale request only). The core proves both paths: the null game, and the fixture
   `proxy/tests/null_game_no_gesture`.
