@@ -46,3 +46,14 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
   (tid N)`, the `dev:` line's `threads at the first Direct3DCreate9: state=<0|1> ctl=<0|1>`, `redirect: <n> rules from <path> (proxy.file_rules)`.
 - **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
   `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
+
+## Gate changes in 0.36.0 (W28, C31): the steps at the pin bump
+- **`[gates] skip`** takes `"<gate>:<decision id>"` only; a bare name is a config error. Add a decisions row first, then skip under its id. Each skip prints a warning line.
+- **`verified_dates`** no longer takes `3-10`, "session", `.md)` or `v2` as a date: fix each flagged line with its true date or run id (`git log`, the report).
+- **`json`** refuses a key twice in one object, in every `.json`/`.jsonl` and in every registry row: fix the data, never relax the check.
+- **`doc_paths`** (an error) fails on backticked paths in living docs that are not in the repo: point a renamed one at its new path, drop a gone one,
+  mark a historical one `(was <path>)`, and list tokens that are not this repo's paths (branch prefixes such as `plan/`, another repo's folders as a
+  prefix glob such as `rml_mod/**`) in `[docs] path_ignore`; the core's own `wsc.toml` is the example. Job folders at any depth, the decisions file and
+  `../` paths are not checked. napoleon-remastered had 56 misses on 2026-11-04 (W28 report): clear them in its pin-bump branch, or skip the gate there
+  under a decision id (`"doc_paths:<id>"`) while it does.
+- **`gen_tables.py`** reads `engine_sites` and `config_keys` through the registry loader, so the game's whole `wsc.toml` must load with this core.

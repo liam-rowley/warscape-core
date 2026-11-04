@@ -5,7 +5,7 @@ drag draws, the rotate binding (Alt+Ctrl) turns them in place by horizontal mous
 down, and the orders go out once, on release. The game supplies the selection, the camera, the ground and the orders through a
 `GestureAdapter`; this layer is everything else. Sources: `proxy/src/gesture_*` (pure headers, no Windows types) and `gesture.cpp`
 (the driver). Host tests: `proxy/tests/test_gesture.cpp` (the headers), `test_dev.cpp` (the ctl grammar). Provenance (read-only):
-empire-remastered `rml_mod/src/gesture_{sm,math,feed,group,v4,v5}.h` and its `tests/gesture_test.cpp` (ported with a sample of
+empire-remastered `rml_mod/src/gesture_{sm,math,feed,group,v4,v5}.h` and its test `gesture_test.cpp` (ported with a sample of
 `gesture_vectors.txt`); its depth-prepass pick, camera shader capture, engine markers, reach search and sound gate are not ported.
 
 ## Keys (rows in the game's config_keys registry; a game without them has no gestures)

@@ -41,8 +41,23 @@ def _boom(c):
     raise ValueError(f'non-finite constant {c}')
 
 
+def no_duplicate_keys(pairs):
+    """`object_pairs_hook` for repo data (W28): a key twice in one object is refused, never last-one-wins."""
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise ValueError(f'duplicate key {k!r}')
+        out[k] = v
+    return out
+
+
+def strict_loads(text):
+    """`json.loads` for repo data: NaN/Infinity and duplicate keys are refused (ValueError)."""
+    return json.loads(text, parse_constant=_boom, object_pairs_hook=no_duplicate_keys)
+
+
 def strict_json_error(text, jsonl=False):
-    """None if `text` is strict JSON (or strict JSON Lines), else the error. NaN/Infinity are refused; a BOM is refused."""
+    """None if `text` is strict JSON (or strict JSON Lines), else the error. NaN/Infinity, duplicate keys and a BOM are refused."""
     if text.startswith('﻿'):
         return 'starts with a byte-order mark'
     try:
@@ -50,11 +65,11 @@ def strict_json_error(text, jsonl=False):
             for i, line in enumerate(text.split('\n'), 1):
                 if line.strip():
                     try:
-                        json.loads(line, parse_constant=_boom)
+                        strict_loads(line)
                     except ValueError as e:
                         return f'line {i}: {e}'
         else:
-            json.loads(text, parse_constant=_boom)
+            strict_loads(text)
     except ValueError as e:
         return str(e)
     return None
@@ -98,7 +113,10 @@ def oversize(sizes, max_kb):
 
 
 # ------------------------------------------------------------------ undated "verified" (empire audit_repo.py sot.verified_dates, 2026-10-28)
-VD_DATED = re.compile(r'\d{4}-\d\d-\d\d|\b20\d{6}|\b\d{1,2}-\d{2}\b|reports/|runs/|records/|\.md\)|session|\bv\d')
+# a date or a run id, nothing looser (W28): an ISO date, a compact date (a run folder such as 20261104_a), or a path under reports/ runs/ records/.
+# A link to a dated record passes through its date; "on PC", "in session", "3-10 times", "(see x.md)" and "v2" do not date a claim.
+VD_DATED = re.compile(r'\d{4}-\d\d-\d\d|\b20\d{6}|reports/|runs/|records/')
+VD_WORD = re.compile(r'\bverified\b', re.I)
 VD_NONCLAIM = re.compile(r'\bunverified\b|\bnot\W{0,4}(?:yet\W+)?verified|\b(?:nothing|never|none)\b[^.|]{0,40}\bverified|["“`]\s*verified\b|\[V\]|\bwhat\b[^.|]{0,12}\bverified\b'
                          r'|\b(?:sha\d*|md5|crc\d*|byte|hash|checksum)[- ]verified'
                          r'|\b(?:to be|must be|should be|will be|can be|needs? to be|be)\s+(?:re-?)?verified'
@@ -145,9 +163,9 @@ def undated_verified(lines):
             continue
         if fence:
             continue
-        if not re.search(r'\b[Vv]erified\b', l) or VD_DATED.search(l) or ctx.get(t) or item.get(t) or VD_NONCLAIM.search(l):
+        if not VD_WORD.search(l) or VD_DATED.search(l) or ctx.get(t) or item.get(t) or VD_NONCLAIM.search(l):
             continue
-        if all(VD_ATTRIB.match(l, m.start()) for m in re.finditer(r'\b[Vv]erified\b', l)):
+        if all(VD_ATTRIB.match(l, m.start()) for m in VD_WORD.finditer(l)):
             continue
         out.append(t + 1)
     return out
@@ -276,3 +294,48 @@ def run_ref_problems(readmes, index, since='', is_ignored=None):
             if not run_ref_found(tok, path, index, is_ignored):
                 errs.append(f'{path}:{n}: names `{tok}`, which is not in the repo (commit the file, fix the path, or git-ignore it if it is build output)')
     return errs, checked, skipped
+
+
+# ------------------------------------------------------------------ stale doc paths (W28, R11; B24 generalised)
+MOVED_NOTE = re.compile(r'\(was [^)]*\)|\(moved\)')
+
+
+def doc_path_tokens(text, ignore=()):
+    """`[(line, token)]`: the backticked tokens of a living doc that look like a repo path: a `/` in it, a file extension or a trailing `/`, no space, none of `* ? < > { } | $ % ~`
+    and the rest of `NOT_A_PATH`, no scheme or drive letter, not in `ignore` (`[docs] path_ignore`: exact tokens, or globs). A trailing `:<line>`,
+    punctuation and a `#anchor` are dropped. Fenced blocks and a line that carries `(was <path>)` or `(moved)` are skipped."""
+    out, fenced = [], False
+    for n, line in enumerate(text.split('\n'), 1):
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or MOVED_NOTE.search(line):
+            continue
+        for m in BACKTICKED.finditer(line):
+            tok = LINE_SUFFIX.sub('', m.group(1).strip().split('#', 1)[0].rstrip('.,;:)!'))
+            tok = tok[2:] if tok.startswith('./') else tok
+            if '/' not in tok or URLISH.match(tok) or NOT_A_PATH.search(tok) or not (tok.endswith('/') or HAS_EXT.search(tok)):
+                continue   # a file has an extension and a folder ends in `/`: `origin/main`, `job/W28` and `actions/cache` are not paths
+            if tok in ignore or matches(tok, [g for g in ignore if any(c in g for c in '*?')]):
+                continue
+            out.append((n, tok))
+    return out
+
+
+def doc_path_found(token, doc, paths):
+    """True when `token` (named in living doc `doc`) is a tracked file or a folder above one (`paths`: `run_ref_index(tracked)[0]`), from the
+    repo root, from the doc's own folder, or across the `core/` submodule boundary (`core/<p>` in the core is `<p>`; `<p>` in a game may be `core/<p>`)."""
+    rel = token.rstrip('/')
+    base = doc.rsplit('/', 1)[0] if '/' in doc else ''
+    cands = [rel, f'core/{rel}'] + ([rel[5:]] if rel.startswith('core/') else [])
+    if base:
+        cands.append(posixpath.normpath(f'{base}/{rel}'))
+    return any(c in paths for c in cands if c and c != '.')
+
+
+def stale_doc_paths(docs, paths, ignore=()):
+    """`<doc>:<line>: path not found: <token>` for each backticked repo path in living docs `{path: text}` that `doc_path_found` cannot find."""
+    errs = []
+    for doc in sorted(docs):
+        errs += [f'{doc}:{n}: path not found: {tok}' for n, tok in doc_path_tokens(docs[doc], ignore) if not doc_path_found(tok, doc, paths)]
+    return errs

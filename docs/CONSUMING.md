@@ -88,40 +88,27 @@ jobs:
 
 ## Upgrading and releasing
 
-- **Core release:** a PR bumps `VERSION`; after Liam merges it, the tag `vX.Y.Z` is cut on that merge commit. Tags are never moved.
-- **Game upgrade:** `git -C core fetch --tags && git -C core checkout vX.Y.Z`, set `[core] version` to the same tag, run
-  `python3 core/wsc.py gates`, commit `core` and `wsc.toml` together on a branch.
+- **Releases (0.36.0, W29, C27):** the `release` workflow tags; nobody else does. After `gates` passes on `main` it computes the version from the
+  rows done since the last tag (`semver` on each row; `[jobs] semver_from` on), opens `release/vX.Y.Z` (VERSION only), auto-merges it and puts an
+  annotated tag on the merge commit; each `[release] consumers` adapter is compiled first (`warn`: a failure goes in the tag message and an issue).
+  `python3 wsc.py release plan` says what the next run does. The secret, the tag ruleset and the manual 1.0.0 path: [RELEASES.md](RELEASES.md).
+- **Game upgrade:** `python3 core/wsc.py core bump vX.Y.Z` (from 0.36.0 on; a bump to 0.36.0 itself is the hand steps: `git -C core fetch --tags`,
+  check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
   or 0.34.0 (DLL changes, C29) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
-Two `wsc.toml` tables, both off by default (a repo that sets neither keeps one JSONL per registry and committed views):
-```toml
-[storage]
-dir = ["jobs", "tools"]     # these keep one file per row: registries/<name>/<id_to_file(id)>.json
-[views]
-commit = false              # views go to the git-ignored dir (default "_scratch/registries"); a committed registries/<name>.md fails
-```
-- **Why:** two branches in flight that each add a row to one JSONL, or re-render one committed view, conflict on GitHub (it ignores
-  `merge=union` on pull-request merges), so auto-merge stalls until someone merges `main` by hand. One file per row and uncommitted
-  views remove both causes (napoleon J55).
-- **Switching:** `python3 core/wsc.py reg migrate <name> --to dir` moves the rows and rewrites `[storage] dir`; `--to jsonl` goes back.
-  With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
-  registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
-  either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
-- **Removing a row (W15):** `python3 core/wsc.py reg remove <reg> <id>...` replaces `git rm registries/<name>/<file>.json`. It refuses, writing
-  nothing, while an `x-ref` field, a tool's `superseded:<id>`, a tool file still in the repo or a `jobs/<id>/` folder points at a row, or when
-  the removal adds a check problem; rows that only point at each other go in one call.
+Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
 
-## Tool retirement (0.36.0, core W15, C31; opt-in)
+## Tool retirement (0.37.0, core W15, C32; opt-in)
 A tool's last use is the later of its row's `last_used` (the floor: the day the row was added, or `wsc reg set tools <id> last_used=<date>`)
 and the newest `done` job whose `jobs/<id>/report.md` cites it, dated by the newest `## Round N (YYYY-MM-DD, ...)` heading of its `review.md`
 (a legacy review: the first date in its first 5 lines). It is derived from the working tree at check time; nothing writes it into rows.
-- **Citation:** the tool's `path` as a whole path (`core/` before it still counts; `xharness/job.sh` or `harness/job.sh.bak` does not), or,
+- **Citation:** the tool's `path` as a whole path (`core/` before it still counts; xharness/job.sh or harness/job.sh.bak does not), or,
   for a verb, `wsc <verb>`, `wsc.py <verb>` or `wsc.<verb>`.
 - **Opt in:** `[tools] retire_after_days = 90` (default 0: off; the core keeps 0, its tools' uses are in its consumers' reports). Then
-  `python3 core/wsc.py reg check tools` warns per stale live tool, naming where its date came from (`(jobs/J12/report.md)` or `(row)`):
+  `python3 core/wsc.py reg check tools` warns per stale live tool, naming where its date came from (the report's path in brackets, or `(row)`):
   supersede it, `reg remove` it after deleting the file, or cite it in the next report that uses it.
 
 ## Extending a core schema (0.17.0)
@@ -173,9 +160,12 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
 required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.22.0)
 ```
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
-  `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
+  jobs view (`[views] commit = true`; the core's view is `_scratch/registries/jobs.md`, never committed) changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
+- **The `jobs view` page** loads marked 12.0.2 from cdnjs with its Subresource Integrity hash (`jobq.MARKED_SRI`), shows raw HTML in a brief, report or
+  review as text (marked's `html` renderer escapes it), and carries a Content-Security-Policy: scripts from that one URL and the page's inline script by hash,
+  styles by hash, `connect-src 'self'` (W28). A new marked version is a new URL, hash and test.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
   `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
@@ -261,9 +251,9 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      rule 76 message names `tools/gates/pipeline.py`.
   3. `python3 core/wsc.py reg add tools tools/gates/pipeline.py --id tools.jobs_hooks` (the row keeps its id) after updating the header (`[gates] dirs`, `not-a-verb:
      a gate module, run by wsc gates`), then `reg add tools` for the two headers that name the file (`tools/usage_reader.py`, `discovery/core/briefpaths.py`).
-  4. Tests that load the file by path or call the old names: `tests/test_jobs_hooks.py` (module path, the three source-text reads, the renamed functions),
-     `tests/test_build_id.py`, `tests/test_registry_merge.py`, `tests/test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `tests/test_usage_reader.py`
-     (`sys.path` gains `tools/gates`, `import pipeline as hk`), `tests/test_proxy_host.py`.
+  4. Tests in the game's `tests/` that load the file by path or call the old names: `test_jobs_hooks.py` (module path, the three source-text reads, the
+     renamed functions), `test_build_id.py`, `test_registry_merge.py`, `test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `test_usage_reader.py`
+     (`sys.path` gains `tools/gates`, `import pipeline as hk`), `test_proxy_host.py`.
   5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside dated job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
@@ -272,6 +262,9 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
 `wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
 lines and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
 `## Orchestrator additions`. A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
+
+## Gate changes in 0.36.0 (W28, C31)
+Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap): `[gates] skip` ids, `verified_dates`, strict `json`, `doc_paths`, `gen_tables.py`.
 
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher
@@ -308,7 +301,7 @@ From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discover
   x86 tools (`x86re`, `console_cmds`, `exe_strings build`) need capstone and pefile in the RE environment: `python3 core/discovery/re_env.py <dir outside the repo>` downloads the
   wheels pinned by sha256 in that file and builds the venv, then run the tool with `<dir>/venv/.../python -I`. A tool that lacks its extra stops with a message that names this fix;
   the host tests skip the capstone cases without it.
-- **`find` and the exe index (0.36.0, W15):** `python3 core/wsc.py find <word>` also searches the adapter's `exe_strings.tsv.gz` for exe-shaped
+- **`find` and the exe index (0.37.0, W15):** `python3 core/wsc.py find <word>` also searches the adapter's `exe_strings.tsv.gz` for exe-shaped
   words (4+ characters with an inner `_` or a lower-to-upper case change: `gfx_hardware_shadows`, `CampaignUI`; every word must appear, as literals,
   case-insensitively); `--exe` forces it for any word, `--in exe_strings` searches only it. Without the table `find` prints what it always did.
 - **Re-run steps:** `python3 core/wsc.py discovery all` on the PC, then `discovery check` and `git diff --stat` (empty when nothing changed in the game); `discovery check` and
