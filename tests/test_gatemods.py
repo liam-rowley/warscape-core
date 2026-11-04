@@ -215,7 +215,8 @@ def run(ctx):
 
 class PolicyStage(unittest.TestCase):
     def setUp(self):
-        self.repo = TempRepo({'checks/p.py': mod(POLICY_MOD), 'README.md': '# r\n'}, toml=TOML)
+        # [ci] core = "": no core in this repo, so `wsc policy` judges as before W23 (in-process, this checkout's modules)
+        self.repo = TempRepo({'checks/p.py': mod(POLICY_MOD), 'README.md': '# r\n'}, toml=TOML + '[ci]\ncore = ""\n')
         self.addCleanup(self.repo.close)
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'base')
@@ -234,7 +235,7 @@ class PolicyStage(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn('policy: kind=plan', out)
         self.assertIn('policy: changed=docs/note.md', out)
-        errs, _ = policy.run_check(Ctx.load(self.repo.root), 'plan/x', 'main', extra_facts={'extra': 'given'})
+        errs, _ = policy.run_check(Ctx.load(self.repo.root), 'plan/x', 'main', 'plan/x', self.repo.root, extra_facts={'extra': 'given'})
         self.assertIn('extra=given', errs)
 
     def test_wsc_gates_never_runs_it(self):

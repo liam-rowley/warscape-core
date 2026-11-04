@@ -20,19 +20,14 @@ bool Readable(const void* p, size_t n) {
 
 // Also parses the PE header from the file's first read: the only place the preferred ImageBase survives (pe.h LoadDelta).
 bool HashFile(const std::wstring& path, std::string& hex, std::string& err, uint32_t& fileImageBase) {
-    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                           FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (f == INVALID_HANDLE_VALUE) { err = "cannot open the exe (error " + std::to_string(GetLastError()) + ")"; return false; }
-    Sha1 h; std::vector<uint8_t> buf(1 << 20); DWORD got = 0;
-    bool ok = true, first = true;
-    for (;;) {
-        if (!ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr)) { err = "read error " + std::to_string(GetLastError()); ok = false; break; }
-        if (!got) break;
-        if (first) { const PeInfo fp = ParsePe(buf.data(), got); if (fp.ok) fileImageBase = fp.preferredBase; first = false; }
-        h.Update(buf.data(), got);
-    }
-    CloseHandle(f);
-    if (ok) hex = h.HexDigest();
+    struct Ctx { Sha1 h; uint32_t* base; bool first; } c{ Sha1(), &fileImageBase, true };
+    uint64_t bytes = 0;
+    const bool ok = ReadChunks(path, "the exe", [](void* p, const uint8_t* data, size_t n) {
+        Ctx& x = *(Ctx*)p;
+        if (x.first) { const PeInfo fp = ParsePe(data, n); if (fp.ok) *x.base = fp.preferredBase; x.first = false; }
+        x.h.Update(data, n);
+    }, &c, bytes, err);
+    if (ok) hex = c.h.HexDigest();
     return ok;
 }
 
@@ -46,6 +41,26 @@ void WriteNotice(const std::wstring& path, const std::string& text) {
 }
 
 } // namespace
+
+// The file-hash read loop of the guard (the exe) and of the DLL's self-hash (dllmain.cpp, W24): 1 MiB reads, each chunk to eat() in order.
+// Loader lock: CreateFileW, ReadFile and CloseHandle only (no LoadLibrary, no crypto provider, no thread, no wait).
+bool ReadChunks(const std::wstring& path, const char* what, void (*eat)(void* ctx, const uint8_t* data, size_t n), void* ctx,
+                uint64_t& bytes, std::string& err) {
+    bytes = 0;
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                           FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (f == INVALID_HANDLE_VALUE) { err = std::string("cannot open ") + what + " (error " + std::to_string(GetLastError()) + ")"; return false; }
+    std::vector<uint8_t> buf(1 << 20); DWORD got = 0;
+    bool ok = true;
+    for (;;) {
+        if (!ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr)) { err = "read error " + std::to_string(GetLastError()); ok = false; break; }
+        if (!got) break;
+        eat(ctx, buf.data(), got);
+        bytes += got;
+    }
+    CloseHandle(f);
+    return ok;
+}
 
 void GuardRun() {
     Runtime& rt = Rt();

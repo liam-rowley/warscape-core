@@ -15,27 +15,7 @@ when the pinned tag is in the checkout, when HEAD is not that tag's commit. A sh
 submodule brings only the core tip's tag) and a checkout with no tags are compared by `VERSION` only; a full checkout that has other
 tags but not the pinned one fails and names the fix, `git -C core fetch --tags` (C21).
 
-## The options compared
-
-| | Submodule at `core/`, tag-pinned (recommended) | Subtree (`git subtree add --squash`) | Vendored copy + `VERSION` | `pip install` from a git tag |
-|---|---|---|---|---|
-| The pin | the gitlink sha in the diff, plus `[core] version` | a squash commit message | the `VERSION` file | a requirements line |
-| In-place patching | impossible to commit; `core_pin` fails on a dirty checkout | easy and silent; would need a tree-hash gate against the tag (network) | same as subtree | not possible, but edits in site-packages are invisible |
-| CI on a private core | needs a read token secret (below; not while the core is public) | no auth | no auth | a token **and** an install step (breaks "no installs") |
-| Fresh clone | `git clone --recurse-submodules`; forgetting it fails loudly (hook and CI say "core missing") | plain clone | plain clone | plain clone + pip |
-| Agent sessions | attach both repos; `git submodule update --init` | nothing extra | nothing extra | pip through the proxy |
-| Upgrade | three commands (below), one reviewable diff | `git subtree pull --squash` (merge noise) | copy and commit (large diff) | bump one line |
-| History cost | none | the core duplicated in game history | same | none |
-
-Costs of the recommendation, and what covers them:
-- **CI token.** Only while the core is private (it is public since at least 2026-10-29, so checkout needs no token): the default
-  `GITHUB_TOKEN` of a game repo cannot read another private repo. Liam creates a fine-grained personal
-  access token with **Contents: read** on `warscape-core` (and the game repo), stored as the secret `WARSCAPE_CORE_TOKEN` in each game
-  repo. A deploy key on warscape-core is the alternative (read-only, one per game repo).
-- **Clone discipline.** The submodule URL is relative (`../warscape-core.git`), so it follows whatever remote the game repo was cloned
-  from: HTTPS through the agent proxy, HTTPS or SSH on Liam's PC. The pre-push hook refuses with "git submodule update --init" when
-  `core/` is empty.
-- **Agent sessions** attach `liam-rowley/warscape-core` (read) next to the game repo; one extra `add_repo`.
+The options weighed against it (subtree, a vendored copy, `pip install`) and the costs of the recommendation: [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md).
 
 ## Hooks and gate keys added in 0.24.0 (C23)
 
@@ -46,6 +26,13 @@ Costs of the recommendation, and what covers them:
 - **`run_refs` gate** (fast set): every repo path a tracked `**/runs/**/README.md` names (link targets and backticked paths) must exist: from the root, from the README's
   folder, as the tail of a tracked path, inside a submodule, or git-ignored. `[gates] run_refs_since = "YYYY-MM-DD"` skips run folders dated before it (default `""`:
   all checked); set it to the pin-bump date when old READMEs name moved paths.
+
+## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
+- **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
+- **CI:** install `$(python3 core/proxy/tools/toolchain.py apt)` with `--no-install-recommends` instead of `g++-mingw-w64-i686` (else `build.sh`
+  refuses once the archive moves), then `wsc ci render` (`{{wsc fetch_cache}}` is two steps). `build_id.py` test fixtures copy `toolchain.py`.
+- **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
+- `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
 
 ## Wiring a game repo (the steps, once approved)
 
@@ -171,7 +158,7 @@ decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD
 decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
-plan = [...]                       # globs a plan/* branch may touch; meta = [...] for a meta/* branch
+plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
 workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
@@ -182,14 +169,33 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
+- **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
+  `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
+  commit's tree; in a game, the core commit the base's `core` gitlink pins (read from the submodule's object store: `git submodule update --init`),
+  plus the base's `wsc.toml`, `[gates] dirs` and `[jobs] legacy` file. The head reaches it only as git objects: its diff, the blobs the rules read,
+  its trailers. A branch that changes the core, `wsc.toml`, a gate module, the legacy file or the policy workflow is judged by the old ones, with a
+  note. **`git fetch` first**: a stale `origin/main` judges with stale rules. The same two shas print the same lines anywhere; CI is the authority
+  (its parent is the base's code, a local one your checkout's). It judges the head commit against the base tip, not GitHub's merge commit, so a
+  branch behind the base on the decisions file is told to merge it. It fails closed, naming the fix: a ref that does not resolve, an unreadable base
+  `wsc.toml`, no gitlink, an uninitialised submodule or a missing pin (`git -C core fetch origin <pin>`), or a child with no verdict. A base whose
+  core predates W23 (no `JUDGE_API` line) is judged as before, with a note. `--commit-msg` stays a local check of the message being written.
+- **What the `policy` check does not prove.** Anyone with a write token can post a status named `policy`, and GitHub calls same-named jobs in two
+  workflows ambiguous, so a head that adds a workflow with a `policy` job can blur the result. No code in a user-owned repository closes this (an
+  organisation's "require workflows to pass" ruleset would); it is accepted for now (W23), and the reviewer reads any `.github/workflows/` change.
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc fetch_cache}}`, `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
-- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.22.0): the fetchers run through
-  `proxy/tools/netfetch.py prefetch` with a retry on network flakes, and their raw downloads are cached by the pins (`ci-cache`), so a warm cache
-  makes the build offline. The fetchers' sha256 checks still judge every byte; a cache fault never fails the job.
+  A template with `{{wsc policy}}` must trigger on `pull_request_target` (W23): GitHub then runs main's copy of the workflow, never the head's, so
+  a branch cannot edit its own check. `wsc ci render` and the `ci_render` gate refuse one without it and warn while a `pull_request` trigger remains.
+- **A job that builds the proxy** puts `{{wsc fetch_cache}}` after its checkout and before `build.sh all` (0.22.0; two steps from 0.27.0): the
+  fetchers' raw downloads cached by the pins (`netfetch.py ci-cache`), so a warm cache builds offline. The fetchers retry their own network flakes
+  (0.27.0) and their sha256 checks judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
+- **The proxy job runs the smoke on your adapter** (`build.sh smoke`, 0.27.0): each step asserts what that game's build must do. A game without a
+  `GestureAdapter` passes steps 6 and 7 on the inert path (the log says "no adapter"), and step 8 peeks the first engine site in the game's
+  generated tables (a game with no engine sites checks the stale request only). The core proves both paths: the null game, and the fixture
+  `proxy/tests/null_game_no_gesture`.
 - **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
   jobs the repo has) and `policy` on `main`, allow auto-merge, require no approving review (one account cannot approve its own pull request), and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
   Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once. `wsc ci check-settings [--repo owner/name]` reads them
@@ -218,8 +224,10 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
 ```
 - **Stages.** `gates`: its own line in `wsc gates`, after the core gates (`[gates] skip`, `fast` and `--only` take its name). `jobs`: the `jobs` gate and
   `wsc jobs check`, with `ctx.rows`, `ctx.read(path)` and `ctx.briefs()` (`(jid, row, text)` per brief, minus the legacy file's `brief_hooks` ids); an `error`
-  Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, with `ctx.facts`
-  (branch, kind, jid, changed, the merge base; the module runs from the branch's own head); an `error` Result's details are policy errors. `view`: `wsc jobs view`,
+  Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, run from the
+  **base tree** (W23): `ctx.root` and `ctx.config` are the base's rule inputs in a temporary folder, not a repository; `ctx.facts` has branch, kind, jid,
+  changed, merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
+  `show(sha, path, cwd=repo)`; never `'HEAD'`, never git in `ctx.root`, never run the head's files. An `error` Result's details are policy errors. `view`: `wsc jobs view`,
   with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
 - A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
   `run`, and a module that still defines one of the old hook names are load errors (`wsc` exits 2 naming the file).
@@ -242,39 +250,27 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
 
+## Moving to base-judged policy (0.26.0, core W23, C24)
+In the pin-bump commit itself, because the render guard and the new facts fail otherwise (napoleon: J78):
+1. **`ci/policy.yml.in`:** `on: pull_request_target` with the same types. For the bump's own pull request add a second trigger, `pull_request` with
+   the same types and `paths: ['jobs/<bump id>/report.md']` (main's copy has no `pull_request_target` yet, so without it nothing would run `policy`
+   on that pull request); remove it in the next change to the template (`ci_render` warns until then). Run `wsc ci render`.
+2. **`[ci] policy_extra_steps`** now run in the base checkout, where `HEAD` is the base. Take the head's sha from an `env:` value
+   (`${{ github.event.pull_request.head.sha }}`), never from an expression inside `run:`, and make both pins present in `core/` if a module compares them.
+3. **The `policy`-stage module** (napoleon `tools/gates/pipeline.py`): run git at `ctx.facts['repo']` with the `head`, `base` and `merge_base` shas
+   (`show`, `show_first`, `core_pin_diff`, `collect_acceptance`), never in `ctx.root` and never with `'HEAD'`; a module left as it is fails closed, as a
+   crash. `ctx.root/core/...` is now the base's core: a build id must come from the base's `build_id.py` over the head's blobs, never by running the
+   head's copy. When a bump changes `build_id.py` itself, the base's algorithm cannot reproduce the head's id: the game needs a rule for that, and the
+   default is a refusal.
+4. **Behaviour.** CI judges the pull request's head against the base tip, so a branch behind `main` on the decisions file must merge `main`. Globs
+   match by path segment: `registries/*` no longer covers `registries/<name>/<row>.json`. Until the bump merges, the game's pull requests are judged
+   as before, with the note.
+
 ## The proxy, the harness and the save tools (0.4.0)
-From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
-watcher kit (`harness/`) and the ESF save tools (`saves/`). A game keeps its adapters: `proxy/<game>/` (adapter.cpp, identity.json,
-the generated tables and config file, lua/) and `harness/<game>/` (adapter.json, profiles/), plus its registries. The tools find
-them through `proxy/tools/layout.py`: the game root is the superproject that pins the core (or `$WSP_GAME_ROOT`), and the adapters
-are `wsc.toml` `[proxy] adapter` / `[harness] adapter` when set, else the one `proxy/*/adapter.cpp` / `harness/*/adapter.json`.
-Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh` and so on; `python3 core/proxy/tools/layout.py`
-prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
-the core, so moving them here kept every game build id (napoleon J12). The core's CI builds and tests them against the null game
-(`proxy/tests/null_game/README.md`); from 0.19.0 the tools' Python host tests run here too (`tests/test_pc_deploy.py`, `test_ctl.py`,
-`test_acceptance.py`, `test_saves.py`, `test_job_sh.py`; W8), so a game keeps only the tests over its own data (its scenario rows and
-battle presets for rule 78, its save map, recipes and staging, its real identity).
-The Git Bash finder is core code from 0.19.0 (`warscape/gitbash.py`: `harness/ctl.py` no longer loads the game's `tools/verbs/setup.py`): a
-game's setup verb imports it (`from warscape.gitbash import git_bash, bash_kind, bash_for_tests`; verbs run with the core on `sys.path`)
-instead of keeping its own, and a host test that runs a shell script takes its bash from `bash_or_skip(self)` (a skip, or a failure under
-`$WSC_REQUIRE_BASH`).
-A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
-(watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher
+kit, the save tools), how the tools find a game's adapters, the UI pin file, and the contract doc of each proxy feature.
 
-Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
-([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
-([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
-`GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).
-The frame capture (`dev.capture`, the ctl `capture` verb, the `frame.txt` record lines) is [PROXY_CAPTURE.md](PROXY_CAPTURE.md): from 0.21.0 it hooks
-37 device slots and 2 state-block slots, fails an abandoned or empty capture with a `state`, records only the thread that took the arm, and writes
-`SBCREATE`, `SBCAPTURE`, `SBAPPLY` (with a `STATE` readback), `OTHERTHREAD` and `ABANDONED` lines; a game's own capture docs point there.
-Engine sites and their config keys ([PROXY_SITES.md](PROXY_SITES.md)): from 0.16.0 a `patch` row may take its value from a numeric key
-(`value_key`, `value_scale`, `value_floor_stock`) and a key may carry `type`, `min` and `max`. Nothing changes for existing rows (their
-generated tables are byte-identical); after the pin bump run `python3 core/proxy/tools/gen_tables.py --check`.
-The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
-`stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
-
-## The game lock is the session's (0.26.0, core W10, C24)
+## The game lock is the session's (0.29.0, core W10, C26)
 The holder of `game.lock` is the pair (owner, session); the default owner is the session id, so two sessions can no longer share a lock by a shared name.
 Set `WSC_SESSION_ID` in the session (or pass `--session`; Claude Code's Bash tool already exports `CLAUDE_CODE_SESSION_ID`, which `ctl.py` and `acceptance.py` use
 when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `--owner` both tools refuse (exit 2) and say so. Scripts that name an owner

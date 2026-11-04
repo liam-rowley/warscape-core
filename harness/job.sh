@@ -3,7 +3,7 @@
 # usage: job.sh [--adapter FILE] <owner> <file|-> [timeout_s (default 100)]  |  job.sh adapter  |  job.sh [--adapter FILE] lock [--wait S] <owner|-> <session> <purpose> [hang_s]  |  touch <owner>  |  unlock <owner> [--force]  |  holds <owner>  |  status  |  root  |  scratch <owner>  |  ctl <owner> '<verb args>' [wait_s (default 100)]
 # when: every time an agent runs something on the PC (launch, kill, profile, scripts): the watcher root comes from the adapter (state_dir + watcher_subdir), never a default path; waiting belongs here, not in repeated agent calls
 # not-a-verb: a bash helper agents call directly from Git Bash (python3 only reads JSON); the PC side of the protocol is harness/watcher.ps1
-# The lock owner is the session (W10, C24): one owner rule ^[a-z0-9][a-z0-9_-]{0,39}$ for every command (a session id is a 36-character UUID; `lock -` makes the owner the session id).
+# The lock owner is the session (W10, C26): one owner rule ^[a-z0-9][a-z0-9_-]{0,39}$ for every command (a session id is a 36-character UUID; `lock -` makes the owner the session id).
 # The holder is the pair (owner, session): the same owner with another session is refused like another owner, until the lock is stale. `holds <owner>` exits 0 when the lock is held,
 # fresh, and its owner or session is <owner>, else 2 with the reason; `ctl` and shot.sh need it. touch/unlock act only on the holder's lock (a bare touch is refused). `lock --wait S`
 # polls every 2 s up to S (capped at 100): 124 on timeout, a plain refusal is 2. The stale age is `lock_stale_min` in <root>/watcher.ini (default 20), the watcher's own setting.
