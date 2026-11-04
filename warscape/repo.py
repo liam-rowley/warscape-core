@@ -81,6 +81,7 @@ DEFAULTS = {
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
         'decisions_cite_job': False,       # a decisions row added on job/<id> must contain <id>, the brief that required it (core W27 rule F)
+        'reviewer_code': 'warn',           # rule A (core W27, W40): reviewer code under a `merge` verdict warns, or with "error" refuses
         'thin_merge_lines': 500,           # a `merge` on more changed lines than this outside jobs/ and the registries...
         'thin_merge_files': 20,            # ...or more files, whose newest round cites no evidence, is a warning (core W27 rule E)
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
@@ -196,6 +197,8 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: release.consumers must list tables with name, repo, adapter and ref')
     if not isinstance(cfg['policy']['decisions_cite_job'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
+    if cfg['policy']['reviewer_code'] not in ('warn', 'error'):
+        raise ConfigError(f'{CONFIG_NAME}: policy.reviewer_code must be "warn" or "error"')
     for t, k in (('policy', 'thin_merge_lines'), ('policy', 'thin_merge_files'), ('jobs', 'claim_hours')):
         if isinstance(cfg[t][k], bool) or not isinstance(cfg[t][k], (int, float)) or cfg[t][k] < 0:
             raise ConfigError(f'{CONFIG_NAME}: {t}.{k} must be a number of at least 0')

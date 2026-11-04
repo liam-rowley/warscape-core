@@ -8,7 +8,9 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
               every commit touching the report or the review must carry that trailer (fails closed). From job number `[jobs] semver_from`
               on (W29, C27) it may not change VERSION: the release workflow owns it.
               Review integrity (core W27), read from the branch's commits by sha:
-                A  (warning) a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict. A round's commits:
+                A  a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict, and no newer round's review
+                   commit follows them (a fresh round has then reviewed the change: W40, the one way out, as rule C keeps the old verdict). A warning,
+                   or with `[policy] reviewer_code = "error"` (W40; the core's own wsc.toml) a refusal. A round's commits:
                    the review.md commits whose review.md holds round N as its newest, any other commit by a session of those, and a commit by nobody
                    known (no trailer, or a session neither the builder's nor a round's) after the first review commit, which goes to the round of
                    the next review commit (the newest round when none follows). The builder's sessions are every report.md writer (fix sessions too).
@@ -24,7 +26,8 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
                 E  (warning) a `merge` on more than `[policy] thin_merge_lines` changed lines or `thin_merge_files` files outside the jobs folder and
                    the registries whose newest round cites no evidence (EVIDENCE: a run id, an actions URL, `run <digits>`, a test name, a runs/ path).
                 F  with `[policy] decisions_cite_job`, a decisions row added on job/<id> contains <id>.
-              Rules A and D's branch cites warn, not refuse: the W27 scan of the merged job branches (its report) passed the brief's kill criterion.
+              Rule A warns by default and D's branch cites warn: the W27 scan of the merged job branches (its report) passed the brief's kill
+              criterion; the W40 scan (its report) put the core's rule A at error.
   release/vX.Y.Z  only VERSION, whose content is X.Y.Z, exactly one patch, minor or major step above the base's VERSION (W29, C27: the
               branch the release workflow opens; the workflow re-derives the version before it tags, so a hand-made one tags nothing).
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
@@ -75,7 +78,7 @@ def settings(config):
             'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'semver_from': j.get('semver_from', 0), 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text']),
-            'decisions_cite_job': bool(p.get('decisions_cite_job', False)), 'thin_lines': p.get('thin_merge_lines', 500),
+            'decisions_cite_job': bool(p.get('decisions_cite_job', False)), 'reviewer_code': p.get('reviewer_code', 'warn'), 'thin_lines': p.get('thin_merge_lines', 500),
             'thin_files': p.get('thin_merge_files', 20)}
 
 
@@ -343,12 +346,13 @@ def append_only_problems(path, base_text, history, head_text, base_ref):
 
 
 def round_problems(jid, cfg, reads, builder, head_review):
-    """(errors, warnings): rule B's errors and rule A's warnings (A warns: the W27 scan of the merged job branches found reviewer code
-    under `merge` on 5 core and 27 napoleon branches, past the brief's kill criterion of 3 beyond the audit's), over the commits of the branch (`reads.commits()`, `reads.history(review.md)`). A review commit belongs to the newest
+    """(errors, warnings): rule B's errors, and rule A's lines in the list `[policy] reviewer_code` names (warn by default: the W27 scan of the
+    merged job branches found reviewer code under `merge` on 5 core and 27 napoleon branches, past the brief's kill criterion of 3 beyond the
+    audit's; W40 added the key), over the commits of the branch (`reads.commits()`, `reads.history(review.md)`). A review commit belongs to the newest
     round its review.md holds; any other commit by a round's session belongs to that round; a commit by nobody known (no trailer, or a
     session that is neither the builder's nor a round's) after the first review commit belongs to the round of the next review commit, or to
     the newest round when none follows. Commits before the first review commit and the builder's own (report.md writers: the builder and
-    every fix session) are never a round's."""
+    every fix session) are never a round's. A commit a newer round's review commit follows has been reviewed by that round, so rule A skips it."""
     jd, T = cfg['jobs_dir'], cfg['text']
     rev = f'{jd}/{jid}/review.md'
     hist = reads.history(rev)
@@ -379,12 +383,14 @@ def round_problems(jid, cfg, reads, builder, head_review):
             if i < first:
                 continue
             n = next((wrote[c[0]] for c in commits[i + 1:] if wrote.get(c[0])), max(by_round))
-        hits.setdefault(n, []).append((sha, code))
+        if not any(wrote.get(c[0], 0) > n for c in commits[i + 1:]):   # W40: else a fresh round (rule B) reviewed it
+            hits.setdefault(n, []).append((sha, code))
     head_r = rounds_of(head_review)
+    rule_a = errs if cfg.get('reviewer_code') == 'error' else warns
     for n, got in sorted(hits.items()):   # rule A
         if verdict(head_r.get(n)) == 'merge':
             shown = '; '.join(f"{s[:12]} ({', '.join(c[:6])}{' and more' if len(c) > 6 else ''})" for s, c in got[:6])
-            warns.append(f'round {n} of {rev} says merge, but its own commits change files outside {jd}/{jid}/ and its row: {shown}: '
+            rule_a.append(f'round {n} of {rev} says merge, but its own commits change files outside {jd}/{jid}/ and its row: {shown}: '
                          'write the verdict `merge after fixes`; a fresh round reviews your change')
     return errs, warns
 
