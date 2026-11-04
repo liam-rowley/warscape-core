@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # purpose: build the proxy d3d9.dll (mingw-w64 i686, the release route) and/or build and run the host tests (g++)
-# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31); smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
+# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; tests: the core's proxy/tests/test_*.cpp, then the game's own (layout.py proxy-tests, W16); --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31), the outer of the game root and the core mounted; smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
 # when: after any change to the proxy sources or the adapter (CI runs `all` on every push); on the PC always with --docker; the DLL in <game repo>/build/proxy/<adapter name>/d3d9.dll is what proxy/tools/pc_deploy.py kits
 # not-a-verb: a compiler driver for C++ sources, not a registry operation; CI and agents call it directly
 set -euo pipefail
@@ -15,6 +15,10 @@ WHAT="${1:-all}"
 if [[ "${2:-}" == "--adapter" ]]; then WSP_PROXY_ADAPTER="$(cd "${3:?adapter folder}" && pwd)"; export WSP_PROXY_ADAPTER; fi
 ROOT="$(upath "$(layout game-root)")"; SRC="$(upath "$(layout proxy-src)")"; ADIR="$(upath "$(layout proxy-adapter)")"; ADAPTER="$(basename "$ADIR")"
 OUT="$ROOT/build/proxy"; mkdir -p "$OUT/$ADAPTER" "$OUT/tests"
+# W16 (B15): the game's own C++ host tests (layout.py proxy-tests: [proxy] tests, else <game>/proxy/tests with a test_*.cpp, else none),
+# compiled after the core's with the same flags. Outside the adapter folder on purpose: that folder is a build-id input, these are not.
+GTESTS=""
+if [[ "$WHAT" == tests || "$WHAT" == all ]]; then GTESTS="$(layout proxy-tests)"; [[ -z "$GTESTS" ]] || GTESTS="$(upath "$GTESTS")"; fi
 # Build id = a hash of the DLL inputs' content (proxy/tools/build_id.py, the one implementation, which rule 79 also uses): a report
 # commit, a reword or a rebase that leaves the inputs alone keeps the id; -dirty when an input has local changes (J45).
 if [[ -n "${WSP_BUILD_ID:-}" ]]; then
@@ -50,13 +54,23 @@ if [[ $DOCKER == 1 ]]; then
     [[ -f "$OUT/$ADAPTER/d3d9.dll" ]] || { echo "build.sh --docker smoke: no $OUT/$ADAPTER/d3d9.dll: run build.sh --docker all first"; exit 2; }
     PRE="dpkg --add-architecture i386"; APT="$APT wine wine32:i386"
   fi
-  # The game repo is mounted at /src (the core, as its submodule, is inside it). The container has no git: it is told the game root
-  # and the adapter, as paths relative to the mount.
-  rel() { python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]).replace(os.sep, "/"))' "$1" "$ROOT"; }
-  MNT="$ROOT"; command -v cygpath >/dev/null && MNT="$(cygpath -w "$ROOT")"   # Git Bash: docker wants C:\...
+  # W16 (B16): one mount at /src, the outer of the two roots: the game repo when it holds the core as its submodule, the core when it
+  # holds the game (its null game, proxy/tests/null_game); neither inside the other is refused (no second mount). The container has no
+  # git: it is told the game root, the adapter and the game's tests as paths relative to the mount.
+  OWNP="$(cd "$OWN" && pwd -P)"; ROOTP="$(cd "$ROOT" && pwd -P)"
+  if [[ "$OWNP/" == "$ROOTP/"* ]]; then TOP="$ROOT"
+  elif [[ "$ROOTP/" == "$OWNP/"* ]]; then TOP="$OWN"
+  else echo "build.sh --docker: the game root $ROOT and the core $OWN are not one inside the other, and one mount cannot hold both: refused (put the game root inside the core or the core inside the game repo)"; exit 2; fi
+  rel() { python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]).replace(os.sep, "/"))' "$1" "$TOP"; }
+  GTENV=()
+  if [[ -n "$GTESTS" ]]; then
+    [[ "$(rel "$GTESTS")" != ..* ]] || { echo "build.sh --docker: the game's tests $GTESTS are outside the mount $TOP: refused"; exit 2; }
+    GTENV=(-e WSP_PROXY_TESTS="/src/$(rel "$GTESTS")")
+  fi
+  MNT="$TOP"; command -v cygpath >/dev/null && MNT="$(cygpath -w "$TOP")"   # Git Bash: docker wants C:\...
   echo "build.sh --docker: $WHAT in $IMAGE, build $BUILD_ID"
   # MSYS_NO_PATHCONV: Git Bash would rewrite /src and the -v argument into Windows paths
-  MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_SOURCES="$SOURCES" -e WSP_GAME_ROOT=/src -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "$IMAGE" bash -c \
+  MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_SOURCES="$SOURCES" -e WSP_GAME_ROOT="/src/$(rel "$ROOT")" -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "${GTENV[@]}" "$IMAGE" bash -c \
     "set -e; $PRE; apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $APT >/dev/null
      $(rel "$OWN")/proxy/tools/build.sh $WHAT"
   exit $?
@@ -197,21 +211,28 @@ if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
 fi
 
 if [[ "$WHAT" == tests || "$WHAT" == all ]]; then
-  fail=0
-  # the tests include core headers, the adapter's generated tables and testkit.h by name, and read files through --src/--adapter/--tests
-  for t in "$OWN"/proxy/tests/test_*.cpp; do
-    n="$(basename "$t" .cpp)"
-    MORE=()
+  fail=0; ncore=0; ngame=0
+  # the tests include core headers, the adapter's generated tables and testkit.h by name, and read files through --src/--adapter/--tests.
+  # $1 = the set (core or game), $2 = the test source. A game test also gets its own folder on the include path; its binary goes under game/.
+  host_test() {
+    local set="$1" t="$2" n o MORE=() INC=()
+    n="$(basename "$t" .cpp)"; o="$OUT/tests/$n"
+    if [[ "$set" == game ]]; then INC=(-I"$GTESTS"); mkdir -p "$OUT/tests/game"; o="$OUT/tests/game/$n"; fi
     if grep -q '^// link: ui' "$t"; then   # the RmlUi host's document tests (J30): host RmlUi + FreeType + the localised ui_lua object
       HU="$(ui_objs g++ gcc host "$SRC")"; [[ -f "$HU/STAMP" ]] || exit 3
       [[ -f "$OUT/tests/ui_lua.o" ]] || ui_lua_obj "$SRC" "$HU" "$OUT/tests/ui_lua.o" g++ ""
       MORE=("${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" "$OUT/tests/ui_lua.o" $(LC_ALL=C ls "$HU"/rml/*.o "$HU"/ft/*.o))
     fi
-    g++ -std=c++17 -O1 -Wall -Wextra -Wshadow -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" -o "$OUT/tests/$n" "$t" "${MORE[@]}"
-    if WSP_UI_SRC="$UI_SRC" "$OUT/tests/$n" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $n FAILED"; fail=1; fi
-  done
+    echo "build.sh: $set test $n"
+    g++ -std=c++17 -O1 -Wall -Wextra -Wshadow -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" "${INC[@]}" -o "$o" "$t" "${MORE[@]}"
+    if WSP_UI_SRC="$UI_SRC" "$o" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $set test $n FAILED"; fail=1; fi
+  }
+  for t in "$OWN"/proxy/tests/test_*.cpp; do host_test core "$t"; ncore=$((ncore + 1)); done
+  if [[ -n "$GTESTS" ]]; then   # none: skipped silently
+    while IFS= read -r t; do host_test game "$t"; ngame=$((ngame + 1)); done < <(find "$GTESTS" -maxdepth 1 -name 'test_*.cpp' | LC_ALL=C sort)
+  fi
   rm -f "$OUT/tests/ui_lua.o"
-  [[ $fail == 0 ]] && echo "build.sh: host tests passed" || exit 1
+  [[ $fail == 0 ]] && echo "build.sh: host tests passed ($ncore core, $ngame game)" || exit 1
 fi
 
 if [[ "$WHAT" == repro ]]; then
@@ -296,7 +317,7 @@ if [[ "$WHAT" == smoke ]]; then
   SITE="$(sed -n '/kSites\[/,/^};/p' "$ADIR/generated/tables.h" | grep -m1 -o '^ *{ "[^"]*"' | cut -d'"' -f2 || true)"
   if [[ -n "$SITE" ]]; then WAITFOR='ctl\peek1.done'; else WAITFOR='ctl\old1.done'; echo "build.sh smoke: this game has no engine sites: step 8 checks the stale request only"; fi
   mkdir -p "$G/ctl"; printf 'exit\n' > "$G/ctl/old1.cmd"; touch -d '2020-01-02 03:04:05 UTC' "$G/ctl/old1.cmd"
-  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\n' > "$G/$INI"
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\nstate_json=1\r\n' > "$G/$INI"
   run wait "$WAITFOR" > "$OUT/smoke/ctl_run.txt" 2>&1 &
   RUN=$!
   for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
@@ -307,6 +328,30 @@ if [[ "$WHAT" == smoke ]]; then
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
   [[ -z "$SITE" ]] || grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
-  echo "build.sh smoke: passed (8 launches under wine, 2 dumps)"
+  #    W33 (C29): no dev thread starts in DllMain: both start after the first Direct3DCreate9, and the ctl thread watches after its start line
+  at() { grep -n -m1 -F "$1" "$G/$MOD/logs/proxy.log" | cut -d: -f1; }
+  CREATE="$(at 'Direct3DCreate9(sdk=32)')"; T_STATE="$(at 'thread: dev.state started')"; T_CTL="$(at 'thread: dev.ctl started')"; WATCH="$(at 'ctl: watching')"
+  if [[ -z "$CREATE" || -z "$T_STATE" || -z "$T_CTL" || -z "$WATCH" ]] || (( T_STATE < CREATE || T_CTL < CREATE || WATCH < T_CTL )); then
+    echo "build.sh smoke: thread order: Direct3DCreate9 line ${CREATE:-none}, dev.state ${T_STATE:-none}, dev.ctl ${T_CTL:-none}, ctl: watching ${WATCH:-none}"
+    cat "$G/$MOD/logs/proxy.log"; exit 1
+  fi
+  check "threads at the first Direct3DCreate9: state=1 ctl=1"
+  nothread() { if grep -q "thread: " "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: $1: a proxy thread started"; cat "$G/$MOD/logs/proxy.log"; exit 1; fi; }
+  # 9) proxy.file_rules (W33): the release file rules with every dev key off: the rules load, no dev side, no thread; the host opens the
+  #    redirected path through its own import table and must read the target's text
+  rm -rf "$G/ctl"; mkdir -p "$G/data"
+  printf 'vanilla\r\n' > "$G/data/smoke_in.txt"; printf 'redirected by proxy.file_rules\r\n' > "$G/$MOD/smoke_out.txt"
+  printf 'redirect data\\smoke_in.txt -> %s\\smoke_out.txt\r\n' "$MOD" > "$G/rules.txt"
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
+  run open 'data\smoke_in.txt' > "$OUT/smoke/open_run.txt" 2>&1 || { echo "build.sh smoke: the proxy.file_rules launch failed"; cat "$OUT/smoke/open_run.txt"; exit 1; }
+  check "redirect: 1 rules from"; check "(proxy.file_rules)"; check "proxy.file_rules line 1"; check "process detach"
+  if grep -q "dev: timeline=" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: proxy.file_rules turned the dev side on"; exit 1; fi
+  nothread "proxy.file_rules alone"
+  grep -q "smoke: open data.smoke_in.txt: redirected by proxy.file_rules" "$OUT/smoke/open_run.txt" || { echo "build.sh smoke: the redirect did not serve smoke_out.txt"; cat "$OUT/smoke/open_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  # 10) dev keys that need no thread (a hook and a rule file): the dev side on, no thread, a clean FreeLibrary with no proxy thread in the DLL
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nskip_intro=1\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
+  run; check "threads at the first Direct3DCreate9: state=0 ctl=0"; check "process detach (FreeLibrary)"
+  nothread "skip_intro and dev.file_rules"
+  echo "build.sh smoke: passed (10 launches under wine, 2 dumps)"
   summary "- smoke: self_hash in proxy.log matches d3d9.dll ($SH_MS ms under wine)"
 fi

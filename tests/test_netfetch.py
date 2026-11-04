@@ -181,7 +181,10 @@ class Fetchers(unittest.TestCase):
         self.slept = []
         self.patches = [mock.patch.dict(os.environ, {'WSP_GAME_ROOT': str(self.game)}),
                         mock.patch.object(fetch_lua, 'ROOT', self.game), mock.patch.dict(fetch_lua.PIN, self.lua_pin),
-                        mock.patch.object(netfetch.time, 'sleep', self.slept.append)]
+                        mock.patch.object(netfetch.time, 'sleep', self.slept.append),
+                        # the file:// URLs are this test's offline stand-ins, which the pin file schema (https only) refuses; the schema
+                        # itself is tested in test_moved_tools.UiPins (W16). Missing pins are still refused (KEYS, missing_pin).
+                        mock.patch.object(fetch_ui, 'validate', lambda inst, schema: [])]
         for p in self.patches:
             p.start()
 
