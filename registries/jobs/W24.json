@@ -6,9 +6,7 @@
   "status": "review",
   "model": "opus",
   "needs_pc": false,
-  "depends_on": [
-    "W22"
-  ],
+  "depends_on": [],
   "brief": "jobs/W24/brief.md",
   "report": "jobs/W24/report.md"
 }
