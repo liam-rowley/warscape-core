@@ -293,6 +293,108 @@ class Render(unittest.TestCase):
         self.assertIn('needs: [changes, gates, proxy]', text)
         self.assertIn("github.event_name == 'push' && github.ref != 'refs/heads/main'", text)
 
+    # W22 decision 1: a push to main forgets the base; a set runs unless a marker proves its tree passed.
+    def decide_fn(self, text):
+        m = re.search(r'^( *)decide\(\) \{.*?^\1\}$', text, re.M | re.S)
+        self.assertIsNotNone(m, text)
+        return m.group(0)
+
+    def run_decide(self, fn, marker, changed='true', hit='true'):
+        """Run the rendered decide() in bash over a throwaway .ci-pass folder; returns the lines it wrote to $GITHUB_OUTPUT."""
+        from warscape.gitbash import bash_or_skip
+        bash = bash_or_skip(self, python3=False)
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            if marker is not None:
+                (d / '.ci-pass' / 'native').mkdir(parents=True)
+                (d / '.ci-pass' / 'native' / 'marker.txt').write_text(marker, encoding='utf-8', newline='\n')
+            script = fn + f"\ndecide native {changed} {hit} ''\n"
+            env = {**os.environ, 'GITHUB_OUTPUT': str(d / 'out.txt'), 'GITHUB_STEP_SUMMARY': str(d / 'sum.txt')}
+            r = subprocess.run([bash, '-c', script], cwd=d, env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return (d / 'out.txt').read_text(encoding='utf-8').split()
+
+    def test_on_main_the_diff_step_has_no_base_and_branch_pushes_keep_the_merge_base(self):
+        text = self.render('jobs:\n{{wsc changes}}\n')
+        self.assertNotIn('BEFORE', text)
+        self.assertNotIn('github.event.before', text)
+        self.assertIn("if [ \"$GITHUB_REF\" = refs/heads/main ]; then base=''", text)
+        self.assertIn('else base=$(git merge-base origin/main HEAD || true); fi', text)
+        self.assertIn('ci inputs --base "$base"', text)
+
+    def test_an_empty_base_means_every_set_changed(self):
+        sets = ci.input_sets(CFG)
+        self.assertTrue(all(ci.classify(ci.changed_files(ROOT, '', 'HEAD'), sets).values()))
+
+    def test_a_skip_on_main_has_exactly_one_route_and_it_is_a_readable_marker(self):
+        text = self.render('jobs:\n{{wsc changes}}\n')
+        fn = self.decide_fn(text)
+        self.assertEqual(len(re.findall(r'=false', fn)), 1)
+        good = 'set=native\ntree=abc\nrun=41\nattempt=1\ncommit=deadbeef\n'
+        self.assertEqual(self.run_decide(fn, good), ['native=false'])
+        self.assertEqual(self.run_decide(fn, good, hit=''), ['native=true'])              # no cache-hit
+        self.assertEqual(self.run_decide(fn, None), ['native=true'])                      # no marker file
+        self.assertEqual(self.run_decide(fn, 'set=native\ntree=abc\n'), ['native=true'])  # a marker without a run
+        self.assertEqual(self.run_decide(fn, 'run=abc\n'), ['native=true'])               # an unreadable run
+        # the empty tree hash never reaches the lookup: the restore step needs a tree, so there is no hit and the set runs
+        self.assertIn("steps.diff.outputs.native_tree != ''", text)
+
+    # W22 decision 5: the blocks other than `changes` and `notify gates` do not move. Hashes taken on main (0.22.0) before W22.
+    PINS = {'if native': ('258478fc233ea401', '258478fc233ea401'), 'if host dispatch': ('476b2e7887afbd73', '476b2e7887afbd73'),
+            'pass_marker native': ('3d3624873836e328', '3d3624873836e328'),
+            'pass_marker host shell=bash': ('a16b8e88b0151624', 'a16b8e88b0151624'),
+            'fetch_cache': ('ac798217583fadcb', '96969571a0ce8e9e'), 'policy': ('38371cc58200e5e4', 'daa5bcf48adba21b'),
+            'notify policy': ('799f8cb27f33c081', '5faa5e2321572b1f')}
+    NOTIFY_JOB = ('267a5b3bef0d88cf', '1f9e1f77aafcf063')
+
+    def test_the_other_blocks_and_the_notify_job_render_byte_for_byte_as_before(self):
+        import hashlib
+        core = {**self.CFGR, 'core': '', 'token_secret': '', 'policy_extra_steps': ''}
+
+        def h(t):
+            return hashlib.sha256(t.encode()).hexdigest()[:16]
+        for block, want in self.PINS.items():
+            self.assertEqual((h(self.render('{{wsc %s}}\n' % block)), h(self.render('{{wsc %s}}\n' % block, core))), want, block)
+        got = [self.render('{{wsc notify gates needs=changes,a,b}}\n', c).split('  main_health:\n')[0] for c in (self.CFGR, core)]
+        self.assertEqual(tuple(h(g) for g in got), self.NOTIFY_JOB)
+
+    def main_health_job(self, cfg=None):
+        text = self.render('jobs:\n{{wsc notify gates needs=changes,gates,proxy}}\n', cfg)
+        self.assertEqual(text.count('\n  main_health:\n'), 1)
+        return text.split('\n  main_health:\n')[1]
+
+    def test_notify_gates_adds_a_main_health_job_that_cannot_turn_main_red(self):
+        job = self.main_health_job()
+        self.assertIn('    needs: [changes, gates, proxy]\n', job)
+        self.assertIn("    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'\n", job)
+        self.assertNotIn('failure()', job)
+        self.assertIn('    continue-on-error: true\n', job)
+        self.assertIn('    runs-on: ubuntu-latest\n    timeout-minutes: 5\n', job)
+        self.assertIn('    permissions:\n      contents: read\n      issues: write\n      actions: read\n', job)
+        self.assertNotIn('pull-requests', job)
+        self.assertEqual(job.count('      - env:'), 1)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', job)
+        self.assertIn('python3 core/wsc.py ci main-health --run-id ${{ github.run_id }} --attempt ${{ github.run_attempt }} '
+                      '--repo "${{ github.repository }}"', job)
+        self.assertIn('submodules: true', job)
+        self.assertIn('token: ${{ secrets.CORE_TOKEN }}', job)
+
+    def test_main_health_for_the_core_has_no_core_prefix_and_no_submodules(self):
+        job = self.main_health_job({**self.CFGR, 'core': '', 'token_secret': ''})
+        self.assertIn('run: python3 wsc.py ci main-health --run-id', job)
+        self.assertNotIn('submodules', job)
+        self.assertNotIn('core/', job)
+
+    def test_main_health_is_not_a_required_job_and_is_a_known_skip(self):
+        from warscape import ci_settings
+        self.assertIn('main_health', ci_settings.SKIP)
+        text = self.render('jobs:\n{{wsc notify gates needs=changes,gates}}\n')
+        names = [j for j, _, _ in ci_settings.workflow_jobs(text)]
+        self.assertEqual(names, ['notify', 'main_health'])
+
+    def test_the_policy_notify_has_no_main_health(self):
+        self.assertNotIn('main_health', self.render('jobs:\n{{wsc notify policy}}\n'))
+
     def test_an_unknown_block_is_an_error_and_the_first_line_says_generated(self):
         with self.assertRaises(ValueError):
             self.render('{{wsc nope}}\n')
@@ -462,6 +564,23 @@ class CheckSettings(unittest.TestCase):
         rc, out = self.go(CORE_ANSWERS, CORE_WF)
         self.assertIn('matrix job gates: list its checks in [ci] required_checks', out)
         self.assertFalse(any('`gates' in p for p in self.problems(out)), out)
+
+    def test_issues_disabled_is_a_problem_and_enabled_or_unreported_is_not(self):
+        off = {**GAME_ANSWERS, 'repos/o/game': (0, json.dumps({'allow_auto_merge': True, 'has_issues': False}), '')}
+        rc, out = self.go(off, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
+        self.assertEqual(rc, 1, out)
+        [p] = self.problems(out)
+        self.assertIn('issues are disabled', p)
+        self.assertIn('main_health', p)
+        on = {**GAME_ANSWERS, 'repos/o/game': (0, json.dumps({'allow_auto_merge': True, 'has_issues': True}), '')}
+        rc, out = self.go(on, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
+        self.assertEqual((rc, self.problems(out)), (0, []), out)
+
+    def test_a_main_health_job_is_neither_expected_nor_noted(self):
+        wf = {**GAME_WF, 'gates.yml': GAME_WF['gates.yml'] + '  main_health:\n    runs-on: x\n'}
+        rc, out = self.go(GAME_ANSWERS, wf, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('main_health', out)
 
     def test_a_renamed_required_check_and_approving_reviews_and_strict(self):
         answers = {**GAME_ANSWERS, 'repos/o/game/rules/branches/main': (0, json.dumps(
