@@ -212,6 +212,10 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   (0.27.0) and their sha256 checks judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
+- **The proxy job runs the smoke on your adapter** (`build.sh smoke`, 0.27.0): each step asserts what that game's build must do. A game without a
+  `GestureAdapter` passes steps 6 and 7 on the inert path (the log says "no adapter"), and step 8 peeks the first engine site in the game's
+  generated tables (a game with no engine sites checks the stale request only). The core proves both paths: the null game, and the fixture
+  `proxy/tests/null_game_no_gesture`.
 - **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
   jobs the repo has) and `policy` on `main`, allow auto-merge, require no approving review (one account cannot approve its own pull request), and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
   Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once. `wsc ci check-settings [--repo owner/name]` reads them
