@@ -4,6 +4,7 @@ Ported from empire-remastered (2026-10-28): `orchestrator/tools/check_windows_pa
 (conflict markers, strict JSON), gates_eol and undated_verified (with its narrowing rules and their tests).
 """
 import json
+import posixpath
 import re
 import subprocess
 
@@ -167,3 +168,111 @@ def eol_problems(root):
         if re.match(r'i/(crlf|mixed)\b', info) and path.endswith(('.py', '.sh')):
             det.append(f'CR in the index: {path}')
     return det
+
+
+# ------------------------------------------------------------------ run README references (B13)
+RUN_README = re.compile(r'(?:^|/)runs/(?:[^/]+/)*README\.md$')
+RUN_DATE = re.compile(r'^(\d{4})-?(\d{2})-?(\d{2})_')
+LINK_TARGET = re.compile(r'\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"\n]*"|\'[^\'\n]*\'))?\s*\)')
+BACKTICKED = re.compile(r'`([^`\n]+)`')
+FENCE = re.compile(r'^\s*(```|~~~)')
+URLISH = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*:')    # https://, mailto:, file: ... and a drive path (C:\ or C:/)
+LINE_SUFFIX = re.compile(r':\d+(?:[-:]\d+)*$')
+HAS_EXT = re.compile(r'\.[A-Za-z0-9_]{1,10}$')
+NOT_A_PATH = re.compile(r'[*?<>{}|\\\s$%~^"\']|^[-/#@=]|=')
+
+
+def run_readmes(paths):
+    """The tracked `**/runs/**/README.md` among `paths`."""
+    return sorted(p for p in paths if RUN_README.search(p))
+
+
+def run_folder_date(path):
+    """`YYYY-MM-DD` from the name of the run folder (the child of the `runs/` folder) that holds README `path`, or None when the name starts with no date
+    (`YYYYMMDD_` or `YYYY-MM-DD_`)."""
+    parts = path.split('/')
+    if 'runs' not in parts[:-1]:
+        return None
+    i = parts.index('runs')
+    m = RUN_DATE.match(parts[i + 1]) if i + 2 < len(parts) else None
+    return f'{m.group(1)}-{m.group(2)}-{m.group(3)}' if m else None
+
+
+def run_ref_tokens(text):
+    """`[(line, token)]`: the repo paths a run README names. Markdown link targets (a path with a `/` or a file extension) and backticked
+    tokens with a `/` that end in a file extension or `/`. Not URLs, absolute or drive paths, `%VAR%`, `$VAR` or `~` paths, backslash paths, a `..` range
+    (`raw/chain1..3/`), nor anything with `* ? < > { } |` or a space (a command line). A trailing `:<line>` and punctuation are stripped; a link's
+    `#anchor` is dropped. Lines inside a fenced code block are skipped (commands and log output)."""
+    out, fenced = [], False
+    for n, line in enumerate(text.split('\n'), 1):
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        for m in LINK_TARGET.finditer(line):
+            out.append((n, m.start(), m.group(1).split('#', 1)[0], True))
+        for m in BACKTICKED.finditer(line):
+            out.append((n, m.start(), m.group(1), False))
+    seen, toks = set(), []
+    for n, _, tok, link in sorted(out, key=lambda t: t[:2]):
+        tok = LINE_SUFFIX.sub('', tok.strip().rstrip('.,;:)!'))
+        tok = tok[2:] if tok.startswith('./') else tok
+        if not tok or URLISH.match(tok) or NOT_A_PATH.search(tok) or any('..' in seg and seg != '..' for seg in tok.split('/')):
+            continue
+        if not (tok.endswith('/') or HAS_EXT.search(tok)) or not (link or '/' in tok):
+            continue
+        if (n, tok) not in seen:
+            seen.add((n, tok))
+            toks.append((n, tok))
+    return toks
+
+
+def run_ref_index(tracked):
+    """What `run_ref_found` looks in: every tracked path, every folder above one, and every trailing sub-path of either (so `probes/x.lua` finds
+    `adapter/probes/x.lua`)."""
+    every = set()
+    for p in tracked:
+        parts = p.split('/')
+        for i in range(len(parts)):
+            every.add('/'.join(parts[i:]))
+        for j in range(1, len(parts)):
+            for i in range(j):
+                every.add('/'.join(parts[i:j]))
+    paths = set(tracked)
+    for p in tracked:
+        parts = p.split('/')
+        paths.update('/'.join(parts[:j]) for j in range(1, len(parts)))
+    return paths, every
+
+
+def run_ref_found(token, readme, index, is_ignored=None):
+    """True when `token` (a path a run README at `readme` names) exists: from the repo root, from the README's folder, as the tail of any tracked
+    file or folder path, or ignored by git on purpose (build output named on purpose). `index`: `run_ref_index`."""
+    paths, every = index
+    base = readme.rsplit('/', 1)[0] if '/' in readme else ''
+    rel = token.rstrip('/')
+    cands = [rel]
+    if base:
+        cands.append(posixpath.normpath(f'{base}/{rel}'))
+    cands = [c for c in cands if c and not c.startswith('../') and c != '..']
+    if any(c in paths for c in cands) or rel in every:
+        return True
+    return bool(is_ignored and any(is_ignored(c) for c in cands))
+
+
+def run_ref_problems(readmes, index, since='', is_ignored=None):
+    """`(errors, checked, skipped)` for run READMEs `{path: text}`: each reference that is found nowhere, as `<readme>:<line>: names <token>, which ...`.
+    A README whose run folder is dated before `since` (`YYYY-MM-DD`; empty = none skipped) is skipped and counted: a dated record's old paths are not
+    wrong, only old."""
+    errs, checked, skipped = [], 0, 0
+    for path in sorted(readmes):
+        d = run_folder_date(path)
+        if since and d and d < since:
+            skipped += 1
+            continue
+        for n, tok in run_ref_tokens(readmes[path]):
+            checked += 1
+            if not run_ref_found(tok, path, index, is_ignored):
+                errs.append(f'{path}:{n}: names `{tok}`, which is not in the repo (commit the file, fix the path, or git-ignore it if it is build output)')
+    return errs, checked, skipped
