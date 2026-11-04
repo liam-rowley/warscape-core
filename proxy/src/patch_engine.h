@@ -17,6 +17,7 @@
 // left stock), so these checks hold for value rows exactly as for fixed rows. An absolute address inside the anchor (c7 05 <abs32>
 // <imm32>) is compared unrelocated, and its relocation ends where the value starts, so it does not count against the value (B41).
 // docs/PROXY_SITES.md is the overview.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -147,44 +148,81 @@ inline int ApplyPlanToBuffer(uint8_t* image, const PatchPlan& pl, const SiteDef*
     return changed;
 }
 
-// Memory protection behind an interface so the write step is host-testable (patch_driver.cpp: VirtualProtect).
+// Memory protection behind an interface so the write step is host-testable (patch_driver.cpp: VirtualProtect, VirtualQuery,
+// GetSystemInfo). The host tests' mock with VirtualProtect's page semantics is tk::PageMem (proxy/tests/testkit.h).
 struct MemOps {
-    virtual bool Unprotect(uint8_t* p, size_t n, uint32_t& old) = 0;   // make writable, return the old protection
+    virtual bool Unprotect(uint8_t* p, size_t n, uint32_t& old) = 0;   // make writable, return the old protection (of the FIRST page)
     virtual bool Reprotect(uint8_t* p, size_t n, uint32_t old) = 0;
     virtual void Flush(uint8_t*, size_t) {}
+    virtual uint32_t PageSize() const { return 0x1000; }
+    virtual bool Query(uint8_t* page, uint32_t& prot) { (void)page; (void)prot; return false; }   // a page's protection now; false = unknown
     virtual ~MemOps() {}
 };
-struct WriteResult {
-    bool ok = false;          // every planned site written (or nothing to write)
-    int written = 0;          // sites written: 0 or pl.nWrite, never in between
-    int failedSite = -1;      // the site whose Unprotect failed
-    int reprotectFailures = 0;
+struct PageProt {
+    uint32_t rva = 0;        // the page's RVA
+    uint32_t recorded = 0;   // its protection before the write (what Unprotect reported for this page alone)
+    uint32_t after = 0;      // what Query read back after the restore
+    bool known = false;      // Query answered
 };
-// All-or-nothing at write time: every site is made writable FIRST; one failure restores the ones already changed and writes
-// nothing (J1 review finding 4: a VirtualProtect failure used to skip one site and keep the others). Then all bytes are written,
-// then protections restored. A failed restore leaves a site writable (counted, logged), never half-written.
+struct WriteResult {
+    bool ok = false;           // every planned site written (or nothing to write)
+    int written = 0;           // sites written: 0 or pl.nWrite, never in between
+    int failedSite = -1;       // the first written site, in plan order, with a byte on the page whose Unprotect failed
+    int64_t failedPage = -1;   // that page's RVA (-1: none)
+    int reprotectFailures = 0; // pages whose restore failed
+    std::vector<PageProt> pages;   // every page made writable, ascending, with its own recorded protection and the readback
+};
+// The pages (RVAs, sorted, unique) that a written site's value bytes touch: from the page of valueRva to the page of valueRva + len - 1.
+inline std::vector<uint32_t> WritePages(const PatchPlan& pl, const SiteDef* s, uint32_t pageSize) {
+    std::vector<uint32_t> v;
+    if (!pageSize) return v;
+    for (size_t i = 0; i < pl.sites.size(); ++i) {
+        if (!pl.sites[i].write || !s[i].len) continue;
+        const uint32_t a = pl.sites[i].valueRva, last = (a + s[i].len - 1) / pageSize * pageSize;
+        for (uint32_t p = a / pageSize * pageSize; p <= last; p += pageSize) v.push_back(p);
+    }
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+    return v;
+}
+// A page read back after the restore holds what was recorded. An image page that was written is private from then on, so a
+// copy-on-write protection reads back as its written form: PAGE_WRITECOPY 0x08 as PAGE_READWRITE 0x04, PAGE_EXECUTE_WRITECOPY 0x80
+// as PAGE_EXECUTE_READWRITE 0x40. Anything else (another value, a guard or cache bit) is a page left changed.
+inline bool ProtectionRestored(uint32_t recorded, uint32_t after) {
+    return recorded == after || (recorded == 0x08 && after == 0x04) || (recorded == 0x80 && after == 0x40);
+}
+// All-or-nothing at write time (J1 review finding 4), page by page (W33, C3): every page a written site touches is made writable
+// FIRST, once, in ascending order, and keeps its OWN old protection (VirtualProtect reports the first page of a range only, so a
+// per-site record restored a page shared by two sites, or a site's second page, as RWX). One failure restores the pages already
+// changed, each with its own value, and writes nothing. Then all bytes are written, every page restored once with its recorded value,
+// each written range flushed, and every page read back (Query). A failed restore leaves a page writable (counted, logged), never a
+// site half-written; the readback never refuses or undoes anything (the bytes are written). A page size that is not a power of two
+// refuses before any call.
 inline WriteResult WritePlanAtomic(uint8_t* base, const PatchPlan& pl, const SiteDef* s, MemOps& ops) {
     WriteResult r;
     if (pl.verdict != PlanVerdict::Apply) { r.ok = pl.verdict == PlanVerdict::NothingToDo; return r; }
-    std::vector<size_t> idx; std::vector<uint32_t> old;
-    for (size_t i = 0; i < pl.sites.size(); ++i) {
-        if (!pl.sites[i].write) continue;
-        uint32_t o = 0;
-        if (!ops.Unprotect(base + pl.sites[i].valueRva, s[i].len, o)) {
-            for (size_t k = idx.size(); k-- > 0;)
-                if (!ops.Reprotect(base + pl.sites[idx[k]].valueRva, s[idx[k]].len, old[k])) ++r.reprotectFailures;
-            r.failedSite = (int)i;
+    const uint32_t ps = ops.PageSize();
+    if (!ps || (ps & (ps - 1))) return r;
+    const std::vector<uint32_t> pages = WritePages(pl, s, ps);
+    for (uint32_t pg : pages) {
+        PageProt p; p.rva = pg;
+        if (!ops.Unprotect(base + pg, ps, p.recorded)) {
+            for (size_t k = r.pages.size(); k-- > 0;)
+                if (!ops.Reprotect(base + r.pages[k].rva, ps, r.pages[k].recorded)) ++r.reprotectFailures;
+            r.failedPage = pg;
+            for (size_t i = 0; i < pl.sites.size() && r.failedSite < 0; ++i)
+                if (pl.sites[i].write && s[i].len && pl.sites[i].valueRva < pg + ps && pl.sites[i].valueRva + s[i].len > pg) r.failedSite = (int)i;
+            for (PageProt& q : r.pages) q.known = ops.Query(base + q.rva, q.after);
             return r;
         }
-        idx.push_back(i); old.push_back(o);
+        r.pages.push_back(p);
     }
-    for (size_t i : idx) memcpy(base + pl.sites[i].valueRva, s[i].patch, s[i].len);
-    for (size_t k = 0; k < idx.size(); ++k) {
-        uint8_t* p = base + pl.sites[idx[k]].valueRva;
-        if (!ops.Reprotect(p, s[idx[k]].len, old[k])) ++r.reprotectFailures;
-        ops.Flush(p, s[idx[k]].len);
-    }
-    r.ok = true; r.written = (int)idx.size();
+    int n = 0;
+    for (size_t i = 0; i < pl.sites.size(); ++i) if (pl.sites[i].write) { memcpy(base + pl.sites[i].valueRva, s[i].patch, s[i].len); ++n; }
+    for (const PageProt& p : r.pages) if (!ops.Reprotect(base + p.rva, ps, p.recorded)) ++r.reprotectFailures;
+    for (size_t i = 0; i < pl.sites.size(); ++i) if (pl.sites[i].write) ops.Flush(base + pl.sites[i].valueRva, s[i].len);
+    for (PageProt& p : r.pages) p.known = ops.Query(base + p.rva, p.after);
+    r.ok = true; r.written = n;
     return r;
 }
 
