@@ -59,6 +59,7 @@ DEFAULTS = {
         'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
         'failed_results': '',              # glob (relative to a run folder a report cites) of ctl result JSONs: one with status "failed" must be named in ## Deviations ('' = off)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
+        'pc_state': '',                    # the PC state folder ($VAR, ~ expanded): a needs_pc build is not ready where it is absent ('' = no gating; WSC_PC_STATE overrides, "" = no PC here; W26)
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
             'policy': '{wsc} policy',      # the policy command, before ` --branch B --base REF`
