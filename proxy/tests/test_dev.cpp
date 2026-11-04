@@ -310,8 +310,8 @@ int main(int argc, char** argv) {
             CHECK(a != std::string::npos && lua != std::string::npos && reset != std::string::npos && wait != std::string::npos);
             CHECK(lua < reset && reset < wait);
             CHECK(raw.find("map_folder_loaded_after_request_ms") != std::string::npos);
-            const std::string fl = tk::ReadFile("core/files.cpp");
-            CHECK(fl.find("void FilesMapReset()") != std::string::npos && fl.find("s_lastMap.clear()") != std::string::npos);
+            const std::string flr = tk::ReadFile("core/files.cpp");
+            CHECK(flr.find("void FilesMapReset()") != std::string::npos && flr.find("s_lastMap.clear()") != std::string::npos);
         }
         for (const std::string& k : read) if (!known.count(k)) { printf("    dev.cpp reads %s, not in config_keys\n", k.c_str()); CHECK(false); }
         for (const std::string& k : known) if (k.rfind("dev.", 0) == 0 && !read.count(k)) { printf("    %s is registered but dev.cpp never reads it\n", k.c_str()); CHECK(false); }

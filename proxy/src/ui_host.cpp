@@ -58,7 +58,8 @@ std::string s_luaWhy;
 struct Doc { Rml::ElementDocument* doc = nullptr; bool visible = false; };
 std::map<std::string, Doc> s_docs;       // by the path under the UI folder
 
-UiRouteState s_route; bool s_rmlOwner = false;
+UiRouteState s_route; bool s_rmlOwner = false;   // written by the window thread under s_cs only
+volatile LONG s_diMask = 0;              // B53: UiDiMask(s_route), published by Publish(); the DirectInput hooks read only this
 volatile LONG64 s_cnt[6][2];             // per UiEv: [0] delivered to RmlUi, [1] to the engine
 volatile LONG s_wmLButton = 0, s_diStateButtons = 0, s_diDataButtons = 0, s_diStateReads = 0, s_diDataReads = 0;
 unsigned s_diMouseBtnPrev = 0;
@@ -370,6 +371,7 @@ void Sense() {
     s_route.overScrollable = UiOverScrollable(s_ctx);
     s_route.textFocus = UiTextFocus(s_ctx);
 }
+void Publish() { InterlockedExchange(&s_diMask, (LONG)UiDiMask(s_route)); }   // under s_cs, after every write of s_route
 void Count(UiEv ev, uint8_t to) {
     if (to & kToRml) InterlockedIncrement64(&s_cnt[(int)ev][0]);
     if (to & kToEngine) InterlockedIncrement64(&s_cnt[(int)ev][1]);
@@ -399,7 +401,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_MOUSEWHEEL: ev = UiEv::Wheel; break;
     case WM_KEYDOWN: case WM_KEYUP: case WM_SYSKEYDOWN: case WM_SYSKEYUP: ev = UiEv::Key; break;
     case WM_CHAR: ev = UiEv::Char; break;
-    case WM_ACTIVATEAPP: { Lock l; s_route.engineButtons = 0; s_route.rmlButtons = 0; }   // a release lost to alt-tab
+    case WM_ACTIVATEAPP: { Lock l; UiFocusLost(s_route, s_rmlOwner); Publish(); }   // a release lost to alt-tab
         GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, true);                        // W6: focus loss cancels a gesture; the message passes
         return Engine(h, msg, wp, lp);
     default:
@@ -432,6 +434,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         }
         leave = r.engineLeave;
         s_rmlOwner = UiRmlOwnsPointer(s_route);
+        Publish();
         Count(ev, r.to);
         (void)down;
     }
@@ -461,30 +464,30 @@ PFN_DI8Create o_DI8Create; PFN_DICreateDevice o_DICreateDevice; PFN_DIState o_DI
 HRESULT WINAPI hk_DIState(void* dev, DWORD cb, void* data) {
     const HRESULT hr = o_DIState(dev, cb, data);
     if (FAILED(hr) || !data) return hr;
-    const UiRouteState s = s_route;   // a copy: the window thread owns the decisions
+    const uint32_t dim = (uint32_t)s_diMask;   // one read of the word the window thread published (B53): no route struct, no lock
     if (dev == s_diMouse && cb >= 16) {
         InterlockedIncrement(&s_diStateReads);
         BYTE* b = (BYTE*)data + 12; const DWORD n = cb - 12;
-        unsigned mask = 0; for (DWORD i = 0; i < n && i < 8; ++i) if (b[i] & 0x80) mask |= 1u << i;
-        if (mask && mask != s_diMouseBtnPrev && InterlockedIncrement(&s_diStateButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceState)");
-        s_diMouseBtnPrev = mask;
-        if (UiBlankDiButtons(s) || GestureOwnsMouse()) memset(b, 0, n);   // W6: a gesture holds the buttons
-        if (UiBlankDiWheel(s)) ((LONG*)data)[2] = 0;
-    } else if (dev == s_diKeyboard && cb == 256 && s.textFocus) memset(data, 0, cb);
+        unsigned btns = 0; for (DWORD i = 0; i < n && i < 8; ++i) if (b[i] & 0x80) btns |= 1u << i;
+        if (btns && btns != s_diMouseBtnPrev && InterlockedIncrement(&s_diStateButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceState)");
+        s_diMouseBtnPrev = btns;
+        if (UiDiBlankButtons(dim, GestureOwnsMouse())) memset(b, 0, n);   // W6: a gesture holds the buttons
+        if (UiDiBlankWheel(dim)) ((LONG*)data)[2] = 0;
+    } else if (dev == s_diKeyboard && cb == 256 && (dim & kDiTextFocus)) memset(data, 0, cb);
     return hr;
 }
 HRESULT WINAPI hk_DIData(void* dev, DWORD cbObj, DiData* rg, DWORD* inOut, DWORD flags) {
     const HRESULT hr = o_DIData(dev, cbObj, rg, inOut, flags);
     if (FAILED(hr) || !rg || !inOut || (flags & 1 /* DIGDD_PEEK */) || cbObj < sizeof(DWORD) * 2) return hr;
-    const UiRouteState s = s_route;
+    const uint32_t dim = (uint32_t)s_diMask;
     for (DWORD i = 0; i < *inOut; ++i) {
         DiData* e = (DiData*)((BYTE*)rg + (size_t)i * cbObj);
         if (dev == s_diMouse) {
             InterlockedIncrement(&s_diDataReads);
             const bool btn = e->ofs >= 12 && e->ofs < 20, wheel = e->ofs == 8;
             if (btn && (e->data & 0x80) && InterlockedIncrement(&s_diDataButtons) == 1) LOGI("ui: input: first DirectInput mouse button (GetDeviceData)");
-            if ((btn && (UiBlankDiButtons(s) || GestureOwnsMouse())) || (wheel && UiBlankDiWheel(s))) memset(e, 0, cbObj);
-        } else if (dev == s_diKeyboard && s.textFocus) memset(e, 0, cbObj);
+            if ((btn && UiDiBlankButtons(dim, GestureOwnsMouse())) || (wheel && UiDiBlankWheel(dim))) memset(e, 0, cbObj);
+        } else if (dev == s_diKeyboard && (dim & kDiTextFocus)) memset(e, 0, cbObj);
     }
     return hr;
 }

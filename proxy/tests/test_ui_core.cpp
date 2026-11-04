@@ -119,6 +119,66 @@ int main(int argc, char** argv) {
         r = ParseCtl("ui frob"); CHECK(r.error.find("unknown operation") != std::string::npos);
         CHECK(std::string(CtlVerbs()).find("ui ") != std::string::npos);
     }
+    {   // B53 (W20): the DirectInput hooks read one published word; it agrees with the pure decisions on every route state
+        long checked = 0;
+        for (int hov = 0; hov < 2; ++hov) for (int scr = 0; scr < 2; ++scr) for (int txt = 0; txt < 2; ++txt)
+            for (unsigned eb = 0; eb < 8; ++eb) for (unsigned rb = 0; rb < 8; ++rb) {
+                UiRouteState s; s.hoverInteractive = hov; s.overScrollable = scr; s.textFocus = txt; s.engineButtons = eb; s.rmlButtons = rb;
+                const uint32_t m = UiDiMask(s);
+                CHECK_EQ(((m & kDiBlankButtons) != 0), UiBlankDiButtons(s));
+                CHECK_EQ(((m & kDiBlankWheel) != 0), UiBlankDiWheel(s));
+                CHECK_EQ(((m & kDiTextFocus) != 0), s.textFocus);
+                CHECK_EQ((m & ~(uint32_t)(kDiBlankButtons | kDiBlankWheel | kDiTextFocus)), 0u);
+                ++checked;
+            }
+        CHECK_EQ(checked, 512L);
+    }
+    {   // B53 (W20): focus loss clears both masks and the owner; the next decision is a fresh start's
+        for (int hov = 0; hov < 2; ++hov) for (int scr = 0; scr < 2; ++scr) for (unsigned eb = 0; eb < 8; ++eb) for (unsigned rb = 0; rb < 8; ++rb) for (int own = 0; own < 2; ++own) {
+            UiRouteState s; s.hoverInteractive = hov; s.overScrollable = scr; s.textFocus = true; s.engineButtons = eb; s.rmlButtons = rb;
+            bool owner = own;
+            UiFocusLost(s, owner);
+            CHECK(s.engineButtons == 0 && s.rmlButtons == 0 && !owner);
+            CHECK(s.hoverInteractive == (bool)hov && s.overScrollable == (bool)scr && s.textFocus);   // what RmlUi sensed is not the router's to clear
+            UiRouteState fresh; fresh.hoverInteractive = hov; fresh.overScrollable = scr; fresh.textFocus = true;
+            for (UiEv ev : { UiEv::Move, UiEv::Down, UiEv::Up, UiEv::Wheel, UiEv::Key, UiEv::Char }) {
+                UiRouteState a = s, b = fresh;
+                const UiRoute ra = UiDecide(ev, 0, a, owner), rb2 = UiDecide(ev, 0, b, false);
+                CHECK(ra.to == rb2.to && ra.engineLeave == rb2.engineLeave && a.engineButtons == b.engineButtons && a.rmlButtons == b.rmlButtons);
+            }
+        }
+    }
+    {   // R1 finding 1: the blank decision over (word, gesture owner), every combination
+        for (uint32_t w = 0; w < 8; ++w) for (int g = 0; g < 2; ++g) {
+            CHECK(UiDiBlankButtons(w, g) == (((w & kDiBlankButtons) != 0) || g));
+            CHECK(UiDiBlankWheel(w) == ((w & kDiBlankWheel) != 0));
+        }
+        CHECK(!UiDiBlankButtons(0, false) && UiDiBlankButtons(kDiBlankButtons, false) && UiDiBlankButtons(0, true));
+        CHECK(!UiDiBlankWheel(kDiBlankButtons | kDiTextFocus) && UiDiBlankWheel(kDiBlankWheel));   // a held left button (bit 0 of the bitmap) is not the route word
+    }
+    {   // W20 source lints (B53): the DirectInput hooks never touch s_route; every block that writes it publishes before it ends
+        const std::string host = tk::ReadFile("core/ui_host.cpp");
+        const size_t st = host.find("HRESULT WINAPI hk_DIState("), cr = host.find("HRESULT WINAPI hk_DICreateDevice(");
+        CHECK(st != std::string::npos && cr != std::string::npos && st < cr);
+        const std::string di = host.substr(st, cr - st);
+        CHECK(di.find("s_route") == std::string::npos && di.find("s_cs") == std::string::npos && di.find("Lock l") == std::string::npos);
+        CHECK(di.find("s_diMask") != std::string::npos);
+        // R1 finding 1: the hooks decide through the pure functions, and no local named `mask` exists to shadow anything
+        CHECK(di.find("UiDiBlankButtons(dim, GestureOwnsMouse())") != std::string::npos && di.find("UiDiBlankWheel(dim)") != std::string::npos);
+        CHECK(di.find("mask ") == std::string::npos && di.find("mask&") == std::string::npos && di.find("(mask") == std::string::npos);
+        CHECK(host.find("void Publish() {") != std::string::npos && host.find("InterlockedExchange(&s_diMask") != std::string::npos);
+        const size_t wp = host.find("LRESULT CALLBACK WndProc("), act = host.find("case WM_ACTIVATEAPP:", wp), def = host.find("default:", act);
+        CHECK(act != std::string::npos && def != std::string::npos);
+        const std::string actBlock = host.substr(act, def - act);
+        CHECK(actBlock.find("UiFocusLost(s_route, s_rmlOwner)") != std::string::npos && actBlock.find("Publish();") != std::string::npos);
+        const size_t dec = host.find("r = UiDecide(", wp), lend = host.find("Count(ev, r.to);", dec);
+        CHECK(dec != std::string::npos && lend != std::string::npos);
+        const std::string decBlock = host.substr(dec, lend - dec);
+        CHECK(decBlock.find("Publish();") != std::string::npos && decBlock.find("s_rmlOwner = UiRmlOwnsPointer(s_route);") != std::string::npos);
+        // the pre-decision write (!live branch) is followed by the decide block's publish in the same lock scope
+        const size_t lockOpen = host.rfind("Lock l;", dec);
+        CHECK(lockOpen != std::string::npos && lockOpen > wp);
+    }
     {   // frame-cost percentiles (nearest rank)
         std::vector<double> v; for (int i = 100; i >= 1; --i) v.push_back(i * 0.01);
         UiCost c = UiCostOf(v); CHECK_EQ(c.n, (size_t)100); CHECK(std::fabs(c.p50 - 0.50) < 1e-9 && std::fabs(c.p99 - 0.99) < 1e-9 && std::fabs(c.max - 1.0) < 1e-9);

@@ -165,7 +165,7 @@ build_dll() {
   # relative file names (the same sources give the same bytes: the PC test binary is the CI binary). --disable-auto-image-base: mingw
   # ld otherwise hashes the OUTPUT PATH into the DLL's ImageBase, so the container, CI and a worktree gave three different DLLs for
   # one commit (review of J1, 2026-10-28). `build.sh repro` proves it stays fixed.
-  "$CXX" -std=c++17 -O2 -s -shared -Wall -Wextra -Werror -DWSP_BUILD_ID="\"$BUILD_ID\"" -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
+  "$CXX" -std=c++17 -O2 -s -shared -Wall -Wextra -Wshadow -Werror -DWSP_BUILD_ID="\"$BUILD_ID\"" -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
     -ffile-prefix-map="$S/"=core/ -ffile-prefix-map="$A/"=adapter/ -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp -Wl,--disable-auto-image-base -Wl,--enable-stdcall-fixup \
     -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" -o "$O" "${SRCS[@]}" "$A/adapter.cpp" \
     "$L"/*.o $(LC_ALL=C ls "$U"/rml/*.o "$U"/ft/*.o) "$S/d3d9.def" -ldbghelp -ladvapi32
@@ -207,7 +207,7 @@ if [[ "$WHAT" == tests || "$WHAT" == all ]]; then
       [[ -f "$OUT/tests/ui_lua.o" ]] || ui_lua_obj "$SRC" "$HU" "$OUT/tests/ui_lua.o" g++ ""
       MORE=("${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" "$OUT/tests/ui_lua.o" $(LC_ALL=C ls "$HU"/rml/*.o "$HU"/ft/*.o))
     fi
-    g++ -std=c++17 -O1 -Wall -Wextra -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" -o "$OUT/tests/$n" "$t" "${MORE[@]}"
+    g++ -std=c++17 -O1 -Wall -Wextra -Wshadow -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" -o "$OUT/tests/$n" "$t" "${MORE[@]}"
     if WSP_UI_SRC="$UI_SRC" "$OUT/tests/$n" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $n FAILED"; fail=1; fi
   done
   rm -f "$OUT/tests/ui_lua.o"

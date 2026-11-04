@@ -30,11 +30,14 @@ null render interface, the host's Lua).
   (`Context::IsMouseInteracting`), a press that began on the engine stays the engine's until every button is up, the wheel goes to RmlUi
   only over a scrollable element, keys only while a text field has focus. The DirectInput mouse and keyboard devices are hooked
   (`IDirectInput8::CreateDevice` [3] from the exe's `DirectInput8Create` import, then `GetDeviceState` [9] and `GetDeviceData` [10]): their
-  buttons, wheel or keys are blanked while RmlUi owns them; movement always passes. With no document visible everything goes to the engine.
+  buttons, wheel or keys are blanked while RmlUi owns them; movement always passes. The hooks read one published word (`s_diMask`, `UiDiMask`:
+  blank buttons, blank wheel, text focus), never the route state and never a lock: the window thread publishes it with `InterlockedExchange` at the end of
+  every block that writes the route state (the `UiDecide` block and `WM_ACTIVATEAPP`, which clears the button masks and the owner: `UiFocusLost`). With no document visible everything goes to the engine.
 - **Lua.** The host does not use the proxy's engine-patched Lua (its tables need the engine's dummynode, its collector never runs). It links
   a second Lua 5.1.1 (float numbers only, the review viewer's) with RmlUi's Lua plugin into one object whose `lua*` symbols are all made
   local (`build.sh`: `ld -r`, `objcopy --localize-symbol`, then a check that none is left global). A document with no script needs no Lua.
-- **Threads.** Every RmlUi call is under one lock. The ctl thread never calls RmlUi or the device: `show`, `hide`, `reload`, `scale` and
+- **Threads.** Every RmlUi call is under one lock (the Present thread holds it while RmlUi renders, so the DirectInput hooks, on other threads, never take it:
+  they read the published word above; the gesture side does the same with `s_ownsMouse`). The ctl thread never calls RmlUi or the device: `show`, `hide`, `reload`, `scale` and
   `dump` run at the next Present; `click` and `wheel` send window messages, so they take the route real input takes.
 
 ## `ctl ui` (dev.ctl)
