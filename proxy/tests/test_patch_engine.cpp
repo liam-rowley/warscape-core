@@ -211,6 +211,97 @@ int main(int argc, char** argv) {
             const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
             CHECK(r.ok); CHECK_EQ(r.written, 2); CHECK(mm == want);   // the same bytes as the pure apply
             CHECK(f.Restored()); CHECK(f.NoneTwice());
+            CHECK_EQ(r.pages.size(), (size_t)2); CHECK_EQ(f.unprotectCalls, 2); CHECK_EQ(f.reprotectCalls, 2); CHECK_EQ(f.flushes, 2);
+            for (const PageProt& q : r.pages) { CHECK(q.known); CHECK_EQ(q.recorded, 0x20u); CHECK_EQ(q.after, 0x20u); }
+            for (int failAt : { 0, 1 }) {   // a failure at each page index: nothing written, every page initial, the site and the page named
+                std::vector<uint8_t> m2 = m; tk::PageMem g(b, m2.data()); g.failUnprotectAt = failAt;
+                const WriteResult w = WritePlanAtomic(m2.data(), pl, x.data(), g);
+                CHECK(!w.ok); CHECK_EQ(w.written, 0); CHECK(m2 == m); CHECK(g.Restored()); CHECK(g.NoneTwice()); CHECK_EQ(g.flushes, 0);
+                CHECK_EQ(w.failedPage, failAt == 0 ? (int64_t)0x2000 : (int64_t)0x3000);
+                CHECK_EQ(w.failedSite, failAt == 0 ? 0 : 1);   // page 0x3000 holds a byte of straddle.b only
+            }
+        }
+    }
+    {   // W33: WritePages, the pages a plan's written value bytes touch (sorted, unique)
+        auto pages = [](std::vector<std::pair<uint32_t, uint8_t>> v, std::vector<bool> w = {}) {
+            PatchPlan pl; std::vector<SiteDef> d(v.size()); pl.sites.resize(v.size());
+            for (size_t i = 0; i < v.size(); ++i) { pl.sites[i].valueRva = v[i].first; pl.sites[i].write = w.empty() || w[i]; d[i].len = v[i].second; }
+            return WritePages(pl, d.data(), 0x1000);
+        };
+        typedef std::vector<uint32_t> P;
+        CHECK(pages({ { 0x1103, 4 } }) == P({ 0x1000 }));                                // one page
+        CHECK(pages({ { 0x1103, 4 }, { 0x1206, 4 } }) == P({ 0x1000 }));                 // two sites on one page
+        CHECK(pages({ { 0x2ffe, 4 } }) == P({ 0x2000, 0x3000 }));                        // a straddle
+        CHECK(pages({ { 0x5016, 2 }, { 0x1103, 4 } }) == P({ 0x1000, 0x5000 }));         // .data and .text, ascending
+        CHECK(pages({ { 0x2ffc, 4 }, { 0x3000, 1 } }) == P({ 0x2000, 0x3000 }));         // a site ending exactly at a page end
+        CHECK(pages({ { 0x1103, 4 }, { 0x5016, 2 } }, { true, false }) == P({ 0x1000 })); // a site not written touches nothing
+        CHECK(pages({}).empty());
+    }
+    {   // W33: ProtectionRestored: equal, the two copy-on-write pairs, a different value, a guard bit
+        CHECK(ProtectionRestored(0x20, 0x20)); CHECK(ProtectionRestored(0x04, 0x04)); CHECK(ProtectionRestored(0x02, 0x02));
+        CHECK(ProtectionRestored(0x08, 0x04)); CHECK(ProtectionRestored(0x80, 0x40));
+        CHECK(!ProtectionRestored(0x20, 0x40)); CHECK(!ProtectionRestored(0x04, 0x40)); CHECK(!ProtectionRestored(0x04, 0x08));
+        CHECK(!ProtectionRestored(0x40, 0x80)); CHECK(!ProtectionRestored(0x20, 0x120));
+    }
+    {   // W33: the page-wise writer on the B41 fixture (pages 0x1000 with two sites, 0x5000 with one): each page its own value, once
+        tk::Image b = im;
+        b.Put(0x1200, { 0xC7, 0x05, 0x00, 0xB0, 0x40, 0x00, 0x00, 0x00, 0x80, 0x3E, 0x90 });
+        b.relocs.push_back(0x1202); b.BuildRelocs();
+        std::vector<SiteDef> x = s;
+        x.push_back(Patch("frame.time", 0x1200, { 0xC7, 0x05, 0x00, 0xB0, 0x40, 0x00 }, { 0x00, 0x00, 0x80, 0x3E }, { 0x00, 0x00, 0x00, 0x3F }));
+        const bool on4[4] = { true, true, true, true };
+        std::vector<uint8_t> m = b.Mapped(0x01230000u); PeInfo pe; ImageView v = tk::MappedView(m, pe);
+        const PatchPlan pl = MakePatchPlan(v, 0x01230000u - 0x400000u, x.data(), x.size(), on4);
+        CHECK(pl.verdict == PlanVerdict::Apply); CHECK_EQ(pl.nWrite, 3);
+        std::vector<uint8_t> want = m; ApplyPlanToBuffer(want.data(), pl, x.data());
+        {   std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data());
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
+            CHECK(r.ok); CHECK_EQ(r.written, 3); CHECK(mm == want); CHECK(f.Restored()); CHECK(f.NoneTwice());
+            CHECK_EQ(f.unprotectCalls, 2); CHECK_EQ(f.reprotectCalls, 2); CHECK_EQ(f.flushes, 3); CHECK_EQ(r.failedPage, (int64_t)-1);
+            CHECK_EQ(r.pages.size(), (size_t)2);
+            if (r.pages.size() == 2) {   // the .text page restored to 0x20 and the .data page to 0x04, each read back
+                CHECK_EQ(r.pages[0].rva, 0x1000u); CHECK_EQ(r.pages[0].recorded, 0x20u); CHECK_EQ(r.pages[0].after, 0x20u); CHECK(r.pages[0].known);
+                CHECK_EQ(r.pages[1].rva, 0x5000u); CHECK_EQ(r.pages[1].recorded, 0x04u); CHECK_EQ(r.pages[1].after, 0x04u); CHECK(r.pages[1].known);
+            }
+        }
+        for (int failAt : { 0, 1 }) {   // a failure at each page index
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data()); f.failUnprotectAt = failAt;
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
+            CHECK(!r.ok); CHECK_EQ(r.written, 0); CHECK(mm == m); CHECK(f.Restored()); CHECK(f.NoneTwice()); CHECK_EQ(f.flushes, 0);
+            CHECK_EQ(r.failedPage, failAt == 0 ? (int64_t)0x1000 : (int64_t)0x5000);
+            CHECK_EQ(r.failedSite, failAt == 0 ? 0 : 1);   // the first written site in plan order with a byte on that page
+            CHECK_EQ(f.reprotectCalls, failAt);            // the pages already changed are restored, nothing else
+        }
+        {   // a restore failure is counted per page, not per site (three sites, two pages)
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data()); f.failEveryReprotect = true;
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
+            CHECK(r.ok); CHECK_EQ(r.written, 3); CHECK(mm == want); CHECK_EQ(r.reprotectFailures, 2);
+            std::vector<uint8_t> m2 = m;
+            tk::PageMem h(b, m2.data()); h.failReprotectAt = 1;
+            const WriteResult r2 = WritePlanAtomic(m2.data(), pl, x.data(), h);
+            CHECK(r2.ok); CHECK_EQ(r2.reprotectFailures, 1); CHECK_EQ(h.Changed(), 1);
+            CHECK(r2.pages.size() == 2 && !ProtectionRestored(r2.pages[1].recorded, r2.pages[1].after));   // the readback sees it
+        }
+        {   // the readback: a page a "successful" restore left changed is reported; Query unknown reports nothing
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data()); f.leaveChanged = { 0x5000 };
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
+            CHECK(r.ok); CHECK_EQ(r.reprotectFailures, 0); CHECK_EQ(r.pages.size(), (size_t)2);
+            if (r.pages.size() == 2) {
+                CHECK(ProtectionRestored(r.pages[0].recorded, r.pages[0].after));
+                CHECK(r.pages[1].known); CHECK_EQ(r.pages[1].after, 0x40u); CHECK(!ProtectionRestored(r.pages[1].recorded, r.pages[1].after));
+            }
+            std::vector<uint8_t> m2 = m; tk::PageMem g(b, m2.data()); g.queryKnown = false;
+            const WriteResult r2 = WritePlanAtomic(m2.data(), pl, x.data(), g);
+            CHECK(r2.ok); CHECK(g.Restored()); for (const PageProt& q : r2.pages) CHECK(!q.known);
+        }
+        for (uint32_t bad : { 0x1800u, 0x1001u, 0x3000u, 0xFFFFFFFFu }) {   // a page size that is not a power of two: refused, no call, nothing written
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data()); f.reportedPage = bad;
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
+            CHECK(!r.ok); CHECK_EQ(r.written, 0); CHECK_EQ(f.unprotectCalls, 0); CHECK_EQ(f.reprotectCalls, 0); CHECK(mm == m);
+        }
+        {   PatchPlan refused = pl; refused.verdict = PlanVerdict::Refuse;   // a refused plan: no call at all
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data());
+            CHECK(!WritePlanAtomic(mm.data(), refused, x.data(), f).ok); CHECK_EQ(f.unprotectCalls + f.reprotectCalls + f.flushes, 0); CHECK(mm == m);
         }
     }
     return tk::Done("test_patch_engine");

@@ -145,8 +145,9 @@ inline wsp::ImageView MappedView(const std::vector<uint8_t>& m, wsp::PeInfo& pe)
 // VirtualProtect with page semantics (W33, decision 5) over a mapped test image, for WritePlanAtomic. One protection per page of the image,
 // from the section characteristics: headers 0x02, exec+read 0x20, exec+read+write 0x40, read+write 0x04, read 0x02. Unprotect answers the
 // protection of the FIRST page of the range as `old` (as VirtualProtect does) and makes every page of the range 0x40; Reprotect sets every
-// page of the range. It fails Unprotect or Reprotect call number failUnprotectAt / failReprotectAt (0-based; failEveryReprotect fails them
-// all), counts Unprotects per page and the flushes. The invariant every writer test checks: Restored() (every page at its initial
+// page of the range; Query reads a page (queryKnown = false: unknown). It fails Unprotect or Reprotect call number failUnprotectAt /
+// failReprotectAt (0-based; failEveryReprotect fails them all), can report another page size (reportedPage) and leave chosen pages
+// changed by a Reprotect that succeeds (leaveChanged: what only the readback sees), and counts Unprotects per page and the flushes. The invariant every writer test checks: Restored() (every page at its initial
 // protection) and NoneTwice() (no page made writable twice).
 struct PageMem : wsp::MemOps {
     const uint8_t* base;
@@ -154,7 +155,9 @@ struct PageMem : wsp::MemOps {
     std::vector<uint32_t> prot, initial;
     std::vector<int> unprotects;
     int failUnprotectAt = -1, failReprotectAt = -1, unprotectCalls = 0, reprotectCalls = 0, flushes = 0;
-    bool failEveryReprotect = false;
+    bool failEveryReprotect = false, queryKnown = true;
+    uint32_t reportedPage = 0;          // 0: the mock's own page size
+    std::vector<uint32_t> leaveChanged; // page RVAs a successful Reprotect leaves as they are
     static uint32_t Prot(uint32_t c) {
         const bool x = c & 0x20000000u, w = c & 0x80000000u, r = c & 0x40000000u;
         return x ? (w ? 0x40u : 0x20u) : w ? 0x04u : r ? 0x02u : 0x01u;
@@ -179,10 +182,17 @@ struct PageMem : wsp::MemOps {
     bool Reprotect(uint8_t* p, size_t n, uint32_t old) override {
         size_t a, b;
         if (reprotectCalls++ == failReprotectAt || failEveryReprotect || !Range(p, n, a, b)) return false;
-        for (size_t i = a; i <= b; ++i) prot[i] = old;
+        for (size_t i = a; i <= b; ++i)
+            if (std::find(leaveChanged.begin(), leaveChanged.end(), (uint32_t)(i * page)) == leaveChanged.end()) prot[i] = old;
         return true;
     }
     void Flush(uint8_t*, size_t) override { ++flushes; }
+    uint32_t PageSize() const override { return reportedPage ? reportedPage : page; }
+    bool Query(uint8_t* p, uint32_t& out) override {
+        size_t a, b;
+        if (!queryKnown || !Range(p, 1, a, b)) return false;
+        out = prot[a]; return true;
+    }
     bool Restored() const {
         bool ok = true;
         for (size_t i = 0; i < prot.size(); ++i)
