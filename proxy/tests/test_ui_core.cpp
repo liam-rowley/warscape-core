@@ -179,6 +179,10 @@ int main(int argc, char** argv) {
         const size_t lockOpen = host.rfind("Lock l;", dec);
         CHECK(lockOpen != std::string::npos && lockOpen > wp);
     }
+    {   // W34 (C9): the three system-key messages, and their neighbours are not
+        for (uint32_t m : { 0x0104u, 0x0105u, 0x0106u }) CHECK(UiIsSystemKey(m));
+        for (uint32_t m : { 0x0000u, 0x0100u, 0x0101u, 0x0102u, 0x0103u, 0x0107u, 0x0108u }) CHECK(!UiIsSystemKey(m));   // 0x100 WM_KEYDOWN, 0x101 WM_KEYUP, 0x102 WM_CHAR
+    }
     {   // W34 source lint (C9): a system key never meets UiDecide: WndProc hands it to the engine first, the gesture stage still told, and no case maps it to a Key
         const std::string host = tk::ReadFile("core/ui_host.cpp");
         const size_t np = std::string::npos, wp = host.find("LRESULT CALLBACK WndProc("), sys = host.find("if (UiIsSystemKey(msg)) {", wp), sw = host.find("switch (msg) {", wp), dec = host.find("r = UiDecide(", wp);

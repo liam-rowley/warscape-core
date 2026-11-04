@@ -384,7 +384,7 @@ struct CtlRequest {
     std::vector<std::string> scenes;   // waitfor
     std::string luaArgs;       // lua: the text after " -- ", read by the chunk as wsp.dev_config("lua_args") (J4)
 };
-inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], ui show|hide|reload|scale|click|wheel|dump|state ..., gesture press|move|release|cancel|plan|info ..., peek <site>[+|-<off>] [*[+|-<off>] ...] <len>, exit"; }
+inline const char* CtlVerbs() { return "ping, state, log <text>, lua <file under the lua or ctl folder> [timeout_s] [-- args], perf <seconds>, waitfor <scene>[|<scene>] [timeout_s], autostart <target> [timeout_s], reset <target> [timeout_s], console <line>|status|on|off, capture <name> [frames], ui show|hide|reload|scale|click|wheel|dump|state ..., gesture press|move|release|cancel|plan|info ..., peek <site>[+|-<off>] [*[+|-<off>] ...] <len>, exit"; }
 inline double CtlDefaultTimeout(const std::string& verb) {
     return verb == "lua" || verb == "console" ? 30 : verb == "perf" ? 70 : verb == "capture" ? 60 : verb == "ui" || verb == "gesture" ? 30 : verb == "waitfor" ? 180 : (verb == "autostart" || verb == "reset") ? 240 : 10;
 }
@@ -398,6 +398,98 @@ inline bool ParseTrailingTimeout(std::string& rest, double& t) {   // "x y 30" -
     t = atof(tail.c_str());
     rest = TrimS2(rest.substr(0, sp));
     return true;
+}
+
+// ---- which files `lua` may run (W34, C8) ----------------------------------------------------------------------------------------
+// A chunk runs with the game's rights, so the verb reads only the game's Lua folder and the ctl folder, both known paths (the harness
+// writes its chunks into the ctl folder). Pure: the caller (dev.cpp Execute) has the roots, ParseCtl stays free of config. A path has one
+// spelling to compare: '/' as '\\', no `\\?\` prefix, no `.` or empty segment, ASCII case folded. Anything that could mean another file
+// than it spells is refused rather than resolved: a `..` segment, a segment ending in a dot or a space (Windows drops those), `:` after
+// the drive letter (an alternate stream, or `C:x` on the drive's current folder), a rooted path with no drive, UNC and device paths, a
+// reserved device name, an embedded NUL. Links are not followed: a junction under a root is the owner's to make.
+inline bool LuaPathReservedName(std::string seg) {
+    seg = seg.substr(0, seg.find('.'));   // CON and CON.lua are the same device
+    if (seg == "con" || seg == "prn" || seg == "aux" || seg == "nul") return true;
+    return seg.size() == 4 && (seg.compare(0, 3, "com") == 0 || seg.compare(0, 3, "lpt") == 0) && seg[3] >= '0' && seg[3] <= '9';
+}
+// `in` in its one spelling, lower case, resolved against `base` (already normal, ending in '\\') when relative; "" = refused, and `why` says so.
+inline std::string LuaPathNormal(const std::string& in, const std::string& base, std::string& why) {
+    if (in.empty()) { why = "empty"; return ""; }
+    if (in.find('\0') != std::string::npos) { why = "a NUL in the path"; return ""; }
+    std::string p = in;
+    for (char& c : p) { if (c == '/') c = '\\'; else if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a'); }
+    const bool extended = p.rfind("\\\\?\\", 0) == 0;
+    if (extended) p = p.substr(4);
+    if (p.rfind("\\\\", 0) == 0) { why = "a UNC or device path"; return ""; }
+    const bool drive = p.size() >= 2 && p[0] >= 'a' && p[0] <= 'z' && p[1] == ':';
+    if (extended && !drive) { why = "a UNC or device path"; return ""; }
+    if (drive && (p.size() < 3 || p[2] != '\\')) { why = "a drive with no root"; return ""; }
+    if (!drive && p[0] == '\\') { why = "a rooted path with no drive"; return ""; }
+    if (p.find(':', drive ? 2 : 0) != std::string::npos) { why = "a ':' after the drive (an alternate data stream)"; return ""; }
+    std::string out = drive ? p.substr(0, 2) + "\\" : base;
+    if (!drive && base.empty()) { why = "no game folder"; return ""; }
+    size_t pos = drive ? 3 : 0;
+    while (pos <= p.size()) {
+        size_t e = p.find('\\', pos); if (e == std::string::npos) e = p.size();
+        const std::string seg = p.substr(pos, e - pos);
+        pos = e + 1;
+        if (seg.empty() || seg == ".") continue;
+        if (seg.back() == '.' || seg.back() == ' ') { why = "a .. segment, or one ending in a dot or a space"; return ""; }
+        if (LuaPathReservedName(seg)) { why = "a device name"; return ""; }
+        out += seg + "\\";
+    }
+    out.pop_back();   // a file, no last '\\'; a root adds its own
+    return out;
+}
+inline bool LuaPathAllowed(const std::string& path, const std::string& gameDir, const std::string& luaDir, const std::string& ctlDir, std::string& why) {
+    std::string detail, ignored;
+    std::string game = gameDir.empty() ? "" : LuaPathNormal(gameDir, "", ignored);
+    if (!game.empty()) game += '\\';   // a game folder that does not normalise stays empty: nothing relative resolves
+    const std::string p = LuaPathNormal(path, game, detail);
+    auto under = [&](const std::string& rootIn) {   // an empty root allows nothing: never the game folder itself
+        const std::string root = rootIn.empty() ? "" : LuaPathNormal(rootIn, game, ignored);
+        return !root.empty() && p.size() > root.size() + 1 && p.compare(0, root.size(), root) == 0 && p[root.size()] == '\\';
+    };
+    if (!p.empty() && (under(luaDir) || under(ctlDir))) { why.clear(); return true; }
+    why = "lua: " + path + " is outside the lua folder " + luaDir + " and the ctl folder";
+    if (!detail.empty()) why += " (" + detail + ")";
+    return false;
+}
+
+// ---- rotation of the ctl folder (W34, C8) -----------------------------------------------------------------------------------------
+// `.cmd.taken` files and `_ids.txt` grew for ever. At ctl start and every kCtlRotateEvery handled requests the disk keeps the newest
+// kCtlKeepTaken taken files and, once `_ids.txt` holds more than kCtlTrimIdsOver ids, its last kCtlKeepIds. Constants, not keys: a rotating
+// folder is not a feature a game tunes. An id stays unusable for the whole launch (s_ids keeps every id in memory) and while its `.done`
+// exists (never deleted: a driver may be reading one). An id older than the kept window can come back in a later launch only.
+constexpr size_t kCtlKeepTaken = 200, kCtlKeepIds = 4096, kCtlTrimIdsOver = 8192, kCtlRotateEvery = 500;
+struct CtlFile { std::wstring name; uint64_t writeTime; };
+// The names to delete: all but the newest `keepNewest`, by write time, a later name counting as newer in a tie. Oldest last.
+inline std::vector<std::wstring> RotatePlan(std::vector<CtlFile> files, size_t keepNewest) {
+    std::sort(files.begin(), files.end(), [](const CtlFile& a, const CtlFile& b) { return a.writeTime != b.writeTime ? a.writeTime > b.writeTime : a.name > b.name; });
+    std::vector<std::wstring> del;
+    for (size_t i = keepNewest; i < files.size(); ++i) del.push_back(files[i].name);
+    return del;
+}
+inline std::vector<std::string> IdLines(const std::string& text) {
+    std::vector<std::string> v; size_t p = 0;
+    while (p < text.size()) {
+        size_t e = text.find('\n', p); if (e == std::string::npos) e = text.size();
+        std::string s = text.substr(p, e - p);
+        if (!s.empty() && s.back() == '\r') s.pop_back();   // the file is CRLF; TrimS2 keeps a '\r'
+        s = TrimS2(s);
+        if (!s.empty()) v.push_back(s);
+        p = e + 1;
+    }
+    return v;
+}
+inline size_t CountIds(const std::string& text) { return IdLines(text).size(); }
+// `text` with only its last `keepLast` ids, whole lines, CRLF; unchanged when it holds no more than that.
+inline std::string TrimIds(const std::string& text, size_t keepLast) {
+    const std::vector<std::string> v = IdLines(text);
+    if (v.size() <= keepLast) return text;
+    std::string o;
+    for (size_t i = v.size() - keepLast; i < v.size(); ++i) o += v[i] + "\r\n";
+    return o;
 }
 
 inline CtlRequest ParseCtl(const std::string& lineIn) {
@@ -426,7 +518,7 @@ inline CtlRequest ParseCtl(const std::string& lineIn) {
         if (dd != std::string::npos) { r.luaArgs = TrimS2(r.arg.substr(dd + 4)); r.arg = TrimS2(r.arg.substr(0, dd)); }
         else if (r.arg.size() >= 3 && r.arg.compare(r.arg.size() - 3, 3, " --") == 0) r.arg = TrimS2(r.arg.substr(0, r.arg.size() - 3));   // empty args (J43)
         ParseTrailingTimeout(r.arg, r.timeoutS);
-        if (r.arg.empty()) r.error = "lua needs a file (relative to the game folder or absolute)";
+        if (r.arg.empty()) r.error = "lua needs a file (under the lua folder or the ctl folder)";
         else if (r.arg.find('"') != std::string::npos || r.arg.find('\n') != std::string::npos) r.error = "bad file name";
         return r;
     }

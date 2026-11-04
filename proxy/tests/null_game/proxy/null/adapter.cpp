@@ -24,6 +24,8 @@ int NullCommit(const GestureOrderOut*, size_t n, std::string& why) { why = "the 
 const GestureAdapter kGesture = { NullScene, NullCamera, NullGround, NullSelection, nullptr, NullCommit, 6, 3.0, 1, 3, 0.0, 0.0, 1 };
 }
 
+// W34 (C6): positional because the DLL builds as -std=c++17 and the designated form is C++20; the size assert in adapter.h catches a shifted
+// field. A new GameAdapter field goes at the end, with a default (docs/CONSUMING.md).
 const GameAdapter& Adapter() {
     static const GameAdapter a = { gen::kGameName, gen::kConfigFile, gen::kModDir, gen::kInstanceMutex, gen::kIdentity,
                                    gen::kSites, gen::kSiteCount, gen::kKeys, gen::kKeyCount, &kDev, nullptr, nullptr, nullptr, &kGesture };
