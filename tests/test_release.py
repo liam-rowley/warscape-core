@@ -73,6 +73,12 @@ class Plan(unittest.TestCase):
         p = self.plan(rows(ROW('W29')), version='0.31.0', semver_from=0)   # rule off: every row is legacy
         self.assertEqual(p['action'], 'tag')
 
+    def test_version_above_the_tag_with_no_rows_is_refused(self):
+        # review round 1: a release/ branch an agent opens by hand (VERSION one step up, no rows) must not get tagged
+        p = self.plan({}, version='0.31.0')
+        self.assertEqual(p['action'], 'error')
+        self.assertIn('no job row', p['reasons'][-1])
+
     def test_tag_after_the_release_merge_and_the_rederivation_refusal(self):
         r = rows(ROW('W40', sv='minor'))
         self.assertEqual(self.plan(r, version='0.31.0')['action'], 'tag')

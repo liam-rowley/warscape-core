@@ -135,6 +135,8 @@ def plan(last_tag, version, tag_rows, head_rows, changed=(), verbs_tag=None, ver
     new = [r for r in rows if not legacy(r, semver_from)]
     old = [r for r in rows if legacy(r, semver_from)]
     if V > T:
+        if not rows:   # no row explains the new VERSION: a hand-made release/ branch must not choose a version
+            return err(f'VERSION {fmt(V)} on main is above {last_tag or "no tag"} but no job row became done since: nothing to release (the manual dispatch can cut a version)')
         if not new:
             return {**out, 'action': 'tag', 'reasons': reasons + [f'VERSION {fmt(V)} was bumped by hand above {last_tag or "no tag"}: tagged as it is']}
         if V == computed or (old and V > computed):
