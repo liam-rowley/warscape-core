@@ -54,14 +54,19 @@ which calls `run_check` here):
     error, or a child that gives no verdict (any other exit, a crash, a timeout) is a refusal that names the fix;
   - a base whose core has no `JUDGE_API` line predates W23: it is judged in-process with this checkout's code and configuration, with a note.
 `JUDGE_API` versions the child's arguments; a later core may only add optional ones, passed when the base's number allows them.
+
+`scan` (`wsc policy --scan`, W40) re-measures the rules over history, so a warning's move to an error rests on a number: W27's method, every merged
+job/ pull request judged at its head against its merge commit's first parent with this checkout's rules, gate modules off and rule F on.
 """
+import copy
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 from . import gatemods
-from .repo import DEFAULTS, git_env, matches
+from .repo import DEFAULTS, Ctx, git_env, matches
 
 # The judge's interface (the `--judge` child's arguments), read from a base core's text by warscape/policy_base.py: keep it on a line of its own.
 JUDGE_API = 1
@@ -596,3 +601,120 @@ def rule_input_note(config, changed, base_ref):
         return ''
     shown = ', '.join(hit[:8]) + (f' and {len(hit) - 8} more' if len(hit) > 8 else '')
     return f"policy: note: this branch changes {shown}: they judge pull requests after this one merges; this one was judged with {base_ref}'s"
+
+
+# What marks a rule's line, first match wins: E before D, its line says "cites" too. A line of no rule (the branch kind, the row) is not counted.
+SCAN_MARKS = (('A', 'says merge, but its own commits change files'), ('B', 'a fresh session per round'), ('C', 'review rounds are append only'),
+              ('C', 'only its own author edits'), ('E', 'merge verdict on a large diff'), ('D', ' cites '), ('F', 'must name the brief that required it'))
+SCAN_RULES = 'ABCDEF'
+
+
+def scan_rule(line):
+    """The rule letter of a policy line, or None."""
+    return next((r for r, mark in SCAN_MARKS if mark in line), None)
+
+
+def scan_config(text):
+    """A config for `scan` from a repo's wsc.toml text: the defaults plus the keys the rules read, gate modules off and rule F on. Not load_config:
+    a repo pinned to an older core has keys this core refuses, and the scan judges its history, not its setup."""
+    raw, cfg = tomllib.loads(text), copy.deepcopy(DEFAULTS)
+    jobs = raw.get('jobs', {})
+    cfg['jobs'].update({k: jobs[k] for k in ('id_prefix', 'dir', 'semver_from') if k in jobs})
+    cfg['jobs']['text'].update(jobs.get('text', {}))
+    cfg['policy'].update({k: v for k, v in raw.get('policy', {}).items() if k in cfg['policy']})
+    cfg['policy']['decisions_cite_job'] = True
+    cfg['registries_dir'] = raw.get('registries_dir', cfg['registries_dir'])
+    cfg['registries'] = raw.get('registries', {})
+    cfg['gates']['dirs'] = []
+    return cfg
+
+
+def merged_prs(repo, run=subprocess.run):
+    """The merged pull requests of job/ branches, from `gh` run in the clone. Raises Refusal."""
+    try:
+        p = run(['gh', 'pr', 'list', '--state', 'merged', '--search', 'head:job/', '--limit', '1000', '--json', 'number,headRefName,headRefOid,mergeCommit,mergedAt'],
+                cwd=repo, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise Refusal(f'gh could not list the merged pull requests: {e}') from None
+    if p.returncode:
+        raise Refusal(f'gh could not list the merged pull requests: {p.stderr.strip()}')
+    return json.loads(p.stdout)
+
+
+def scan_targets(prs, after=None):
+    """The merged job/ pull requests to judge, oldest first; with `after` (a set of commit shas), those whose merge commit is in it."""
+    got = [p for p in prs if p['headRefName'].startswith('job/') and p.get('mergeCommit')]
+    return sorted((p for p in got if after is None or p['mergeCommit']['oid'] in after), key=lambda p: p['mergedAt'])
+
+
+def scan_label(p):
+    return f"{p['headRefName']} (#{p['number']}, {p['mergedAt'][:10]})"
+
+
+def scan_tally(results, only=None):
+    """(one line per branch a rule hit, {rule: branches}) of `results` ([(pull request, policy lines)]); `only`: that rule alone."""
+    rules = only or SCAN_RULES
+    counts, lines = dict.fromkeys(rules, 0), []
+    for p, got in results:
+        by = {}
+        for x in got:
+            r = scan_rule(x)
+            if r in counts:
+                by.setdefault(r, []).append(x)
+        for r in by:
+            counts[r] += 1
+        if by:
+            lines.append(f'{scan_label(p)}: ' + ' | '.join(f"{r}: {v[0]}{f' (and {len(v) - 1} more)' if len(v) > 1 else ''}" for r, v in sorted(by.items())))
+    return lines, counts
+
+
+def scan_shas(p, repo):
+    """(base, head) of a merged pull request: its merge commit's first parent and its head, fetching a head whose branch was deleted (objects only:
+    no ref and no FETCH_HEAD change in the clone); None when either cannot be read."""
+    head, sha = None, p['headRefOid']
+    for fetch in (False, True):
+        if fetch:
+            subprocess.run(['git', 'fetch', '--quiet', '--no-write-fetch-head', 'origin', f"refs/pull/{p['number']}/head"], cwd=repo, env=git_env(), capture_output=True)
+        head = resolve(sha, repo)
+        if head:
+            break
+    base = resolve(f"{p['mergeCommit']['oid']}^1", repo)
+    return (base, head) if base and head else None
+
+
+def scan(root, base='origin/main', since=None, rule=None, run=subprocess.run, out=print):
+    """`wsc policy --scan`: print one line per merged job/ branch a rule refuses or warns about, then the branches per rule. Reads `root`'s clone; its
+    rules are this checkout's and its configuration `base`'s wsc.toml. Exit 1 when it could not run or a branch was not judged: a count that left
+    a branch out is not the number a decision needs."""
+    repo = str(Path(root).resolve())
+    try:
+        text = show(base, 'wsc.toml', repo)
+        if text is None:
+            raise Refusal(f'{base} has no wsc.toml in {repo}: `git fetch` first')
+        after = None
+        if since:
+            s = resolve(since, repo)
+            if not s:
+                raise Refusal(f'--since {since} does not resolve in {repo}: `git fetch` first')
+            after = set(git('rev-list', f'{s}..{base}', cwd=repo).split())
+        ctx, targets = Ctx(root=Path(repo), config=scan_config(text)), scan_targets(merged_prs(repo, run), after)
+    except (Refusal, ValueError) as e:   # ValueError: gh's JSON or the TOML
+        out(f'policy: scan: {e}')
+        return 1
+    results, lost = [], 0
+    for p in targets:
+        shas = scan_shas(p, repo)
+        try:
+            if not shas:
+                raise Refusal('its head or merge commit is not in this clone and could not be fetched')
+            warns = []
+            errs, _ = run_check(ctx, p['headRefName'], shas[0], shas[1], repo, base_ref=base, warnings=warns)
+            results.append((p, errs + warns))
+        except (Refusal, subprocess.CalledProcessError, ValueError, KeyError) as e:
+            lost += 1
+            out(f'policy: scan: {scan_label(p)}: not judged: {e}')
+    lines, counts = scan_tally(results, rule)
+    for x in lines:
+        out(f'policy: scan: {x}')
+    out(f"policy: scan: {len(results)} branches judged, {lost} not judged; {', '.join(f'{r} {n}' for r, n in counts.items())} (branches per rule)")
+    return 1 if lost else 0
