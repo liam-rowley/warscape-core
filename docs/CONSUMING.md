@@ -275,6 +275,7 @@ Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap): `[gates] sk
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher
 kit, the save tools), how the tools find a game's adapters, the UI pin file, and the contract doc of each proxy feature.
+A game that ships DXVK adds the key row `proxy.dxvk_wndproc_fix` (bool, default 1, release value 1, owner `proxy`) to its `config_keys` and runs `gen_tables.py`; without the row the build's host tests fail and name it ([0.38.0](UPGRADING.md)).
 
 ## The game lock is the session's (0.29.0, core W10, C26)
 The holder of `game.lock` is the pair (owner, session); the default owner is the session id, so two sessions can no longer share a lock by a shared name.
