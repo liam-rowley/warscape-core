@@ -129,6 +129,28 @@ int main(int argc, char** argv) {
         CHECK(MakePatchPlan(v, 0, s.data(), s.size(), on).verdict == PlanVerdict::Refuse);
         CHECK(MakePatchPlan(v, 0, s.data(), 0, on).verdict == PlanVerdict::NothingToDo);
     }
+    {   // W34: the smoke's own row as launch 11 writes it (a game without the fixture row skips this): every generated site in place, only
+        // null.smoke_patch on. The writer changes exactly what the pure apply does, on one page, and the page comes back
+        size_t at = gen::kSiteCount;
+        for (size_t i = 0; i < gen::kSiteCount; ++i) if (!strcmp(gen::kSites[i].id, "null.smoke_patch")) at = i;
+        if (at < gen::kSiteCount) {
+            tk::Image b = tk::GameLike();
+            std::unique_ptr<bool[]> en(new bool[gen::kSiteCount]());
+            en[at] = true;
+            for (size_t i = 0; i < gen::kSiteCount; ++i) {
+                const SiteDef& d = gen::kSites[i];
+                b.Put(d.rva, std::vector<uint8_t>(d.anchor, d.anchor + d.anchorLen));
+                b.Put(d.rva + d.anchorLen, std::vector<uint8_t>(d.stock, d.stock + d.len));
+            }
+            std::vector<uint8_t> m = b.Mapped(0x400000); PeInfo pe; ImageView v = tk::MappedView(m, pe);
+            const PatchPlan pl = MakePatchPlan(v, 0, gen::kSites, gen::kSiteCount, en.get());
+            CHECK(pl.verdict == PlanVerdict::Apply); CHECK_EQ(pl.nBad, 0); CHECK_EQ(pl.nWrite, 1); CHECK_EQ(pl.bytesToChange, 1);
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data());
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, gen::kSites, f);
+            CHECK(r.ok); CHECK_EQ(r.written, 1); CHECK_EQ(r.pages.size(), (size_t)1); CHECK(f.Restored());
+            std::vector<uint8_t> want = m; CHECK_EQ(ApplyPlanToBuffer(want.data(), pl, gen::kSites), 1); CHECK(mm == want);
+        }
+    }
     {   // the generated table (from the registry) is well formed and gives a clean plan on a game-like image
         std::vector<uint8_t> m = im.Mapped(0x400000); PeInfo pe; ImageView v = tk::MappedView(m, pe);
         PatchPlan pl = MakePatchPlan(v, 0, gen::kSites, gen::kSiteCount, nullptr);

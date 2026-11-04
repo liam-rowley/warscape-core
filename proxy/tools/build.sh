@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # purpose: build the proxy d3d9.dll (mingw-w64 i686, the release route) and/or build and run the host tests (g++)
-# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; tests: the core's proxy/tests/test_*.cpp, then the game's own (layout.py proxy-tests, W16); --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31), the outer of the game root and the core mounted; smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
+# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; tests: the core's proxy/tests/test_*.cpp, then the game's own (layout.py proxy-tests, W16); --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31), the outer of the game root and the core mounted; smoke: run the built DLL under wine with a stand-in exe, and for the null games a second build of it that carries their sites, so a patch is really written; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
 # when: after any change to the proxy sources or the adapter (CI runs `all` on every push); on the PC always with --docker; the DLL in <game repo>/build/proxy/<adapter name>/d3d9.dll is what proxy/tools/pc_deploy.py kits
 # not-a-verb: a compiler driver for C++ sources, not a registry operation; CI and agents call it directly
 set -euo pipefail
@@ -256,6 +256,16 @@ if [[ "$WHAT" == smoke ]]; then
   EXE="$(ident exe_name)"; MOD="$(ident mod_dir)"; INI="$(ident config_file)"
   G="$OUT/smoke/game"; rm -rf "$OUT/smoke"; mkdir -p "$G"
   "$CXX" -O1 -static -o "$G/$EXE" "$OWN/proxy/tests/smoke_host.cpp"
+  # W34 (C5): a game with the fixture row null.smoke_patch (the null games) also gets the second build of the host, which carries its sites at
+  # their RVAs. gen_tables.py --exe proves that before the first launch; the host is not the pinned build, so only the bytes decide.
+  STANDIN=""; LAUNCHES=10
+  if grep -q '"null.smoke_patch"' "$ADIR/generated/tables.h"; then
+    STANDIN="$OUT/smoke/standin.exe"; LAUNCHES=11
+    "$CXX" -O1 -static -DWSP_SMOKE_SITES -o "$STANDIN" "$OWN/proxy/tests/smoke_host.cpp"
+    python3 "$OWN/proxy/tools/gen_tables.py" --exe "$STANDIN" --allow-pin-mismatch > "$OUT/smoke/standin_exe.txt" || { echo "build.sh smoke: the stand-in does not carry its sites"; cat "$OUT/smoke/standin_exe.txt"; exit 1; }
+    grep -q '^MATCH null.smoke_patch 0x1180' "$OUT/smoke/standin_exe.txt" || { echo "build.sh smoke: gen_tables.py --exe did not check null.smoke_patch"; cat "$OUT/smoke/standin_exe.txt"; exit 1; }
+    tr -d '\r' < "$OUT/smoke/standin_exe.txt" | grep -E '^(MATCH|gen_tables: --exe:)' | sed 's/^/build.sh smoke: /'
+  fi
   cp "$OUT/$ADAPTER/d3d9.dll" "$G/"
   run() { (cd "$G" && WINEDEBUG=-all WINEDLLOVERRIDES="d3d9=n,b;winedbg.exe=d" timeout 120 wine "$EXE" "$@") ; }
   check() { grep -q "$1" "$G/$MOD/logs/proxy.log" || { echo "build.sh smoke: '$1' not in the log"; cat "$G/$MOD/logs/proxy.log"; exit 1; }; }
@@ -352,6 +362,32 @@ if [[ "$WHAT" == smoke ]]; then
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nskip_intro=1\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
   run; check "threads at the first Direct3DCreate9: state=0 ctl=0"; check "process detach (FreeLibrary)"
   nothread "skip_intro and dev.file_rules"
-  echo "build.sh smoke: passed (10 launches under wine, 2 dumps)"
+  # 11) a real process (W34, C5): the stand-in carries every site, so the patch engine accepts the table and writes null.smoke_patch into a code
+  #     page; the protections come back, the running code is the patched code, peek reads the bytes in memory, ctl answers, a `lua` outside
+  #     its folders is refused before the bridge. The host exits without FreeLibrary while the ctl thread runs, as in launch 8.
+  if [[ -n "$STANDIN" ]]; then
+    rm -rf "$G/ctl"; cp "$STANDIN" "$G/$EXE"
+    printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\nstate_json=0\r\n[null]\r\nsmoke_patch=1\r\n' > "$G/$INI"
+    run wait 'ctl\peek2.done' > "$OUT/smoke/standin_run.txt" 2>&1 &
+    RUN=$!
+    for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
+    ask() { printf '%s\n' "$2" > "$G/ctl/$1.tmp"; mv "$G/ctl/$1.tmp" "$G/ctl/$1.cmd"; for _ in $(seq 1 150); do [[ -f "$G/ctl/$1.done" ]] && return; sleep 0.2; done; }
+    ask ping1 'ping'; ask lua1 'lua C:\outside\x.lua 5'; ask peek1 'peek null.smoke_patch 4'; ask peek2 'peek null.dummy_hook 4'
+    wait "$RUN" || { echo "build.sh smoke: the stand-in launch failed"; cat "$OUT/smoke/standin_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+    check "patch_engine: apply - 3 sites: 3 ok, 0 bad, 1 to write (1 bytes), 0 already patched, 1 hooks verified"
+    check "patch_engine: wrote null.smoke_patch at "; check "patch_engine: protections restored on 1 page(s): 0x00001000="; check "patch_engine: 1 of 1 planned sites written"
+    if grep -q "left changed\|left writable" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: a page was left changed"; cat "$G/$MOD/logs/proxy.log"; exit 1; fi
+    check "ctl: ping1: ok"; check "ctl: lua1: refused: lua: C:.outside.x.lua is outside the lua folder"; check "ctl: peek1: ok"; check "ctl: peek2: ok"
+    grep -Eq 'ctl: (folder .* is owner-only|could not restrict .* \(error [0-9]+\): continuing)' "$G/$MOD/logs/proxy.log" || { echo "build.sh smoke: no ctl folder ACL line"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+    has() { grep -q "$2" "$1" || { echo "build.sh smoke: '$2' not in $1"; cat "$1"; cat "$G/$MOD/logs/proxy.log"; exit 1; }; }
+    has "$G/ctl/ping1.done" '"pong": true'; has "$G/ctl/lua1.done" '"status": "refused"'
+    has "$G/ctl/peek1.done" '"hex": "02 00 00 00"'; has "$G/ctl/peek2.done" '"hex": "55 8b ec 83"'
+    has "$OUT/smoke/standin_run.txt" 'smoke: patched code returned 2'
+    has "$OUT/smoke/standin_run.txt" 'smoke: page 0x00001000 protect 0x20 before 0x20'
+    grep -a 'patch_engine: \(apply\|wrote\|protections\)\|ctl: folder\|ctl: could not' "$G/$MOD/logs/proxy.log" | tr -d '\r' | sed 's/^.*patch_engine: /patch_engine: /; s/^.*ctl: /ctl: /; s/^/build.sh smoke: /'
+    tr -d '\r' < "$OUT/smoke/standin_run.txt" | grep '^smoke: \(page\|patched\)' | sed 's/^/build.sh smoke: /'
+    grep -ao '"hex": "[0-9a-f ]*"' "$G/ctl/peek1.done" "$G/ctl/peek2.done" | sed 's/^.*ctl.//; s/^/build.sh smoke: /'
+  else echo "build.sh smoke: this game has no null.smoke_patch row: no real-process launch"; fi
+  echo "build.sh smoke: passed ($LAUNCHES launches under wine, 2 dumps)"
   summary "- smoke: self_hash in proxy.log matches d3d9.dll ($SH_MS ms under wine)"
 fi
