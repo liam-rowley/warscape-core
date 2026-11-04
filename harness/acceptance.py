@@ -2,7 +2,7 @@
 """The acceptance gate: one pass proves the harness, the DLL and the control API hold; 20 in a row pass the phase 1 gate (J4, rules 28, 74, 79).
 
 purpose: run N acceptance passes in the background against the committed baseline file (rule 74), stop at the first failure with its evidence, and append one line per pass to the committed ledger; also the pure checks the policy gate reuses (consecutive passes for a build)
-usage: acceptance.py run --passes N --run RUN_ID [--owner O] [--baseline F] [--ledger F] | measure --run RUN_ID [--owner O] | check-baseline [--baseline F] | streak --build ID --watcher V [--ledger F]
+usage: acceptance.py run --passes N --run RUN_ID [--owner O] [--session S] [--baseline F] [--ledger F] | measure --run RUN_ID [--owner O] [--session S] | check-baseline [--baseline F] | streak --build ID --watcher V [--ledger F]
 when: after every change to proxy/ or harness/ (rule 79: a job branch that changes them needs 20 consecutive ledger passes on its final DLL and watcher build); `check-baseline` and the helpers run in the tests gate
 not-a-verb: orchestrates PC sessions through harness/core/ctl.py and job.sh (game-agnostic: the scenario list is the baseline's, the settings files and exe pin come from the adapter); a J12 core candidate
 
@@ -242,7 +242,7 @@ class PcEnv:
                 raise RuntimeError(f'acceptance: cannot take the game lock: {out.strip()}')
             self.locked = True
         else:
-            self.sh('touch')
+            self.sh('touch', self.owner)   # W10: touch refreshes only the holder's lock
 
     def release(self):
         """Release the lock and wait until the watcher has restored every profile (byte for byte) with the game closed."""
@@ -334,6 +334,15 @@ def run_problems(a, branch_of=None, has_pil=None, watcher_status=None):
     return out
 
 
+def who(a):
+    """W10 (H2): the lock owner is the session. --owner and --session default to the session id ($WSC_SESSION_ID, then the id Claude Code
+    exports); with none the run is refused and the message names the fix. False on a refusal."""
+    a.owner, a.session, why = load_ctl().resolve_identity(a.owner, a.session)
+    if why:
+        print(f'acceptance {a.cmd}: refused: {why}', file=sys.stderr)
+    return not why
+
+
 def cmd_run(a):
     baseline = load_baseline(a.baseline)   # refuses without a valid baseline (rule 74)
     ad = json.loads(Path(a.adapter).read_text(encoding='utf-8'))
@@ -345,6 +354,8 @@ def cmd_run(a):
     if bad:
         for b in bad:
             print(f'acceptance run: refused: {b}', file=sys.stderr)
+        return 2
+    if not who(a):
         return 2
     state = Path(json.loads(Path(a.adapter).read_text(encoding='utf-8'))['state_dir'])
     led = Path(a.ledger)
@@ -390,6 +401,8 @@ def cmd_measure(a):
     """Two passes over the adapter's acceptance order: pass 1 finds the poses (`cam read` = the engine's deployment view, then that view turned
     60 degrees) and takes the baseline shots; pass 2 sets the same pose and its shot difference sets the threshold. Writes baseline.json, the
     shots and poses.json (for the scenario rows); a person never writes them by hand."""
+    if not who(a):
+        return 2
     ad = json.loads(Path(a.adapter).read_text(encoding='utf-8'))
     order = ad['acceptance']['order']
     state = Path(ad['state_dir'])
@@ -469,11 +482,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description='acceptance gate')
     sub = ap.add_subparsers(dest='cmd', required=True)
     adapter = str(layout.harness_adapter(ROOT))
-    r = sub.add_parser('run'); r.add_argument('--passes', type=int, default=NEEDED); r.add_argument('--owner', default='claude-acceptance')
+    r = sub.add_parser('run'); r.add_argument('--passes', type=int, default=NEEDED); r.add_argument('--owner', default=None)
     r.add_argument('--baseline', default=str(BASELINE)); r.add_argument('--ledger', default=str(LEDGER)); r.add_argument('--run', required=True)
-    r.add_argument('--session', default='acceptance'); r.add_argument('--adapter', default=adapter); r.add_argument('--branch', default='')
-    m = sub.add_parser('measure'); m.add_argument('--run', required=True); m.add_argument('--owner', default='claude-acceptance')
-    m.add_argument('--session', default='acceptance'); m.add_argument('--adapter', default=adapter)
+    r.add_argument('--session', default=None); r.add_argument('--adapter', default=adapter); r.add_argument('--branch', default='')
+    m = sub.add_parser('measure'); m.add_argument('--run', required=True); m.add_argument('--owner', default=None)
+    m.add_argument('--session', default=None); m.add_argument('--adapter', default=adapter)
     c = sub.add_parser('check-baseline'); c.add_argument('--baseline', default=str(BASELINE))
     s = sub.add_parser('streak'); s.add_argument('--build', required=True); s.add_argument('--watcher', required=True); s.add_argument('--ledger', default=str(LEDGER))
     a = ap.parse_args(argv)

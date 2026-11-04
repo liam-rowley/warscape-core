@@ -512,7 +512,7 @@ class HarnessKit(unittest.TestCase):
 
 class SetWaitsForRestore(unittest.TestCase):
     """B39 (W10): `pc_deploy set` waits for, or refuses on, the watcher's pending profile restore (profiles/_active.json), because a restore
-    that runs after the set puts the old keys back (napoleon J9, run 20261101_j9pc)."""
+    that runs after the set puts the old keys back."""
 
     def setUp(self):
         use_fixture_game(self)
@@ -521,9 +521,7 @@ class SetWaitsForRestore(unittest.TestCase):
         self.game, self.state = t / 'game', t / 'state'
         self.game.mkdir()
         self.ini = self.game / 'nullgame.ini'
-        self.ini.write_bytes(b'[proxy]
-backend=dxvk
-')
+        self.ini.write_bytes(b'[proxy]\r\nbackend=dxvk\r\n')
         self.w = self.state / 'watcher'
         (self.w / 'profiles').mkdir(parents=True)
         (self.w / 'watcher.status').write_text(json.dumps({'processes': [], 'lock': {'owner': 'o1'}}), encoding='utf-8')

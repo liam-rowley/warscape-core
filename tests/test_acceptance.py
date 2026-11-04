@@ -186,7 +186,7 @@ class Identity(unittest.TestCase):
         b = Path(d) / 'b.json'
         b.write_text(json.dumps(baseline()))
         err = io.StringIO()
-        with mock.patch.dict(os.environ, env), mock.patch.object(acc, 'run_problems', return_value=[]), mock.patch.object(acc, 'PcEnv', pcenv), \
+        with mock.patch.dict(os.environ, dict(env, WSP_GAME_ROOT=str(NULL_GAME))), mock.patch.object(acc, 'ROOT', NULL_GAME), mock.patch.object(acc, 'run_problems', return_value=[]), mock.patch.object(acc, 'PcEnv', pcenv), \
                 contextlib.redirect_stderr(err):
             for k in ('WSC_SESSION_ID', 'CLAUDE_CODE_SESSION_ID'):
                 if k not in env:
@@ -217,7 +217,7 @@ class Identity(unittest.TestCase):
         import io
         import os
         err = io.StringIO()
-        with mock.patch.dict(os.environ), contextlib.redirect_stderr(err):
+        with mock.patch.dict(os.environ, {'WSP_GAME_ROOT': str(NULL_GAME)}), mock.patch.object(acc, 'ROOT', NULL_GAME), contextlib.redirect_stderr(err):
             for k in ('WSC_SESSION_ID', 'CLAUDE_CODE_SESSION_ID'):
                 os.environ.pop(k, None)
             self.assertEqual(acc.main(['measure', '--run', 't']), 2)

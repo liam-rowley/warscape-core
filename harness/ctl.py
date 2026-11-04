@@ -2,7 +2,7 @@
 """The control API: one call per verb, blocks until a checked result, always one JSON object (J4).
 
 purpose: (scene, shot, reset, perf, state and cam read ran on the PC in J44, cam, pause and speed in J43, order in J28) name a scenario and a camera pose and get a settled, checked answer back (scene, cam, shot, order, pause, speed, reset, perf, state), over the proxy's ctl channel (job.sh ctl) and the watcher's shot job; game-agnostic, everything game-specific comes from the adapter's `ctl` block and the scenarios registry
-usage: ctl.py [--owner O] [--adapter A] [--registry R] [--out DIR] [--no-pc] <verb> [args]   verbs: scene <id> [--deploy end] | cam <scenario:pose | x y z yaw pitch [fov] | read> | shot <name> | order list | <unit> move x z [facing] [width] [run] | pause on|off | speed <x> | reset [<id>] | perf <seconds> | state | key|click|wait (probe only)
+usage: ctl.py [--owner O] [--session S] [--adapter A] [--registry R] [--out DIR] [--no-pc] <verb> [args]   verbs: scene <id> [--deploy end] | cam <scenario:pose | x y z yaw pitch [fov] | read> | shot <name> | order list | <unit> move x z [facing] [width] [run] | pause on|off | speed <x> | reset [<id>] | perf <seconds> | state | key|click|wait (probe only)
 when: every time an agent needs a known game state or a frame (never type key taps or sleeps for it); the acceptance runner (acceptance.py) calls the same functions
 not-a-verb: a host-side client over harness/core/job.sh and the proxy's ctl verbs, not a registry operation; a J12 core candidate
 
@@ -89,6 +89,25 @@ def make_result(verb, status, reason='', start=None, check=None, settle=None, ev
 
 def exit_code(result):
     return {'ok': 0, 'failed': 1, 'refused': 2}.get(result['status'], 1)
+
+
+# ---- who holds the game lock (W10, H2: the lock owner is the session) ---------------------------------------------------------
+OWNER_RX = re.compile(r'^[a-z0-9][a-z0-9_-]{0,39}$')   # job.sh's one owner rule; the watcher compares owners exactly
+
+
+def resolve_identity(owner=None, session=None, env=None):
+    """(owner, session, problem). The session id is --session, else $WSC_SESSION_ID, else the id Claude Code exports to its Bash tool
+    ($CLAUDE_CODE_SESSION_ID); the owner is --owner, else the session id. An explicit --owner is the caller's own choice (two sessions
+    with the same name exclude each other only through the game lock's owner+session pair rule); it needs no session id (then the session is the owner)."""
+    env = os.environ if env is None else env
+    sid = (session or env.get('WSC_SESSION_ID') or env.get('CLAUDE_CODE_SESSION_ID') or '').strip().lower() or None
+    own = owner or sid
+    if not own:
+        return None, None, ('no session id for the game lock: pass --session <id> or set WSC_SESSION_ID (Claude Code exports CLAUDE_CODE_SESSION_ID '
+                            'to its Bash tool), or pass --owner <name> knowing that two sessions with that name exclude each other only through the pair rule')
+    if not OWNER_RX.match(own):
+        return None, None, f"owner '{own}' must match ^[a-z0-9][a-z0-9_-]{{0,39}}$ (lower case: the session id, or a job id like j18)"
+    return own, sid or own, None
 
 
 # ---- scenarios and poses ------------------------------------------------------------------------------------------------
@@ -971,7 +990,8 @@ def arrival_check(want, got, tol, before=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='control API: one checked JSON result per verb')
-    ap.add_argument('--owner', default='claude-ctl')
+    ap.add_argument('--owner', default=None, help='the game lock owner (default: the session id; the lock must be held by it, see job.sh lock)')
+    ap.add_argument('--session', default=None, help='the session id (default: $WSC_SESSION_ID, then $CLAUDE_CODE_SESSION_ID)')
     ap.add_argument('--adapter', default=None, help='the harness adapter (default: proxy/tools/layout.py harness-adapter)')
     ap.add_argument('--registry', default=str(ROOT / 'registries' / 'scenarios.jsonl'))
     ap.add_argument('--out', help='folder for shots (default <state>/ctl/shots)')
@@ -984,6 +1004,10 @@ def main(argv=None):
         return 2
     if a.verb not in VERBS:
         print(json.dumps(make_result(a.verb, 'refused', f'unknown verb; verbs: {", ".join(VERBS)}')))
+        return 2
+    a.owner, a.session, why = resolve_identity(a.owner, a.session)
+    if why:
+        print(json.dumps(make_result(a.verb, 'refused', why)))
         return 2
     a.adapter = a.adapter or str(layout.harness_adapter(ROOT))
     adapter = json.loads(Path(a.adapter).read_text(encoding='utf-8'))
