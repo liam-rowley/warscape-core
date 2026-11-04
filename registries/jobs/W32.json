@@ -1,0 +1,13 @@
+{
+  "id": "W32",
+  "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) R4 (core half), R9, automation 4. napoleon's reviews hold 135 Later items with no tracker, and several were overtaken. A later registry (text, source, trigger_paths), warned on by policy when a branch touches a trigger path. Brief open questions carry recommended:, 'default after: <date>' and an optional taste, risk or legal tag (those never default); jobs check lists the due ones, and a plan/ branch applies them as one dated decision line naming each. The status page gets a Waiting on Liam lane: due and tagged questions, decision rows marked for Liam's review, and what a game's view hook adds (napoleon: release values awaiting approval). LANES is at jobq.py:561-568. After W26 and W31 (jobq.py).",
+  "title": "Later items with trigger paths, open-question defaults, a Waiting on Liam lane",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "W26",
+    "W31"
+  ]
+}

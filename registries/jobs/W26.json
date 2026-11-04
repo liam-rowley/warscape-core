@@ -1,0 +1,12 @@
+{
+  "id": "W26",
+  "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) rule rows 'two sessions never build one job' and 'phase and needs_pc', the --auto red-CI item, automation 7, the PC worktree rows. jobs next in two terminals hands out the same job: a claim is 'push early' (jobq.py:984) and readiness reads the remote branch list (313). Claim atomically: jobs next first runs git push origin origin/main:refs/heads/job/<id> and moves on to the next job when that push is refused. jobs next orders by phase and skips needs_pc rows when the PC state folder is absent. The autopilot (auto_tick, jobq.py:899-934) defers a review or fix while the branch's CI is red or running (branch_checks, 414, only feeds the prompt today) and starts one needs_pc row at a time. The tick runs git worktree prune; wsc setup warns about registered worktrees whose folder is gone or whose branch is merged (125 on napoleon's PC clone, 47 on the core's) and about a .git above the repo root (one sits above every clone on the project PC). After W22 (jobq.py).",
+  "title": "Job claim and autopilot: atomic claim, phase and needs_pc, red CI, stale worktrees",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "W22"
+  ]
+}

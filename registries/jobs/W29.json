@@ -1,0 +1,13 @@
+{
+  "id": "W29",
+  "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) automation 1 and 2, the core_pin rule row; v0.11.0 and v0.12.0 never existed (two W jobs renumbered their VERSION bumps), every tag is lightweight, V0.1.0 is upper case, and v0.16.0 was tagged on a red proxy. Needs Liam's decision first (CLAUDE.md: tags are cut by Liam). A semver field on job rows (patch, minor, major or none; schema; checked by the brief rule) replaces editing VERSION on job branches. A workflow on push to main waits until every required check on that commit is green, computes the next version from the done rows since the last tag, opens release/vX.Y.Z (a new branch kind that may change VERSION only), auto-merges it and puts an annotated tag on the merge commit; a release concurrency group; it never moves an existing tag; a change under schemas/ or to the verb set forces at least minor. core_pin checks that a tag exists for main's VERSION. Before tagging, CI compiles each consumer adapter named in wsc.toml with -fsyntax-only against the candidate (it would have caught napoleon's missing GameAdapter gesture member, audit C2). A wsc core bump verb writes a consumer's bump commit: gitlink and [core] version together (B9) and colliding game verbs named. After W22 (a green main) and W23.",
+  "title": "Release tags by workflow: semver on rows, release branch, annotated tags on a green main",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "W22",
+    "W23"
+  ]
+}
