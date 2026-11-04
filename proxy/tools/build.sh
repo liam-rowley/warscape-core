@@ -217,27 +217,39 @@ if [[ "$WHAT" == smoke ]]; then
   printf '[proxy]\r\nbackend=system\r\nminidump=2\r\n' > "$G/$INI"
   run replace crash || true
   check "top-level filter at first Direct3DCreate9: REPLACED by $EXE"; check "minidump (first-chance) written"
-  # 6) the gesture layer (W6) with the RmlUi host it rides on: the null adapter's GestureAdapter is accepted and the layer starts
+  # 6) the gesture layer (W6) with the RmlUi host it rides on. W37: the build's own log says which path it is on, never the game's name:
+  #    a GestureAdapter starts the layer ("gesture: on: drag 6 px"); a game without one logs the no-adapter line and the layer is inert.
+  #    Anything else (a missing callback, a crash, no gesture line) fails.
+  NOGEST_LINE="gesture: controls.gestures=1 but no adapter (the game has no GestureAdapter): the layer is inert"
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[controls]\r\ngestures=1\r\n[ui]\r\nenabled=1\r\n' > "$G/$INI"
-  run; check "gesture: on: drag 6 px"; check "ui: enabled"; check "process detach"
+  run; NOGEST=0
+  if grep -qF "$NOGEST_LINE" "$G/$MOD/logs/proxy.log"; then NOGEST=1; echo "build.sh smoke: this game has no GestureAdapter: steps 6 and 7 check the inert path"
+  else check "gesture: on: drag 6 px"; fi
+  check "ui: enabled"; check "process detach"
   # 7) gestures without the host: inert, said so, nothing hooked for them (W2's "ui.enabled=0: nothing hooked" holds)
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[controls]\r\ngestures=1\r\n' > "$G/$INI"
-  run; check "gesture: the RmlUi host is off (ui.enabled=0)"; check "process detach"
+  run; check "process detach"
+  if [[ $NOGEST == 1 ]]; then   # no adapter: GestureInit returns at the no-adapter check, before it looks at the host
+    grep -qF "$NOGEST_LINE" "$G/$MOD/logs/proxy.log" || { echo "build.sh smoke: the no-adapter gesture line is not in the log"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  else check "gesture: the RmlUi host is off (ui.enabled=0)"; fi
   if grep -q "IDirect3D9::CreateDevice (ui)" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: a UI hook went in with ui.enabled=0"; exit 1; fi
   # 8) the control channel (W17): a request written before the launch is refused as stale and never run (an exit here would end the
-  #    launch before the peek), and a peek on the null game's site, which the patch engine refuses by design, is refused with its reason.
+  #    launch before the peek), and a peek on the first engine site of the game being built (W37: from its generated tables; the stand-in
+  #    exe refuses every site) is refused with its reason. A game with no engine sites checks the stale request only.
   #    The host waits for the peek's answer; the peek is written only once the ctl thread logged, so after the process was created.
+  SITE="$(grep -m1 -o '^ *{ "[^"]*"' "$ADIR/generated/tables.h" | cut -d'"' -f2 || true)"
+  if [[ -n "$SITE" ]]; then WAITFOR='ctl\peek1.done'; else WAITFOR='ctl\old1.done'; echo "build.sh smoke: this game has no engine sites: step 8 checks the stale request only"; fi
   mkdir -p "$G/ctl"; printf 'exit\n' > "$G/ctl/old1.cmd"; touch -d '2020-01-02 03:04:05 UTC' "$G/ctl/old1.cmd"
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\n' > "$G/$INI"
-  run wait 'ctl\peek1.done' > "$OUT/smoke/ctl_run.txt" 2>&1 &
+  run wait "$WAITFOR" > "$OUT/smoke/ctl_run.txt" 2>&1 &
   RUN=$!
   for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
-  printf 'peek null.dummy_hook * 4\n' > "$G/ctl/peek1.tmp"; mv "$G/ctl/peek1.tmp" "$G/ctl/peek1.cmd"
+  if [[ -n "$SITE" ]]; then printf 'peek %s * 4\n' "$SITE" > "$G/ctl/peek1.tmp"; mv "$G/ctl/peek1.tmp" "$G/ctl/peek1.cmd"; fi
   wait "$RUN" || { echo "build.sh smoke: the ctl launch failed"; cat "$OUT/smoke/ctl_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
   check "ctl: old1: refused: stale: written 2020-01-02T03:04:05.000Z, before this launch started"
-  check "ctl: peek1: refused: sites not accepted by the patch engine"
+  if [[ -n "$SITE" ]]; then check "ctl: peek1: refused: sites not accepted by the patch engine"; fi
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
-  grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
+  [[ -z "$SITE" ]] || grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
   echo "build.sh smoke: passed (8 launches under wine, 2 dumps)"
 fi
