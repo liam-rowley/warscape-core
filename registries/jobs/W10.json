@@ -3,10 +3,11 @@
   "description": "Covers B20, B21, B27, B30, B39. Race-free stale lock takeover in job.sh lock and the watcher's expiry (B20); a ps1 job's exit code from its last statement, not a stale $LASTEXITCODE (B21); the kill job returns only at not_running (B27); the prefs overlay sets every occurrence of a key or refuses a duplicated one (B30); pc_deploy.py set waits for, or refuses on, a pending profile restore (B39). Host tests first. Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) adds H2, H11, H12 (lock). H2: the game lock owner defaults to the session id and is validated as scratch does (job.sh:38 vs 121); Check-Owner compares case-sensitively and also matches session (watcher.ps1:238-246; -ne is case-insensitive); job.sh ctl (86-100) and shot.sh (line 4: 'no game lock needed') require the lock; touch refreshes only the owner's lock; lock --wait. H12: the stale-lock age comes from the ini's lock_stale_min, not a hard-coded 1200 s. H11: job.sh's default wait is 100 s, not 900 (job.sh:148; the Bash tool gives up at 120 s), and a request that timed out is withdrawn, as the ctl path does (166-169).",
   "title": "Watcher and pc_deploy race fixes; the lock owner is the session",
   "phase": 1,
-  "status": "needs_brief",
+  "status": "queued",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [
     "W8"
-  ]
+  ],
+  "brief": "jobs/W10/brief.md"
 }
