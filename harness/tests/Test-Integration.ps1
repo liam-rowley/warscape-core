@@ -581,7 +581,7 @@ try {
             [IO.File]::WriteAllBytes($prefs, $oddPrefs); Remove-Item -LiteralPath $hdll, $hstat -Force -ErrorAction SilentlyContinue
         }
     }
-    Test-Case 'headless launch: a game that writes refused and exits before the watcher looks keeps its detail (W38); a stale refusal is not taken for it' {
+    Test-Case 'headless launch: a game that writes refused and exits at once keeps its detail (W38; both orders are pinned in Test-Unit); a stale refusal is not taken for it' {
         $trig = Join-Path $game 'FakeGame.refuse'
         Set-Lock 'ci38'; Set-Vd '3840x2160'; Set-Proxy $true; Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
         [IO.File]::WriteAllBytes($prefs, (Real-Prefs)); $h0 = Hashes
