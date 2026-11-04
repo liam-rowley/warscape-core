@@ -131,7 +131,7 @@ def block_proxy_map(cfg, step='dll'):
         f'          path: ${{{{ {o}.map_files }}}}', '          retention-days: 90', '          if-no-files-found: error',
         '      - name: the proxy map in the step summary', when, '        env:', f'          NAME: ${{{{ {o}.map_name }}}}',
         '          URL: ${{ steps.proxy_map.outputs.artifact-url }}',
-        '        run: echo "- linker map artifact: [$NAME]($URL), kept 90 days (wsc crash symbolise DUMP --build-id ID)" >>"$GITHUB_STEP_SUMMARY"'])
+        '        run: echo "- linker map artifact [$NAME]($URL), kept 90 days (wsc crash symbolise DUMP --build-id ID)" >>"$GITHUB_STEP_SUMMARY"'])
 
 
 def block_policy(cfg):

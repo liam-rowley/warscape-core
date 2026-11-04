@@ -729,6 +729,17 @@ class ProxyMap(unittest.TestCase):
         self.assertLess(t.index('id: dll'), t.index('{{wsc proxy_map step=dll}}'))
         self.assertIn('proxy-map-', (ROOT / '.github' / 'workflows' / 'gates.yml').read_text().replace('${{ steps.dll.outputs.map_name }}', 'proxy-map-'))
 
+    def test_no_plain_yaml_value_holds_a_colon_space(self):
+        # W35: `run: echo "- a: b"` is a YAML error (": " inside a plain scalar) that GitHub reports only as "a workflow file issue"
+        for wf in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+            bad = []
+            for n, ln in enumerate(wf.read_text(encoding='utf-8').splitlines(), 1):
+                m = re.match(r'^\s*(-\s+)?[\w-]+:\s+(.*)$', ln)
+                if m and m.group(2) and m.group(2)[0] not in '|>"\'{[&*!#' and not m.group(2).startswith('${{'):
+                    if ': ' in re.sub(r'\$\{\{.*?\}\}', '', m.group(2).split(' #')[0]):
+                        bad.append(f'{wf.name}:{n}: {ln.strip()[:100]}')
+            self.assertEqual(bad, [], '\n'.join(bad))
+
     def test_build_sh_writes_the_outputs_the_block_reads(self):
         b = (ROOT / 'proxy' / 'tools' / 'build.sh').read_text()
         self.assertIn('map_name=proxy-map-$BUILD_ID', b)

@@ -156,7 +156,7 @@ jobs:
         env:
           NAME: ${{ steps.dll.outputs.map_name }}
           URL: ${{ steps.proxy_map.outputs.artifact-url }}
-        run: echo "- linker map artifact: [$NAME]($URL), kept 90 days (wsc crash symbolise DUMP --build-id ID)" >>"$GITHUB_STEP_SUMMARY"
+        run: echo "- linker map artifact [$NAME]($URL), kept 90 days (wsc crash symbolise DUMP --build-id ID)" >>"$GITHUB_STEP_SUMMARY"
       - name: the DLL and its linker map are byte-identical from another checkout path, and the DLL without the map flag
         run: proxy/tools/build.sh repro
       - name: smoke test the DLL under wine (a stand-in exe loads it; guard verdicts, config, log, clean detach, a DLL fault symbolised)
