@@ -17,7 +17,7 @@ namespace gest {
 
 // ---- window messages ------------------------------------------------------------------------------------------------------------
 constexpr uint32_t
-    kWmKillFocus = 0x0008, kWmActivateApp = 0x001C, kWmKeyDown = 0x0100, kWmKeyUp = 0x0101, kWmChar = 0x0102, kWmSysKeyDown = 0x0104,
+    kWmKillFocus = 0x0008, kWmActivateApp = 0x001C, kWmCaptureChanged = 0x0215, kWmKeyDown = 0x0100, kWmKeyUp = 0x0101, kWmChar = 0x0102, kWmSysKeyDown = 0x0104,
     kWmSysKeyUp = 0x0105, kWmSysChar = 0x0106, kWmMouseMove = 0x0200, kWmLButtonDown = 0x0201, kWmLButtonUp = 0x0202, kWmLButtonDblClk = 0x0203,
     kWmRButtonDown = 0x0204, kWmRButtonUp = 0x0205, kWmRButtonDblClk = 0x0206, kWmMButtonDown = 0x0207, kWmMButtonUp = 0x0208, kWmMouseWheel = 0x020A;
 constexpr uint32_t kVkTab = 0x09, kVkShift = 0x10, kVkControl = 0x11, kVkMenu = 0x12, kVkEscape = 0x1B, kVkF4 = 0x73,
@@ -25,13 +25,16 @@ constexpr uint32_t kVkTab = 0x09, kVkShift = 0x10, kVkControl = 0x11, kVkMenu = 
 constexpr uint32_t kMkLButton = 0x0001, kMkRButton = 0x0002, kMkShift = 0x0004, kMkControl = 0x0008;
 
 enum MsgClass { kClsOther = 0, kClsMouse = 1, kClsKey = 2, kClsFocus = 3 };
-inline MsgClass Classify(uint32_t msg, uint32_t wp) {
+// WM_CAPTURECHANGED (B58 b): lp is the window gaining the capture. Losing it to another window, or to nobody, is focus loss (a release can
+// be lost with it); our own window gaining it is not (`self` = the subclassed window as an integer; 0 = unknown, so always focus loss).
+inline MsgClass Classify(uint32_t msg, uint32_t wp, intptr_t lp = 0, uintptr_t self = 0) {
     switch (msg) {
     case kWmMouseMove: case kWmLButtonDown: case kWmLButtonUp: case kWmLButtonDblClk: case kWmRButtonDown: case kWmRButtonUp:
     case kWmRButtonDblClk: case kWmMButtonDown: case kWmMButtonUp: case kWmMouseWheel: return kClsMouse;
     case kWmKeyDown: case kWmKeyUp: case kWmSysKeyDown: case kWmSysKeyUp: case kWmChar: case kWmSysChar: return kClsKey;
     case kWmKillFocus: return kClsFocus;
     case kWmActivateApp: return wp ? kClsOther : kClsFocus;
+    case kWmCaptureChanged: return (self != 0 && (uintptr_t)lp == self) ? kClsOther : kClsFocus;
     default: return kClsOther;
     }
 }
@@ -48,9 +51,10 @@ struct FeedOut {
 // One message. `mods` = the modifier set held now (the window procedure reads the keyboard state; the ctl verb injects its own).
 // `mouseToEngine` = the RmlUi stage gave this mouse message to the engine (a message RmlUi took never reaches the gestures).
 // A press that would start a gesture returns needsEligibility unless `eligibilityKnown`; the caller then calls again with `eligible`.
-inline FeedOut Feed(Machine& m, uint32_t msg, uint32_t wp, int x, int y, unsigned mods, bool mouseToEngine, bool eligibilityKnown = true, bool eligible = false, int force = kNone) {
+inline FeedOut Feed(Machine& m, uint32_t msg, uint32_t wp, int x, int y, unsigned mods, bool mouseToEngine, bool eligibilityKnown = true, bool eligible = false, int force = kNone,
+                    intptr_t lp = 0, uintptr_t self = 0) {
     FeedOut f;
-    const MsgClass c = Classify(msg, wp);
+    const MsgClass c = Classify(msg, wp, lp, self);
     Event e; e.x = x; e.y = y; e.mods = mods;
     if (c == kClsFocus) { e.type = kDeactivate; f.sm = m.On(e); f.fed = true; f.action = kPass; return f; }
     if (c == kClsKey) {

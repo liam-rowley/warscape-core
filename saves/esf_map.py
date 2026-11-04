@@ -2,7 +2,7 @@
 """esf_map.py: generic, offset-based walker for semantic maps of an ESF save (no tree objects, so a 30 MB save stays cheap).
 
 purpose: library for a game's save map: navigate records by name, read values by child position @N, find record paths, and grep every value that equals an id
-usage: from esf_map import Save; s = Save(path); s.sub(span, 'NAME'); s.vals(span)[N]; s.items(span, 'ARRAY'); s.path('WORLD', 'FACTION_ARRAY')  |  python3 -I saves/core/esf_map.py SAVE id ID
+usage: from esf_map import Save; s = Save(path); s.sub(span, 'NAME'); s.vals(span)[N]; s.items(span, 'ARRAY'); s.path('WORLD', 'FACTION_ARRAY')  |  python3 -I saves/esf_map.py SAVE id ID
 when: writing a game's semantic map (a game repo's save_map.py) or chasing an id through a save (both ends of every link); field meanings live in saves/SAVE_FORMAT.md
 not-a-verb: a game-agnostic library and id grep run on the PC against saves outside the repo (warscape-core candidate, D10)
 

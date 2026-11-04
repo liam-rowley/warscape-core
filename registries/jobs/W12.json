@@ -3,9 +3,11 @@
   "description": "Covers B10, B13, B24, B49. A .githooks/commit-msg that refuses a commit whose last paragraph has no Claude-Session: trailer, opt-in from wsc.toml (B10); a gate that every repo path a runs/**/README.md names exists (B13); a lint for moved-away */core/ paths in core files, fixing harness/job.sh line 5 (B24); jobs check fails when [views] commit = true beside a jobs registry, naming C19, and policy adds a C19 hint to its brief-branch refusal (B49).",
   "title": "Guards: commit-msg trailer hook, run-README references, stale moved paths, committed views beside a jobs registry",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W12/brief.md"
+  "brief": "jobs/W12/brief.md",
+  "report": "jobs/W12/report.md",
+  "review": "jobs/W12/review.md"
 }

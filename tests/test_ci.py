@@ -286,7 +286,79 @@ class Render(unittest.TestCase):
         self.assertIn('failure()', ifs['notify'])
         self.assertIn("github.event.action != 'ready_for_review'", ifs['notify'])
         self.assertIn('echo extra', text)
-        self.assertIn('policy --branch "${{ github.head_ref }}"', text)
+        # W23: the head's names reach the script through env (pull_request_target), and --head names the commit judged
+        self.assertIn('policy --branch "$HEAD_REF" --base "origin/$BASE_REF" --head "$HEAD_SHA"', text)
+        self.assertLess(text.index('refs/pull/$PR/head'), text.index('echo extra'))   # the extra steps can read the fetched head
+
+    @staticmethod
+    def run_scripts(text):
+        """Every `run:` script of a workflow: the line itself, plus the block lines of a `run: |`."""
+        lines, out, i = text.splitlines(), [], 0
+        while i < len(lines):
+            m = re.match(r'^(\s*)(?:- )?run:\s*(.*)$', lines[i])
+            i += 1
+            if not m:
+                continue
+            out.append(m.group(2))
+            if m.group(2) in ('|', '>'):
+                while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > len(m.group(1))):
+                    out.append(lines[i])
+                    i += 1
+        return out
+
+    def test_w23_the_policy_job_runs_base_code_and_names_the_head_only_as_data(self):
+        """pull_request_target gives the job the base's privileges: no step checks out, caches or runs the head, and the head's names reach
+        scripts only through `env:` (a branch name may hold `$(...)`)."""
+        for cfg in (self.CFGR, {**self.CFGR, 'core': '', 'token_secret': '', 'policy_extra_steps': ''}):
+            text = self.render('jobs:\n{{wsc policy}}\n{{wsc notify policy}}\n', cfg)
+            scripts = self.run_scripts(text)
+            self.assertTrue(scripts)
+            self.assertEqual([s for s in scripts if '${{' in s], [])
+            self.assertIn('--branch "$HEAD_REF" --base "origin/$BASE_REF" --head "$HEAD_SHA"', text)
+            for env in ('HEAD_REF: ${{ github.head_ref }}', 'BASE_REF: ${{ github.base_ref }}', 'HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+                        'PR: ${{ github.event.pull_request.number }}'):
+                self.assertIn(env, text)
+            self.assertIn('git fetch --no-tags origin "+refs/pull/$PR/head:refs/remotes/pull/$PR/head"', text)
+            self.assertNotRegex(text, r'(?m)^\s+ref:')   # every checkout is the default one: the base under pull_request_target
+            self.assertNotRegex(text, r'git (checkout|switch|worktree)|actions/cache')
+
+    def test_w23_the_render_guard_refuses_a_policy_template_without_pull_request_target(self):
+        sys.path.insert(0, str(ROOT / 'tests'))
+        from _util import MINIMAL_TOML, TempRepo
+        repo = TempRepo(toml=MINIMAL_TOML + '[ci]\nworkflows = ["policy.yml"]\ncore = ""\n')
+        self.addCleanup(repo.close)
+        old = '# pull_request_target in a comment does not count\nname: policy\non:\n  pull_request:\n    types: [opened]\njobs:\n{{wsc policy}}\n'
+        repo.write('ci/policy.yml.in', old)
+        rc, out = repo.wsc('ci', 'render')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('ci/policy.yml.in has {{wsc policy}} but no pull_request_target trigger', out)
+        self.assertFalse((repo.root / '.github' / 'workflows' / 'policy.yml').exists())
+        rc, out = repo.wsc('gates', '--only', 'ci_render')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('no pull_request_target trigger', out)
+        repo.write('ci/policy.yml.in', old.replace('on:\n', 'on:\n  pull_request_target:\n    types: [opened]\n'))
+        rc, out = repo.wsc('ci', 'render')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('ci/policy.yml.in also has a pull_request trigger', out)
+        rc, out = repo.wsc('gates', '--only', 'ci_render')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('WARN ci_render', out)
+        repo.write('ci/policy.yml.in', old.replace('pull_request:', 'pull_request_target:'))
+        rc, out = repo.wsc('ci', 'render')
+        self.assertEqual(rc, 0, out)
+        rc, out = repo.wsc('gates', '--only', 'ci_render')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('ok   ci_render', out)
+
+    def test_w23_this_repos_policy_workflow_is_pull_request_target_with_the_bootstrap_trigger(self):
+        text = (ROOT / '.github' / 'workflows' / 'policy.yml').read_text(encoding='utf-8')
+        on = text[text.index('\non:\n'):text.index('\npermissions:')]
+        self.assertIn('\n  pull_request_target:\n    types: [opened, synchronize, reopened, ready_for_review]', on)
+        self.assertIn("\n  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    paths: ['jobs/W23/report.md']", on)
+        self.assertEqual([s for s in self.run_scripts(text) if '${{' in s], [])
+        fixture = (ROOT / 'tests' / 'fixture_game' / 'ci' / 'policy.yml.in').read_text(encoding='utf-8')
+        self.assertIn('  pull_request_target:', fixture)
+        self.assertNotRegex(fixture, r'(?m)^  pull_request:')   # the fixture switches with no bootstrap trigger
 
     def test_notify_of_a_push_workflow_waits_for_the_named_jobs(self):
         text = self.render('jobs:\n{{wsc notify gates needs=changes,gates,proxy}}\n')
@@ -339,12 +411,13 @@ class Render(unittest.TestCase):
         # the empty tree hash never reaches the lookup: the restore step needs a tree, so there is no hit and the set runs
         self.assertIn("steps.diff.outputs.native_tree != ''", text)
 
-    # W22 decision 5: the blocks other than `changes` and `notify gates` do not move. Hashes taken on main (0.22.0) before W22.
+    # W22 decision 5: the blocks other than `changes` and `notify gates` do not move. Hashes taken on main (0.22.0) before W22; on merging
+    # main (0.28.0), `fetch_cache` (W24) and `policy` and `notify policy` (W23) were retaken from main's own render, which W22 leaves byte-identical.
     PINS = {'if native': ('258478fc233ea401', '258478fc233ea401'), 'if host dispatch': ('476b2e7887afbd73', '476b2e7887afbd73'),
             'pass_marker native': ('3d3624873836e328', '3d3624873836e328'),
             'pass_marker host shell=bash': ('a16b8e88b0151624', 'a16b8e88b0151624'),
-            'fetch_cache': ('ac798217583fadcb', '96969571a0ce8e9e'), 'policy': ('38371cc58200e5e4', 'daa5bcf48adba21b'),
-            'notify policy': ('799f8cb27f33c081', '5faa5e2321572b1f')}
+            'fetch_cache': ('f9137200f6dafa94', '9970041a89484cba'), 'policy': ('5d785518dd5f4289', '2c80d50eee064d2d'),
+            'notify policy': ('45e45a163a968517', '5949e489656f80eb')}
     NOTIFY_JOB = ('267a5b3bef0d88cf', '1f9e1f77aafcf063')
 
     def test_the_other_blocks_and_the_notify_job_render_byte_for_byte_as_before(self):
@@ -404,13 +477,17 @@ class Render(unittest.TestCase):
         from warscape.repo import Ctx
         self.assertEqual(ci_render.problems(Ctx.load(ROOT)), [])
 
-    # W21: a game renders the same blocks; a byte that changes fails its `ci_render` gate after a pin bump. Hashes taken on main before W21; the gates.yml and 'all blocks' ones were retaken in W22 for the intended change (changes diff step, notify main_health job), the blocks pinned separately below.
+    # W21: a game renders the same blocks; a byte that changes fails its `ci_render` gate after a pin bump. Hashes taken on main before W21.
+    # W23 changed three of them on purpose, in one commit: the `policy` block (pull_request_target: a base checkout, the head fetched as git
+    # objects, head names through env, --head) and `notify policy` (the branch through env), and the fixture's template switched its trigger.
+    # The fixture's gates.yml is unchanged by W23. W22 changed it and both "all blocks" renders on purpose (the `changes` job and `notify gates`
+    # with its `main_health` job); on merging main the combined render was checked to be main's render plus W22's diff, nothing else.
     ALL_BLOCKS = ('jobs:\n{{wsc changes}}\n  a:\n{{wsc if native}}\n  b:\n{{wsc if host dispatch}}\n{{wsc pass_marker native}}\n'
                   '{{wsc pass_marker host shell=bash}}\n{{wsc policy}}\n{{wsc notify gates needs=changes,a,b}}\n{{wsc notify policy}}\n')
     GOLDEN = {'fixture_game gates.yml': 'dff03d1ec57a47c0531f8cf38f84687ef998018de8cc5828108faaa8b8592dc5',
-              'fixture_game policy.yml': 'fd4af2f072285b78862fec6b164003a5b6ce92d04b1cb56d82264c3fb5afbe9d',
-              'all blocks, a game': '5a935793569f6f2b91ec70357fc67f1147e0a824486160a467502e044e9e766f',
-              'all blocks, the core': 'e013d9c689f263ad27645d0e217d23d92265d06a39aa6c55b23a33b1b407e1a0'}
+              'fixture_game policy.yml': '9707260ef4246236ae4acfa6e25493bdac0345b9ac576288fab35400cf1bd3e9',
+              'all blocks, a game': '8d057d3629aa1aa3fb46a4a4356f7239de6b90cdf4d7573631342fb6f10ee737',
+              'all blocks, the core': '04d4afc4caf7a0a51b71a4706c54f0eed95b6f9d8340c8a23e0ea2b0fecd5ca2'}
 
     def test_the_existing_blocks_render_byte_for_byte_as_before(self):
         import hashlib
@@ -424,19 +501,21 @@ class Render(unittest.TestCase):
         self.assertEqual({k: hashlib.sha256(v.encode()).hexdigest() for k, v in got.items()}, self.GOLDEN)
 
     def test_fetch_cache_keys_on_the_pins_and_never_fails_the_job(self):
+        # W24 (B62): two steps; the fetchers retry themselves inside build.sh, so the `netfetch.py prefetch` step is gone
         for core, prefix in (('core', 'core/'), ('', '')):
             text = self.render('    steps:\n{{wsc fetch_cache}}\n', {**self.CFGR, 'core': core, 'salt': '3'})
             steps = re.split(r'^      - ', text, flags=re.M)[1:]
-            self.assertEqual(len(steps), 3, text)
-            key, cache, pre = steps
+            self.assertEqual(len(steps), 2, text)
+            key, cache = steps
             self.assertIn('id: fetch_key', key)
             self.assertIn(f'run: python3 {prefix}proxy/tools/netfetch.py ci-cache >> "$GITHUB_OUTPUT"', key)
             self.assertIn('uses: actions/cache@v5', cache)
             self.assertIn('continue-on-error: true', cache)
             self.assertIn('path: ${{ steps.fetch_key.outputs.paths }}', cache)
             self.assertIn('key: fetch-3-${{ steps.fetch_key.outputs.key }}', cache)
-            self.assertIn(f'run: python3 {prefix}proxy/tools/netfetch.py prefetch', pre)
-            self.assertNotIn('continue-on-error', key + pre)   # a failed prefetch fails the job: the fetchers' sha checks judge every byte
+            self.assertNotIn('prefetch', text)
+            self.assertIn('retry', text)   # the comment says where the retry is now
+            self.assertNotIn('continue-on-error', key)
 
 
 class CoreConfig(unittest.TestCase):

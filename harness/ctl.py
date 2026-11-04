@@ -4,7 +4,7 @@
 purpose: (scene, shot, reset, perf, state and cam read ran on the PC in J44, cam, pause and speed in J43, order in J28) name a scenario and a camera pose and get a settled, checked answer back (scene, cam, shot, order, pause, speed, reset, perf, state), over the proxy's ctl channel (job.sh ctl) and the watcher's shot job; game-agnostic, everything game-specific comes from the adapter's `ctl` block and the scenarios registry
 usage: ctl.py [--owner O] [--adapter A] [--registry R] [--out DIR] [--no-pc] <verb> [args]   verbs: scene <id> [--deploy end] | cam <scenario:pose | x y z yaw pitch [fov] | read> | shot <name> | order list | <unit> move x z [facing] [width] [run] | pause on|off | speed <x> | reset [<id>] | perf <seconds> | state | key|click|wait (probe only)
 when: every time an agent needs a known game state or a frame (never type key taps or sleeps for it); the acceptance runner (acceptance.py) calls the same functions
-not-a-verb: a host-side client over harness/core/job.sh and the proxy's ctl verbs, not a registry operation; a J12 core candidate
+not-a-verb: a host-side client over harness/job.sh and the proxy's ctl verbs, not a registry operation; a J12 core candidate
 
 Result contract (every verb, tests/test_ctl.py): `status` ok | failed | refused, `reason`, the verb's fields, `settle` (what it waited for and how
 long), `check` (what was compared: expected against got; ok is never returned without one), `evidence` (paths: shot, state, log) and
@@ -17,7 +17,7 @@ in <state>/ctl/_ctl_session.json, so a later call's `current_kind` uses the row.
 Process Memory counter for the game's pid, nvidia-smi for the device) and the DLL's build id from its load line in proxy.log.
 Routes come from the adapter's `ctl.routes`, per verb and per kind (land, siege, naval, campaign: `current_kind`); one not `reachable` makes the
 verb answer `refused` with its reason and fact. cam sets the pose with the route's `set` chunk, waits its `settle_ms`, reads the pose back with its
-`read` chunk (harness/core/campose.py) and compares within its `tolerance`; pause and speed go through the battle root's RequestSpeed and check
+`read` chunk (harness/campose.py) and compares within its `tolerance`; pause and speed go through the battle root's RequestSpeed and check
 the battle clock's rate against the windows clock over `measure_s` (J43).
 """
 import argparse
@@ -43,6 +43,10 @@ BATTLE_SCENES = ('battle_deploy', 'battle', 'naval')   # the proxy's scene track
 PROBE_ONLY = ('key', 'click', 'wait')   # rule 78: never part of a scenario row, a generated file or the acceptance script
 VERBS = ('scene', 'cam', 'shot', 'order', 'pause', 'speed', 'reset', 'perf', 'state')
 POSE_FIELDS = ('x', 'y', 'z', 'yaw', 'pitch', 'fov')
+# proxy.log's first two lines (docs/PROXY_BUILD.md): the launch line names the DLL's build id; the self_hash line (W24) its own file sha256,
+# size and build, exactly as dllmain.cpp LogSelfHash writes it. A log with no self_hash line comes from a DLL older than W24.
+LAUNCH_RE = re.compile(r'd3d9\.dll build (\S+) loaded')
+SELF_HASH_RE = re.compile(r'\bself_hash: sha256 ([0-9a-f]{64}) bytes ([0-9]+) build (\S+) \(hashed in ([0-9]+) ms\)')
 
 
 def bash():
@@ -143,17 +147,20 @@ def resolve_pose(rows, ref):
     return parse_pose(ref)
 
 
+def angle_diff(a, b):
+    """Smallest difference between two angles in degrees, in [0, 180]: equal angles compare equal in any representation (270 and -90)."""
+    return abs((a - b + 180) % 360 - 180)
+
+
 def pose_check(expected, got, tol):
-    """Compare a pose with the one read back. Each field within tol[field] (default tol['default']). Returns (ok, check dict)."""
+    """Compare a pose with the one read back. Each field within tol[field] (default tol['default']); yaw wraps (angle_diff), pitch does not. Returns (ok, check dict)."""
     detail, ok = {}, True
     for f in POSE_FIELDS:
         if f not in expected:
             continue
         t = tol.get(f, tol.get('default', 0.5))
         g = got.get(f)
-        d = None if g is None else abs(g - expected[f])
-        if f in ('yaw', 'pitch') and d is not None:
-            d = min(d, 360 - d) if d <= 360 else d
+        d = None if g is None else (angle_diff(g, expected[f]) if f == 'yaw' else abs(g - expected[f]))
         within = d is not None and d <= t
         ok = ok and within
         detail[f] = {'expected': expected[f], 'got': g, 'tolerance': t, 'within': within}
@@ -367,9 +374,11 @@ class Pc:
         ini = ini_values(self.ini_path().read_text(encoding='utf-8')) if self.ini_path().exists() else {}
         # the DLL's own build id (a hash of its inputs' content, proxy/tools/build_id.py: what rule 79 compares), from its load line; the kit id names HEAD at kit time
         log = self.ini_path().parent / ident_mod(self.a) / 'logs' / 'proxy.log'
-        m = re.search(r'd3d9\.dll build (\S+) loaded', log.read_text(encoding='utf-8', errors='replace')) if log.exists() else None
+        text = log.read_text(encoding='utf-8', errors='replace') if log.exists() else ''
+        m, h = LAUNCH_RE.search(text), SELF_HASH_RE.search(text)
+        # dll_sha256 (W24): the DLL's own file sha256 from its self_hash line; None for a DLL older than W24 or a failed hash (W9 records and compares it)
         return {'build': m.group(1) if m else rec.get('build_id'), 'kit': rec.get('kit_id'), 'backend': ini.get('proxy.backend'),
-                'size': ini.get('headless.size') if ini.get('headless.enabled') == '1' else 'windowed'}
+                'size': ini.get('headless.size') if ini.get('headless.enabled') == '1' else 'windowed', 'dll_sha256': h.group(1) if h else None}
 
     def shot(self, name, out_dir):
         """shot.sh into out_dir/<name>.jpg: (path, bytes)."""

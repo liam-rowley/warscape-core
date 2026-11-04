@@ -41,6 +41,8 @@ class Settings:
     jobs_dir = 'jobs'
     reg_dir = 'registries'
     ledgers = ''
+    failed_results = ''
+    root = None
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
     text = dict(DEFAULTS['jobs']['text'])
@@ -52,6 +54,7 @@ S = Settings()
 def configure_from(cfg, root=None, reg_dir='registries'):
     """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file."""
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
+    S.failed_results, S.root = cfg.get('failed_results', ''), (Path(root) if root is not None else None)
     S.text = dict(cfg['text'])
     S.legacy_rounds = S.legacy_briefs = frozenset()
     if root is not None:
@@ -85,9 +88,18 @@ def check(ctx, rows, read, folders=()):
     """The whole queue check (`wsc jobs check` and the `jobs` gate): the core rules, then the repo's `jobs`-stage gate modules
     (warscape/gatemods.py). Returns (errors, warnings, summaries): the modules' non-empty summaries go on the `jobs check` line."""
     res = gatemods.run_stage(ctx, 'jobs', rows=rows, read=read, briefs=lambda: briefs(rows, read))
-    errs = problems(rows, read, folders) + gatemods.problems(res)
+    errs = views_problems(ctx.config) + problems(rows, read, folders) + gatemods.problems(res)
     summaries = [r.summary for r in res if r.summary and not (r.level == 'error' and not r.details)]
     return errs, gatemods.problems(res, 'warn'), summaries
+
+
+def views_problems(config):
+    """C19 (B49): a repo with a `jobs` registry cannot commit its registry views. `reg set` rewrites `<registries_dir>/jobs.md`, `policy` refuses
+    that file on a `brief/` branch and the `registries` gate refuses the branch without it, so no brief branch could ever pass."""
+    if 'jobs' in config['registries'] and config['views']['commit']:
+        return [f"views are committed beside a jobs registry: set `[views] commit = false` in wsc.toml (C19), git rm the committed "
+                f"`{config['registries_dir']}/*.md` views and git-ignore the views dir (`{config['views']['dir']}`)"]
+    return []
 
 
 STATUSES_WITH = {'brief': {'queued', 'review', 'fix', 'done'}, 'report': {'review', 'fix', 'done'}, 'review': {'fix', 'done'}}
@@ -136,6 +148,35 @@ def report_problems(jid, text):
     for h in ('Deviations', 'Open questions'):
         if not re.search(rf'^## {h}\b', text, re.M):
             errs.append(f'no "## {h} ..." section')
+    return errs
+
+
+RUN_CITE = re.compile(r'(?:[\w.-]+/)*runs/[\w.-]*\w')  # ends on a word char: a sentence's '.' or '-' is not part of the path
+
+
+def failed_results_problems(jid, text, root, glob):
+    """Every ctl result (JSON matched by `glob` inside a run folder the report cites) with top-level status "failed" is named, by path
+    relative to the run folder or by file name, in the report's ## Deviations section. A report that cites no run folder passes."""
+    if not glob:
+        return []
+    root = Path(root).resolve()
+    m = re.search(r'^## Deviations\b[^\n]*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    dev = m.group(1) if m else ''
+    errs, seen = [], set()
+    for cite in RUN_CITE.finditer(text):
+        folder = (root / cite.group(0)).resolve()
+        if folder in seen or not folder.is_dir() or root not in folder.parents:
+            continue
+        seen.add(folder)
+        for f in sorted(folder.glob(glob)):
+            try:
+                if not f.is_file() or json.loads(f.read_text(encoding='utf-8')).get('status') != 'failed':
+                    continue
+            except (OSError, ValueError, AttributeError):
+                continue
+            rel = f.relative_to(folder).as_posix()
+            if rel not in dev and f.name not in dev:
+                errs.append(f'failed ctl result {folder.relative_to(root).as_posix()}/{rel} is not named in ## Deviations')
     return errs
 
 
@@ -231,6 +272,8 @@ def problems(rows, read, folders=()):
         report = read(f'{S.jobs_dir}/{jid}/report.md')
         if report is not None:
             errs += [f'{jid}: report: {e}' for e in report_problems(jid, report)]
+            if S.failed_results and S.root is not None:
+                errs += [f'{jid}: report: {e}' for e in failed_results_problems(jid, report, S.root, S.failed_results)]
         review = read(f'{S.jobs_dir}/{jid}/review.md')
         if review is not None:
             if not DATED.search('\n'.join(review.split('\n')[:5])):

@@ -84,6 +84,19 @@ inline bool UiRmlOwnsPointer(const UiRouteState& s) { return !s.engineButtons &&
 // DirectInput arbitration: the mouse device's buttons (and wheel) are blanked while RmlUi owns them, movement always passes.
 inline bool UiBlankDiButtons(const UiRouteState& s) { return UiRmlOwnsPointer(s); }
 inline bool UiBlankDiWheel(const UiRouteState& s) { return !s.engineButtons && (s.overScrollable || s.rmlButtons); }
+// B53 (W20): what the DirectInput hooks need, as one word the window thread publishes (InterlockedExchange) after every write of the
+// route state, so the hooks read it once per call: no lock on the input path, no torn copy of the struct.
+constexpr uint32_t kDiBlankButtons = 1, kDiBlankWheel = 2, kDiTextFocus = 4;
+inline uint32_t UiDiMask(const UiRouteState& s) {
+    return (UiBlankDiButtons(s) ? kDiBlankButtons : 0u) | (UiBlankDiWheel(s) ? kDiBlankWheel : 0u) | (s.textFocus ? kDiTextFocus : 0u);
+}
+// The DirectInput blank decision as a pure function of the published word (R1 finding 1: an inline `mask` was shadowed by the button
+// bitmap in hk_DIState; a function over named inputs cannot be). Buttons: RmlUi owns them, or a gesture holds them. Wheel: RmlUi's word only.
+inline bool UiDiBlankButtons(uint32_t diMask, bool gestureOwns) { return (diMask & kDiBlankButtons) != 0 || gestureOwns; }
+inline bool UiDiBlankWheel(uint32_t diMask) { return (diMask & kDiBlankWheel) != 0; }
+// Focus left the application (WM_ACTIVATEAPP, either value: a release can be lost either way): no button is held any more, and RmlUi
+// does not own the pointer until the next event says so.
+inline void UiFocusLost(UiRouteState& s, bool& rmlOwner) { s.engineButtons = 0; s.rmlButtons = 0; rmlOwner = false; }
 inline const char* UiEvName(UiEv e) {
     switch (e) { case UiEv::Move: return "move"; case UiEv::Down: return "down"; case UiEv::Up: return "up"; case UiEv::Wheel: return "wheel"; case UiEv::Key: return "key"; default: return "char"; }
 }

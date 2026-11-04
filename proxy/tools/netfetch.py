@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
-"""Retry the proxy's source fetchers on network flakes, and give CI a cache of their raw downloads (W21, backlog B45b).
+"""The network retry the proxy's source fetchers call, and CI's cache of their raw downloads (W21, backlog B45b; W24, B62).
 
-purpose: `prefetch` runs fetch_lua.py and fetch_ui.py (the outputs build.sh uses) inside a retry on transient network errors; `ci-cache` prints the cache key (the pins) and the raw download paths for $GITHUB_OUTPUT; `retry()` is imported by fetch_dxvk.py
-usage: python3 proxy/tools/netfetch.py prefetch | ci-cache   (game root: proxy/tools/layout.py game-root; ci-cache paths are relative to the working directory)
-when: CI's proxy job runs both before `build.sh all` (the `{{wsc fetch_cache}}` render block); by hand: `prefetch` before an offline build
-not-a-verb: needs network and writes build output, like the fetchers it wraps
+purpose: `retry()` (and `transient()`) wrap each download and git fetch of fetch_lua.py, fetch_ui.py and fetch_dxvk.py on transient network errors, one stderr line per retry; `ci-cache` prints the cache key (the pins) and the raw download paths for $GITHUB_OUTPUT
+usage: python3 proxy/tools/netfetch.py ci-cache   (game root: proxy/tools/layout.py game-root; paths relative to the working directory); the fetchers import retry, transient, _git_ok and _force_remove
+when: CI's proxy job runs `ci-cache` before `build.sh all` (the `{{wsc fetch_cache}}` render block); the fetchers call retry() wherever they run (build.sh, --docker, CI, the PC)
+not-a-verb: a library of the fetchers plus CI's cache key, not a registry operation
 
-Why a wrapper and not a retry inside fetch_lua.py and fetch_ui.py: both are DLL build-id inputs (build_id.py INPUTS), so editing them
-gives every consumer a new build id for identical DLL bytes (and a consumer's acceptance passes at its pin bump). The fetchers are idempotent:
-they skip what is present and sha-checked, so retrying a whole call equals retrying its failed request, and build.sh then finds
-everything in place and makes no network call. The sha256 checks stay in the fetchers; every mismatch and every failed patch raises
-SystemExit there, which is never retried (a wrong byte is never a flake).
-The one place a fetcher is not idempotent: a git fetch that failed after `git init`, or a checkout restored only in part, leaves a
-folder fetch_ui.py trusts or cannot read (it checks only that HEAD is the pinned commit). Before each try `prefetch` removes a
-checkout whose HEAD cannot be read or whose working tree differs from HEAD, so fetch_ui.py fetches it again.
+The retry lives inside the fetchers since W24 (B62): W21 kept it in a CI-only wrapper (`prefetch`) because the fetchers are DLL build-id
+inputs, and W24 changes the DLL inputs anyway, so the PC route (`build.sh --docker`) retries too. This module is imported by the fetchers
+but is not a DLL input (build_id.py INPUTS): it changes whether a download succeeds, never a byte (layout.py is the precedent). The sha256
+checks and the patch checks stay in the fetchers, outside the retried call, and raise SystemExit, which is never retried (a wrong byte is
+never a flake). Retry lines go to stderr: build.sh discards the fetchers' stdout.
 The CI cache holds only raw downloads (tarballs, git checkouts), never the patched trees (build/lua/src, build/ui/src/lua): their
-stamps hold only the tarball's sha256, not the patch list, so a cached patched tree could survive a patch change.
+stamps hold only the tarball's sha256, not the patch list, so a cached patched tree could survive a patch change. fetch_ui.py trusts a
+restored checkout only when HEAD is the pin and the working tree equals HEAD (`_git_ok`); anything else it removes and fetches again.
 """
 import hashlib
 import http.client
 import json
 import os
 import random
-import shutil
 import stat
 import subprocess
 import sys
@@ -53,7 +50,7 @@ def _say(e):
     return text
 
 
-def retry(fn, what, tries=TRIES, delays=DELAYS, sleep=time.sleep, jitter=random.uniform):
+def retry(fn, what, tries=TRIES, delays=DELAYS, sleep=None, jitter=random.uniform):
     """fn() with up to `tries` calls; a transient error waits delay x uniform(0.8, 1.2) and tries again, one line each.
     SystemExit and non-transient errors pass through at once; the last try's error is raised."""
     for n in range(1, tries + 1):
@@ -63,8 +60,8 @@ def retry(fn, what, tries=TRIES, delays=DELAYS, sleep=time.sleep, jitter=random.
             if n == tries or not transient(e):
                 raise
             wait = delays[min(n - 1, len(delays) - 1)] * jitter(0.8, 1.2)
-            print(f'netfetch: {what}: {_say(e)}; retry {n + 1} of {tries} in {round(wait)} s', flush=True)
-            sleep(wait)
+            print(f'netfetch: {what}: {_say(e)}; retry {n + 1} of {tries} in {round(wait)} s', file=sys.stderr, flush=True)
+            (sleep or time.sleep)(wait)
 
 
 def _force_remove(func, path, exc):
@@ -84,32 +81,6 @@ def _git_ok(d):
         return st.returncode == 0 and not st.stdout.strip()
     except OSError:
         return False
-
-
-def clean_checkouts(src):
-    """Remove each git checkout under `src` (rmlui, freetype) that fetch_ui.py would trust or fail on but cannot be complete."""
-    for name in ('rmlui', 'freetype'):
-        d = Path(src) / name
-        if (d / '.git').exists() and not _git_ok(d):
-            shutil.rmtree(d, onexc=_force_remove)
-            print(f'netfetch: {name}: removed {d} (unreadable HEAD or a working tree that differs from it); fetching again', flush=True)
-
-
-def prefetch(root=None, sleep=time.sleep):
-    """Fetch every source build.sh compiles, each fetcher inside retry(); the outputs are the ones build.sh passes."""
-    import fetch_lua
-    import fetch_ui
-    root = Path(root) if root else layout.game_root()
-    ui = root / 'build' / 'ui' / 'src'
-    retry(lambda: fetch_lua.fetch(root / 'build' / 'lua'), 'fetch_lua', sleep=sleep)
-
-    def ui_once():
-        clean_checkouts(ui)
-        if fetch_ui.main(['--out', str(ui)]) != 0:
-            raise SystemExit('netfetch: fetch_ui failed')
-
-    retry(ui_once, 'fetch_ui', sleep=sleep)
-    print(f'netfetch: prefetch done under {root / "build"}', flush=True)
 
 
 def ci_cache(root=None, cwd=None):
@@ -132,9 +103,6 @@ def ci_cache(root=None, cwd=None):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if argv == ['prefetch']:
-        prefetch()
-        return 0
     if argv == ['ci-cache']:
         sys.stdout.write(ci_cache())
         return 0
