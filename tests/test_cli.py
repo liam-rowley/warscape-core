@@ -171,5 +171,54 @@ class PrePush(unittest.TestCase):
             repo.close()
 
 
+class RunRefsGate(unittest.TestCase):
+    """B13: the `run_refs` gate on a throwaway repo (tracked files only; a build path is ignored on purpose)."""
+
+    def setUp(self):
+        self.repo = TempRepo({'.gitignore': 'build/\n', 'logs/a.log': 'x\n', 'adapter/probes/x.lua': '--\n', 'adapter/runs/20261105_a/raw.log': 'x\n'})
+
+    def tearDown(self):
+        self.repo.close()
+
+    def gate(self, readme, name='adapter/runs/20261105_a/README.md', extra=''):
+        self.repo.write(name, readme)
+        if extra:
+            self.repo.write('wsc.toml', self.repo.read('wsc.toml') + extra)
+        subprocess.run(['git', '-C', str(self.repo.root), 'add', '-A'], check=True)
+        return self.repo.wsc('gates', '--only', 'run_refs')
+
+    def test_committed_files_relative_suffix_ignored_url_and_glob_pass(self):
+        rc, out = self.gate('Log `logs/a.log`, [raw](raw.log), `probes/x.lua`, build output `build/out.dll`, [web](https://x.y/z.md), `logs/*.log`.\n')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('every run README reference exists (1 run READMEs, 4 references)', out)
+
+    def test_a_missing_log_fails_naming_the_readme_and_line(self):
+        rc, out = self.gate('Run notes.\nThe pass wrote `logs/never_committed.log`.\n')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('adapter/runs/20261105_a/README.md:2: names `logs/never_committed.log`', out)
+
+    def test_an_untracked_file_does_not_count(self):
+        self.repo.write('logs/new.log', 'x\n')
+        rc, out = self.gate('`logs/new.log`\n')
+        self.assertEqual(rc, 0, out)   # git add -A in gate() tracked it
+        self.repo.write('logs/late.log', 'x\n')
+        self.repo.write('adapter/runs/20261105_a/README.md', '`logs/late.log`\n')
+        subprocess.run(['git', '-C', str(self.repo.root), 'add', 'adapter/runs/20261105_a/README.md'], check=True)
+        self.assertEqual(self.repo.wsc('gates', '--only', 'run_refs')[0], 1)   # on disk but never committed
+
+    def test_a_run_folder_dated_before_the_grandfather_date_is_skipped_and_counted(self):
+        rc, out = self.gate('`logs/gone.log`\n', extra='\n[gates]\nrun_refs_since = "2026-11-06"\n')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('1 before 2026-11-06 skipped', out)
+        rc, out = self.gate('`logs/gone.log`\n', name='adapter/runs/20261106_b/README.md')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('adapter/runs/20261106_b/README.md:1', out)
+
+    def test_a_bad_date_key_is_a_config_error(self):
+        rc, out = self.gate('x\n', extra='\n[gates]\nrun_refs_since = "yesterday"\n')
+        self.assertNotEqual(rc, 0)
+        self.assertIn('run_refs_since', out)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -2,7 +2,7 @@
 """esf_diff.py: node-level diff of two ESF files (saves, startpos) by record path. Stdlib only.
 
 purpose: list changed values, added and removed records and record-array items between two saves, by record path (NAME[i], NAME#n, @N = child position)
-usage: python3 -I saves/core/esf_diff.py A.save B.save [--under PATH] [--max N] [--ignore-float EPS] [--skip NAME,NAME|@<game>/noise.txt]
+usage: python3 -I saves/esf_diff.py A.save B.save [--under PATH] [--max N] [--ignore-float EPS] [--skip NAME,NAME|@<game>/noise.txt]
 when: mapping which records encode a game state from two saves made one action apart (saves/SAVE_FORMAT.md), and checking that a recipe changed only what it meant to; read-only, offset based (two files in memory, no tree objects)
 not-a-verb: a game-agnostic ESF reader run on the PC against saves outside the repo (warscape-core candidate, D10)
 

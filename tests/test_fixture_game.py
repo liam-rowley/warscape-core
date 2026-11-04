@@ -67,6 +67,18 @@ class Verbs(Fixture):
             self.assertIn('F2: brief: fixture rule: the brief does not say', p.stderr)
             self.assertIn('1 problems', p.stdout)
 
+    def test_committed_views_beside_a_jobs_registry_fail_check_and_the_gate_naming_c19(self):
+        """B49: `[views] commit = true` with a `jobs` registry could never pass a brief branch (C19); `jobs check` and the `jobs` gate say so at once."""
+        with tempfile.TemporaryDirectory() as t:
+            g = Path(t) / 'g'
+            shutil.copytree(self.d, g, ignore=shutil.ignore_patterns('.git'))
+            toml = g / 'wsc.toml'
+            toml.write_text(toml.read_text(encoding='utf-8').replace('commit = false', 'commit = true'), encoding='utf-8', newline=chr(10))
+            for args in (['jobs', 'check'], ['gates', '--only', 'jobs']):
+                p = subprocess.run([sys.executable, str(ROOT / 'wsc.py'), '--root', str(g), *args], capture_output=True, text=True, timeout=60)
+                self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+                self.assertIn('views are committed beside a jobs registry: set `[views] commit = false` in wsc.toml (C19)', p.stdout + p.stderr)
+
     def test_next_names_the_job_and_uses_the_configured_texts(self):
         rc, out, err = self.wsc('jobs', 'next', '--offline')
         self.assertEqual(rc, 0, err)
