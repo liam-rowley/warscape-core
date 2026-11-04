@@ -30,6 +30,7 @@ python3 wsc.py --help                      # verbs: reg, find, gates, jobs, poli
 python3 wsc.py find shadow resolution      # one search across every registry
 python3 wsc.py reg add tools path/to/tool.py
 python3 wsc.py reg set engine_facts some.fact state=verified date=2026-10-28 evidence=runs/20261028_a
+python3 wsc.py reg remove engine_facts some.fact   # refused, nothing written, while any row, tool file or job folder points at it
 python3 wsc.py gates --fast                # what the pre-push hook runs; `gates` alone adds the host tests (CI)
 git config core.hooksPath .githooks        # once per clone
 ```
@@ -85,7 +86,7 @@ after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs vi
 | `CLAUDE.md` | rules for every chat and agent working here |
 | `docs/DECISIONS.md` | core decisions, dated, append only |
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
-| `docs/UPGRADING.md` | what a game changes when its core pin crosses 0.24.0 or 0.26.0 |
+| `docs/UPGRADING.md` | what a game changes when its core pin crosses 0.24.0, 0.26.0, 0.27.0 or 0.34.0 |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
 | `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |

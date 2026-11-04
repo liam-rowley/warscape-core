@@ -29,6 +29,24 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
    match by path segment: `registries/*` no longer covers `registries/<name>/<row>.json`. Until the bump merges, the game's pull requests are judged
    as before, with the note.
 
+## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
+- **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
+- **CI:** install `$(python3 core/proxy/tools/toolchain.py apt)` with `--no-install-recommends` instead of `g++-mingw-w64-i686` (else `build.sh`
+  refuses once the archive moves), then `wsc ci render` (`{{wsc fetch_cache}}` is two steps). `build_id.py` test fixtures copy `toolchain.py`.
+- **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
+- `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
+
+## DLL changes in 0.34.0 (W33, C29)
+- **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
+  row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
+  tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".
+- **Migration:** a release that set `dev.file_rules` for shipped data rules moves them to `proxy.file_rules`; the player ini then sets no
+  dev key. A dev launch's `dev.file_rules` stays and wins on the same path.
+- **New log lines:** `patch_engine: protections restored on <n> page(s): ...` (and `... left changed` per bad page), `thread: <name> started
+  (tid N)`, the `dev:` line's `threads at the first Direct3DCreate9: state=<0|1> ctl=<0|1>`, `redirect: <n> rules from <path> (proxy.file_rules)`.
+- **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
+  `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
+
 ## Gate changes in 0.36.0 (W28, C31): the steps at the pin bump
 - **`[gates] skip`** takes `"<gate>:<decision id>"` only; a bare name is a config error. Add a decisions row first, then skip under its id. Each skip prints a warning line.
 - **`verified_dates`** no longer takes `3-10`, "session", `.md)` or `v2` as a date: fix each flagged line with its true date or run id (`git log`, the report).

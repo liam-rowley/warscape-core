@@ -39,3 +39,6 @@ commit = false              # views go to the git-ignored dir (default "_scratch
   With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
   registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
   either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
+- **Removing a row (W15):** `python3 core/wsc.py reg remove <reg> <id>...` replaces `git rm registries/<name>/<file>.json`. It refuses, writing
+  nothing, while an `x-ref` field, a tool's `superseded:<id>`, a tool file still in the repo or a `jobs/<id>/` folder points at a row, or when
+  the removal adds a check problem; rows that only point at each other go in one call.

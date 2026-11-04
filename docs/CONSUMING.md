@@ -17,24 +17,6 @@ tags but not the pinned one fails and names the fix, `git -C core fetch --tags` 
 
 The options weighed against it (subtree, a vendored copy, `pip install`) and the costs of the recommendation: [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md).
 
-## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
-- **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
-- **CI:** install `$(python3 core/proxy/tools/toolchain.py apt)` with `--no-install-recommends` instead of `g++-mingw-w64-i686` (else `build.sh`
-  refuses once the archive moves), then `wsc ci render` (`{{wsc fetch_cache}}` is two steps). `build_id.py` test fixtures copy `toolchain.py`.
-- **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
-- `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
-
-## DLL changes in 0.34.0 (W33, C29)
-- **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
-  row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
-  tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".
-- **Migration:** a release that set `dev.file_rules` for shipped data rules moves them to `proxy.file_rules`; the player ini then sets no
-  dev key. A dev launch's `dev.file_rules` stays and wins on the same path.
-- **New log lines:** `patch_engine: protections restored on <n> page(s): ...` (and `... left changed` per bad page), `thread: <name> started
-  (tid N)`, the `dev:` line's `threads at the first Direct3DCreate9: state=<0|1> ctl=<0|1>`, `redirect: <n> rules from <path> (proxy.file_rules)`.
-- **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
-  `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
-
 ## Wiring a game repo (the steps, once approved)
 
 ```sh
@@ -113,11 +95,21 @@ jobs:
 - **Game upgrade:** `python3 core/wsc.py core bump vX.Y.Z` (from 0.36.0 on; a bump to 0.36.0 itself is the hand steps: `git -C core fetch --tags`,
   check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
-- **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate) or 0.26.0 (base-judged policy, C24) are in
-  [UPGRADING.md](UPGRADING.md).
+- **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
+  or 0.34.0 (DLL changes, C29) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
-Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`.
+Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
+
+## Tool retirement (0.37.0, core W15, C33; opt-in)
+A tool's last use is the later of its row's `last_used` (the floor: the day the row was added, or `wsc reg set tools <id> last_used=<date>`)
+and the newest `done` job whose `jobs/<id>/report.md` cites it, dated by the newest `## Round N (YYYY-MM-DD, ...)` heading of its `review.md`
+(a legacy review: the first date in its first 5 lines). It is derived from the working tree at check time; nothing writes it into rows.
+- **Citation:** the tool's `path` as a whole path (`core/` before it still counts; xharness/job.sh or harness/job.sh.bak does not), or,
+  for a verb, `wsc <verb>`, `wsc.py <verb>` or `wsc.<verb>`.
+- **Opt in:** `[tools] retire_after_days = 90` (default 0: off; the core keeps 0, its tools' uses are in its consumers' reports). Then
+  `python3 core/wsc.py reg check tools` warns per stale live tool, naming where its date came from (the report's path in brackets, or `(row)`):
+  supersede it, `reg remove` it after deleting the file, or cite it in the next report that uses it.
 
 ## Extending a core schema (0.17.0)
 A game that needs a field a core schema lacks does not copy the schema (its copy would miss every later core change): its own schema
@@ -315,5 +307,8 @@ From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discover
   x86 tools (`x86re`, `console_cmds`, `exe_strings build`) need capstone and pefile in the RE environment: `python3 core/discovery/re_env.py <dir outside the repo>` downloads the
   wheels pinned by sha256 in that file and builds the venv, then run the tool with `<dir>/venv/.../python -I`. A tool that lacks its extra stops with a message that names this fix;
   the host tests skip the capstone cases without it.
+- **`find` and the exe index (0.37.0, W15):** `python3 core/wsc.py find <word>` also searches the adapter's `exe_strings.tsv.gz` for exe-shaped
+  words (4+ characters with an inner `_` or a lower-to-upper case change: `gfx_hardware_shadows`, `CampaignUI`; every word must appear, as literals,
+  case-insensitively); `--exe` forces it for any word, `--in exe_strings` searches only it. Without the table `find` prints what it always did.
 - **Re-run steps:** `python3 core/wsc.py discovery all` on the PC, then `discovery check` and `git diff --stat` (empty when nothing changed in the game); `discovery check` and
   `discovery gate` need only committed files and belong in the game's thin real-repo test.

@@ -2,7 +2,7 @@
 """Index every string of a 32-bit Warscape exe with the code and data that reference it, and search the committed index.
 
 purpose: list each ASCII and UTF-16LE string (4+ printable characters, NUL-terminated) in the exe's non-executable sections with its RVA, section, the code sites whose relocated operand points at it (count and first four instruction RVAs) and the data dwords that point at it (count and first two: name tables, Lua registration tables), into a sorted deterministic tsv.gz; `find` searches that table without the RE venv
-usage: <re venv python> -I discovery/exe_strings.py build <exe> [--out <adapter>/exe_strings.tsv.gz] [--check]; python3 discovery/exe_strings.py find <regex> [--table ...] [--refs] [-n 50]
+usage: <re venv python> -I discovery/exe_strings.py build <exe> [--out <adapter>/exe_strings.tsv.gz] [--check]; python3 discovery/exe_strings.py find <regex> [--table ...] [--refs] [-n 50]; or wsc find <word> (exe-shaped words, as literals)
 when: J9 and every later RE session on the exe: `find` a tweaker, Lua or prefs name first, then x86re.py on the code RVAs it lists; build again (and --check in review) after a game update
 not-a-verb: reads a game exe in place (read only) and writes one discovery table; outside the wsc registry operations
 
@@ -75,14 +75,25 @@ def build(exe):
     return rows
 
 
-def find(table, pattern, refs_only=False, limit=50):
+def search(table, pattern, refs_only=False):
+    """The rows of the table whose string text matches `pattern` (a regex string or compiled); `refs_only`: only referenced strings.
+    `wsc find` calls it for exe-shaped words."""
     _, rows = tsvgz.read(table)
-    rx = re.compile(pattern)
-    hits = [r for r in rows if rx.search(r[8]) and (not refs_only or r[4] != '0' or r[6] != '0')]
+    rx = re.compile(pattern) if isinstance(pattern, str) else pattern
+    return [r for r in rows if rx.search(r[8]) and (not refs_only or r[4] != '0' or r[6] != '0')]
+
+
+def line(r):
+    """One printed hit: RVA, section, encoding, code and data references, the string."""
+    code = f'code {r[4]}' + (f' [{r[5]}]' if r[5] else '')
+    data = f'data {r[6]}' + (f' [{r[7]}]' if r[7] else '')
+    return f'{r[0]} {r[1]:<6} {r[2]} {code:<52} {data:<30} {r[8]!r}'
+
+
+def find(table, pattern, refs_only=False, limit=50):
+    hits = search(table, pattern, refs_only)
     for r in hits[:limit]:
-        code = f'code {r[4]}' + (f' [{r[5]}]' if r[5] else '')
-        data = f'data {r[6]}' + (f' [{r[7]}]' if r[7] else '')
-        print(f'{r[0]} {r[1]:<6} {r[2]} {code:<52} {data:<30} {r[8]!r}')
+        print(line(r))
     if len(hits) > limit:
         print(f'... {len(hits) - limit} more (-n to show more)')
     return hits
