@@ -736,5 +736,54 @@ Test-Case 'headless: the adapter block is read, and the launch refuses a d3d9.dl
     Assert-True (Bytes-Contain ([byte[]]($Latin1.GetBytes('xx headless_status.json yy'))) 'headless_status.json') 'Bytes-Contain'
     Remove-Item -LiteralPath $dll -Force
 }
+# W38: the proxy writes `refused` and exits with exit_code; a watcher that looks after the exit must still report the proxy's detail.
+# Both orders are made deterministic by stubbing the process lookups (functions shadow cmdlets for the callee: PowerShell scopes dynamically).
+function Write-UnitHStatus([int]$p, [string]$detail, [int]$ageS = 0) {
+    $sp = GamePath $A.headless.status_file
+    New-Item -ItemType Directory -Path (Split-Path $sp) -Force | Out-Null
+    [IO.File]::WriteAllText($sp, "{`"pid`": $p, `"state`": `"refused`", `"detail`": `"$detail`", `"exit_code`": 2160}")
+    if ($ageS) { (Get-Item -LiteralPath $sp).LastWriteTimeUtc = [DateTime]::UtcNow.AddSeconds(-$ageS) }
+}
+Test-Case 'headless wait (W38): a game gone before the first look still reports its own refusal; an older refusal is not taken for it' {
+    function Get-GameProcs { return @() }
+    $o = New-Object Collections.Generic.List[string]
+    $since = [DateTime]::UtcNow.AddSeconds(-2)
+    Write-UnitHStatus 777 'no target: the virtual display is gone'
+    Assert-Match (Headless-Wait 5 $o $since) 'the proxy refused the launch: no target: the virtual display is gone \(exit code 2160' 'the detail, written since the launch'
+    Write-UnitHStatus 777 'an old refusal' 3600
+    $r = Headless-Wait 5 $o $since
+    Assert-Match $r 'is not running after the start \(exit code 2160 = the proxy refused' 'an hour-old refusal: the generic line'
+    Assert-NotMatch $r 'an old refusal' 'not the stale detail'
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force
+    Assert-Match (Headless-Wait 5 $o $since) 'is not running after the start' 'no status file at all: the generic line'
+}
+Test-Case 'headless wait (W38): a game that writes refused after the loop read it and then exits reports the refusal; another pid does not count' {
+    function Get-GameProcs { return @([pscustomobject]@{ Id = 4321 }) }
+    $script:W38Pid = 4321
+    # only the alive check on the game's pid is stubbed (Pump calls Get-Process too): the loop's read saw nothing; then the write and the exit
+    function Get-Process {
+        [CmdletBinding()] param([int]$Id = 0, [string]$Name = '')
+        if ($Id -eq 4321) { Write-UnitHStatus $script:W38Pid 'refused after the read'; return $null }
+        if ($Name) { return Microsoft.PowerShell.Management\Get-Process -Name $Name -ErrorAction SilentlyContinue }
+        if ($Id) { return Microsoft.PowerShell.Management\Get-Process -Id $Id -ErrorAction SilentlyContinue }
+        return Microsoft.PowerShell.Management\Get-Process
+    }
+    $o = New-Object Collections.Generic.List[string]
+    $since = [DateTime]::UtcNow.AddSeconds(-2)
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force -ErrorAction SilentlyContinue
+    Assert-Match (Headless-Wait 5 $o $since) 'the proxy refused the launch: refused after the read \(exit code 2160' 'the refusal, read again after the exit'
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force
+    $script:W38Pid = 999
+    Assert-Match (Headless-Wait 5 $o $since) 'the game exited before reporting on_virtual' 'a refusal for another pid: the generic line'
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force -ErrorAction SilentlyContinue
+}
+Test-Case 'kill (W38): a game that exited just before the kill is logged as gone, not a watcher error' {
+    $gone = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'exit' -PassThru -WindowStyle Hidden; $gone.WaitForExit()
+    $script:W38Gone = $gone.Id
+    function Get-GameProcs { return @([pscustomobject]@{ Id = $script:W38Gone; ProcessName = 'Game' }) }
+    $o = New-Object Collections.Generic.List[string]
+    Assert-True (Kill-Game 'unit test' $o) 'no zombie, no throw'
+    Assert-Match ($o -join "`n") "taskkill /F /T /PID $($script:W38Gone) \(Game\)" 'the taskkill outcome is logged'
+}
 Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 exit (Finish-Tests 'unit')
