@@ -209,7 +209,7 @@ def w27(steps, report='# J1 report\n', base=None, cfg=CFG, base_rows=None, chang
             review = text
     sess = lambda p: [c[1] for c in commits if p in c[2]]
     warns = []
-    errs = check(branch, list(changed), base_rows or {'J1': ROW, 'J2': OTHER}, {'J1': DONE, 'J2': OTHER},
+    errs = check(branch, list(changed), base_rows or {'J1': ROW, 'J2': OTHER}, {**(base_rows or {'J2': OTHER}), 'J1': DONE},
                  base or files(**{'jobs/J1/brief.md': 'b'}), files(**{'jobs/J1/report.md': report, REV: review}), sess, cfg=cfg,
                  reads=fake_reads(commits, hist, **kw), warnings=warns)
     return errs, warns
