@@ -8,6 +8,10 @@
 
 namespace wsp {
 
+// B58 a: the thread that holds the stage's lock is the one re-entering (an adapter callback sent a message to the window on its own thread).
+// owner 0 = nobody holds the lock. Only the owning thread can have stored its own id, so an unlocked read cannot match another thread.
+inline bool ReenteredBy(uint32_t owner, uint32_t me) { return owner != 0 && owner == me; }
+
 void GestureInit();     // DllMain, after the dev side and before UiInit: reads controls.gestures, checks the adapter
 bool GestureOn();       // the key is on, the adapter has gestures and the plan allows D3D hooks
 void GestureSetWindow(void* hwnd);   // the subclassed game window (ui_host.cpp Subclass)

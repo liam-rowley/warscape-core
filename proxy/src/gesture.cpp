@@ -25,7 +25,15 @@ namespace {
 using namespace gest;
 
 SRWLOCK s_lock = SRWLOCK_INIT;
-struct Lock { Lock() { AcquireSRWLockExclusive(&s_lock); } ~Lock() { ReleaseSRWLockExclusive(&s_lock); } };
+// B58 a: the thread that holds s_lock (0: none). Set after acquiring, cleared before releasing, so only the owning thread can ever read its
+// own id here: a callback that sends a window message to the game from that thread re-enters GestureMessage and is recognised, never waited on.
+volatile DWORD s_lockOwner = 0;
+volatile LONG s_reentered = 0;         // messages passed untouched because the lock owner sent them (reported in gesture info)
+volatile LONG s_ownsMouse = 0;         // B53: a gesture holds the buttons; GestureMessage publishes it under s_lock, GestureOwnsMouse reads it
+struct Lock {
+    Lock() { AcquireSRWLockExclusive(&s_lock); s_lockOwner = GetCurrentThreadId(); }
+    ~Lock() { s_lockOwner = 0; ReleaseSRWLockExclusive(&s_lock); }
+};
 
 bool s_key = false, s_on = false;
 std::string s_offWhy = "not initialised (the proxy is in pass-through)";
@@ -46,7 +54,8 @@ std::vector<Order> s_pending; bool s_commitPending = false;
 long s_commitSeq = 0, s_commitDone = 0; int s_commitSent = 0; std::string s_commitWhy;
 HANDLE s_commitEvt = nullptr;
 volatile LONG s_injectMods = -1;       // the ctl verb's modifier set for the messages it sends (-1: read the keyboard)
-bool s_ctlHeld = false; int s_ctlX = 0, s_ctlY = 0;
+bool s_ctlHeld = false;                // B58 c: the stage took the last ctl press (phase Pending or Active)
+int s_ctlX = 0, s_ctlY = 0;
 uint64_t s_previewFrames = 0; size_t s_lastDrawn = 0, s_lastHidden = 0;
 std::string s_probe;                   // the window thread's answer to a probe (JSON members)
 
@@ -159,13 +168,13 @@ Counters Delta(const Counters& a, const Counters& b) {
     return d;
 }
 std::string InfoJson() {   // under s_lock
-    char b[600];
+    char b[800];
     snprintf(b, sizeof b, "\"gesture\": {\"on\": %s, \"key\": %s, \"adapter\": %s, \"off_why\": %s, \"window\": %s, \"phase\": \"%s\", \"kind\": \"%s\", "
              "\"bindings\": {\"move\": %u, \"rotate\": %u}, \"drag_px\": %d, \"short_drag_m\": %.2f, \"pivot_fwd_m\": %.2f, \"last_why\": %s, "
-             "\"preview_frames\": %llu, \"preview_last_drawn\": %zu, \"preview_last_hidden\": %zu, \"commit\": {\"seq\": %ld, \"done\": %ld, \"sent\": %d, \"why\": %s}, \"counters\": ",
+             "\"preview_frames\": %llu, \"preview_last_drawn\": %zu, \"preview_last_hidden\": %zu, \"reentered\": %ld, \"commit\": {\"seq\": %ld, \"done\": %ld, \"sent\": %d, \"why\": %s}, \"counters\": ",
              s_on ? "true" : "false", s_key ? "true" : "false", s_ad ? "true" : "false", JStr(s_on ? "" : s_offWhy).c_str(), s_hwnd ? "true" : "false",
              PhaseName(s_m.phase), KindName(s_m.kind), s_m.moveMods, s_m.rotateMods, s_m.dragPx, s_pl.p.shortDragM, s_pl.p.pivotFwdM, JStr(s_lastWhy).c_str(),
-             (unsigned long long)s_previewFrames, s_lastDrawn, s_lastHidden, s_commitSeq, s_commitDone, s_commitSent, JStr(s_commitWhy).c_str());
+             (unsigned long long)s_previewFrames, s_lastDrawn, s_lastHidden, (long)s_reentered, s_commitSeq, s_commitDone, s_commitSent, JStr(s_commitWhy).c_str());
     return b + CountersJson(C) + "}";
 }
 
@@ -211,7 +220,10 @@ WPARAM MkFlags(unsigned mods) { return (mods & kModCtrl ? MK_CONTROL : 0) | (mod
 } // namespace
 
 bool GestureOn() { return s_on; }
-void GestureSetWindow(void* hwnd) { Lock l; if (!s_hwnd) s_hwnd = (HWND)hwnd; }
+void GestureSetWindow(void* hwnd) {
+    if (ReenteredBy(s_lockOwner, GetCurrentThreadId())) return;   // B58 a: called from a callback under the lock; the window is set already or will be
+    Lock l; if (!s_hwnd) s_hwnd = (HWND)hwnd;
+}
 
 void GestureInit() {
     Runtime& rt = Rt();
@@ -245,19 +257,25 @@ void GestureInit() {
 GestureMsgResult GestureMessage(void* hwnd, uint32_t msg, uint32_t wp, intptr_t lp, bool mouseToEngine) {
     GestureMsgResult r; r.wp = wp;
     if (!s_on) return r;
+    // B58 a: a callback of the adapter (called under s_lock, which is not re-entrant) sent a message to the window on this very thread. It
+    // passes to the game untouched: no state change, no wait.
+    if (ReenteredBy(s_lockOwner, GetCurrentThreadId())) {
+        if (InterlockedIncrement(&s_reentered) == 1) LOGW("gesture: an adapter callback sent window message 0x%04X while the stage held its lock: passed to the game untouched (counted as reentered)", msg);
+        return r;
+    }
     const bool probe = s_probeMsg && msg == s_probeMsg;
-    if (!probe && Classify(msg, wp) == kClsOther) return r;
+    if (!probe && Classify(msg, wp, lp, (uintptr_t)hwnd) == kClsOther) return r;
     Lock l;
     if (!s_hwnd) s_hwnd = (HWND)hwnd;
     if (probe) { s_probe = Probe(); r.action = kSwallow; return r; }   // our own message: never the game's
     const unsigned mods = ReadMods();
     const int x = (int)(short)LOWORD((DWORD)lp), y = (int)(short)HIWORD((DWORD)lp);
-    FeedOut f = Feed(s_m, msg, wp, x, y, mods, mouseToEngine, false);
+    FeedOut f = Feed(s_m, msg, wp, x, y, mods, mouseToEngine, false, false, kNone, lp, (uintptr_t)hwnd);
     if (f.needsEligibility) {
         ++C.presses;
         std::string why; const bool ok = PressEligible(x, y, mods, why);
         if (!ok) { ++C.inert; s_lastWhy = why; }
-        f = Feed(s_m, msg, wp, x, y, mods, mouseToEngine, true, ok);
+        f = Feed(s_m, msg, wp, x, y, mods, mouseToEngine, true, ok, kNone, lp, (uintptr_t)hwnd);
     }
     if (f.fed) {
         const Out& o = f.sm;
@@ -280,10 +298,11 @@ GestureMsgResult GestureMessage(void* hwnd, uint32_t msg, uint32_t wp, intptr_t 
     r.action = f.action;
     if (f.action == kSwallow) ++C.swallowed; else ++C.passed;
     if (f.action == kPassNoButton) { r.wp = ClearLButton(wp); ++C.noButton; }
+    InterlockedExchange(&s_ownsMouse, (s_m.phase != kIdle || s_m.swallowRUp) ? 1 : 0);   // B53: after every message fed
     return r;
 }
 
-bool GestureOwnsMouse() { return s_on && (s_m.phase != kIdle || s_m.swallowRUp); }
+bool GestureOwnsMouse() { return s_ownsMouse != 0; }   // B53: one published word, not two machine fields read unlocked
 
 void GesturePresent(void* device, int bbW, int bbH) {
     if (!s_on || !device) return;
@@ -332,7 +351,9 @@ bool GestureCtl(const std::string& arg, double timeoutS, std::string& result, st
     if (a.op == "press") {
         const LPARAM lp = MAKELPARAM((WORD)(short)a.x, (WORD)(short)a.y);
         ok = Send(WM_MOUSEMOVE, mk, lp, timeoutS) && Send(WM_LBUTTONDOWN, MK_LBUTTON | mk, lp, timeoutS);
-        s_ctlHeld = true; s_ctlX = a.x; s_ctlY = a.y;
+        // B58 c: held only if the stage took the press (a gesture started). An inert press, one over a panel, or one eligibility refused
+        // went to the game as a real press; the next `move` is then a plain cursor move, not a drag, and the driver sends `release`.
+        Lock l; s_ctlHeld = (s_m.phase == kPending || s_m.phase == kActive); s_ctlX = a.x; s_ctlY = a.y;
     } else if (a.op == "move") {
         ok = Send(WM_MOUSEMOVE, (s_ctlHeld ? MK_LBUTTON : 0) | mk, MAKELPARAM((WORD)(short)a.x, (WORD)(short)a.y), timeoutS);
         s_ctlX = a.x; s_ctlY = a.y;
@@ -358,7 +379,7 @@ bool GestureCtl(const std::string& arg, double timeoutS, std::string& result, st
         commit = b + JStr(s_commitWhy) + "}";
     }
     Lock l;
-    result = "\"delta\": " + CountersJson(Delta(before, C)) + ", \"phase\": " + JStr(PhaseName(s_m.phase)) + ", \"kind\": " + JStr(KindName(s_m.kind)) +
+    result = std::string("\"held\": ") + (s_ctlHeld ? "true" : "false") + ", \"delta\": " + CountersJson(Delta(before, C)) + ", \"phase\": " + JStr(PhaseName(s_m.phase)) + ", \"kind\": " + JStr(KindName(s_m.kind)) +
              ", \"last_why\": " + JStr(s_lastWhy) + ", " + commit + ", " + PlanJson();
     return true;
 }
