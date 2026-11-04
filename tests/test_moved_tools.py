@@ -162,5 +162,48 @@ class NoGameNames(unittest.TestCase):
         self.assertEqual(bad, [], '\n'.join(bad))
 
 
+class NoOldLayoutPaths(unittest.TestCase):
+    """B24: the trees that moved into the core (proxy/, harness/, saves/, discovery/) have no `core/` folder any more; a comment, a docstring or a
+    `usage:` line that names `harness/core/job.sh` sends the reader to a path that is gone. (`viewer/core/` is still a consumer's folder and is not
+    matched.) A match that must stay has an entry in ALLOW: (path, matched text) -> (how many times, why); no blanket exemption. The count makes a
+    new match in an allowed file fail, and a stale entry fail once its strings are re-stamped."""
+    OLD = re.compile(r'(?:proxy|harness|saves|discovery)/core/')
+    TREES = ('proxy/', 'harness/', 'saves/', 'discovery/')
+    RESULT = ('written into a committed result of a game (a generator or provenance string, or a line of a generated README): changing it moves the '
+              "game's committed bytes; backlog B55 re-stamps them in one regeneration commit on the game")
+    ALLOW = {
+        ('discovery/README.md', 'discovery/core/'): (None, 'documents the old-to-new paths on purpose (the table of moved tools)'),
+        ('discovery/assets.py', 'discovery/core/'): (1, RESULT),
+        ('discovery/db.py', 'discovery/core/'): (2, RESULT),
+        ('discovery/engine_api.py', 'discovery/core/'): (3, RESULT),
+        ('discovery/gate.py', 'discovery/core/'): (2, RESULT),
+        ('discovery/loc.py', 'discovery/core/'): (1, RESULT),
+        ('discovery/lua_api.py', 'discovery/core/'): (1, RESULT),
+        ('discovery/ron2json.py', 'discovery/core/'): (1, RESULT),
+        ('discovery/shader_catalog.py', 'discovery/core/'): (1, RESULT),
+        ('discovery/ui_atlas.py', 'discovery/core/'): (5, RESULT),
+        ('proxy/tools/gen_tables.py', 'discovery/core/'): (1, 'written into the generated console_table.h, a DLL input of every game: changing it changes their build ids'),
+        ('proxy/src/camera.h', 'harness/core/'): (1, 'a comment in a DLL input: fix it with the next DLL change'),
+        ('proxy/tools/pc_deploy.py', 'harness/core/'): (1, 'code that still supports the old layout on purpose (a game that has not bumped its pin)'),
+        ('harness/watcher.ps1', 'harness/core/'): (2, 'the watcher kit: fixed with the next watcher change (W10), so its version and the consumer rule-79 streak move once'),
+    }
+
+    def test_no_moved_file_names_a_path_that_is_gone(self):
+        files = subprocess.run(['git', '-C', str(ROOT), 'ls-files'], capture_output=True, text=True).stdout.splitlines()
+        found, bad = {}, []
+        for f in files:
+            if not f.startswith(self.TREES) or not (ROOT / f).is_file():
+                continue
+            for n, line in enumerate((ROOT / f).read_bytes().decode('utf-8', 'replace').splitlines(), 1):
+                for m in self.OLD.finditer(line):
+                    found[(f, m.group(0))] = found.get((f, m.group(0)), 0) + 1
+                    if (f, m.group(0)) not in self.ALLOW:
+                        bad.append(f'{f}:{n}: names {m.group(0)}, which no longer exists in the core: {line.strip()[:100]}')
+        for key, (count, why) in self.ALLOW.items():
+            if count is not None and found.get(key, 0) != count:
+                bad.append(f'ALLOW entry {key} expects {count} match(es), found {found.get(key, 0)}: update or remove the entry ({why[:40]}...)')
+        self.assertEqual(bad, [], '\n'.join(bad))
+
+
 if __name__ == '__main__':
     unittest.main()

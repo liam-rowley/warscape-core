@@ -4,7 +4,7 @@
 purpose: (scene, shot, reset, perf, state and cam read ran on the PC in J44, cam, pause and speed in J43, order in J28) name a scenario and a camera pose and get a settled, checked answer back (scene, cam, shot, order, pause, speed, reset, perf, state), over the proxy's ctl channel (job.sh ctl) and the watcher's shot job; game-agnostic, everything game-specific comes from the adapter's `ctl` block and the scenarios registry
 usage: ctl.py [--owner O] [--adapter A] [--registry R] [--out DIR] [--no-pc] <verb> [args]   verbs: scene <id> [--deploy end] | cam <scenario:pose | x y z yaw pitch [fov] | read> | shot <name> | order list | <unit> move x z [facing] [width] [run] | pause on|off | speed <x> | reset [<id>] | perf <seconds> | state | key|click|wait (probe only)
 when: every time an agent needs a known game state or a frame (never type key taps or sleeps for it); the acceptance runner (acceptance.py) calls the same functions
-not-a-verb: a host-side client over harness/core/job.sh and the proxy's ctl verbs, not a registry operation; a J12 core candidate
+not-a-verb: a host-side client over harness/job.sh and the proxy's ctl verbs, not a registry operation; a J12 core candidate
 
 Result contract (every verb, tests/test_ctl.py): `status` ok | failed | refused, `reason`, the verb's fields, `settle` (what it waited for and how
 long), `check` (what was compared: expected against got; ok is never returned without one), `evidence` (paths: shot, state, log) and
@@ -17,7 +17,7 @@ in <state>/ctl/_ctl_session.json, so a later call's `current_kind` uses the row.
 Process Memory counter for the game's pid, nvidia-smi for the device) and the DLL's build id from its load line in proxy.log.
 Routes come from the adapter's `ctl.routes`, per verb and per kind (land, siege, naval, campaign: `current_kind`); one not `reachable` makes the
 verb answer `refused` with its reason and fact. cam sets the pose with the route's `set` chunk, waits its `settle_ms`, reads the pose back with its
-`read` chunk (harness/core/campose.py) and compares within its `tolerance`; pause and speed go through the battle root's RequestSpeed and check
+`read` chunk (harness/campose.py) and compares within its `tolerance`; pause and speed go through the battle root's RequestSpeed and check
 the battle clock's rate against the windows clock over `measure_s` (J43).
 """
 import argparse
