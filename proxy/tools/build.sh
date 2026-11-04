@@ -350,7 +350,7 @@ if [[ "$WHAT" == smoke ]]; then
   SYM="$(python3 "$OWN/wsc.py" --root "$OWN" crash symbolise "$OUT/smoke_dll_fault.dmp" --map "$OUT/$ADAPTER/d3d9.map" --log "$OUT/smoke_dll_fault.log" --dll "$G/d3d9.dll")" \
     || { echo "build.sh smoke: wsc crash symbolise did not name the DLL fault (exit $?)"; echo "$SYM"; exit 1; }
   printf '%s\n' "$SYM"
-  grep -q '^exception frame: d3d9\.dll+0x[0-9a-f]*  \.text: _lua_gettop+0x' <<< "$SYM" || { echo "build.sh smoke: the exception frame is not lua_gettop"; exit 1; }
+  grep -q '^exception frame: d3d9\.dll+0x[0-9a-f]*  \.text: _\?lua_gettop+0x' <<< "$SYM" || { echo "build.sh smoke: the exception frame is not lua_gettop"; exit 1; }
   echo "build.sh smoke: passed (9 launches under wine, 3 dumps; the DLL fault named from the map)"
   summary "- smoke: a fault in the DLL symbolised from the map: \`$(grep '^exception frame:' <<< "$SYM")\`"
   summary "- smoke: self_hash in proxy.log matches d3d9.dll ($SH_MS ms under wine)"

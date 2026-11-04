@@ -89,4 +89,4 @@ sha256 mismatch or a failed patch; `fetch_ui.py` trusts a checkout only when HEA
   the DLL (the module list is printed), 2 refused. The in-process dump has the stacks and the memory they reference, not full memory, so
   scans are best effort; the exception frame is always named.
 - **Proof.** The smoke's step 9 faults inside the DLL (the stand-in exe calls `wsp_sentinel` with a bad `lua_State`) and the verb must
-  name `_lua_gettop`; CI uploads that dump and log as `proxy-smoke-dll-fault`.
+  name `lua_gettop` (with the PE leading underscore when the toolchain adds one); CI uploads that dump and log as `proxy-smoke-dll-fault`.

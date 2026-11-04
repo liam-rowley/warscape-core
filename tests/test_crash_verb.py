@@ -13,10 +13,13 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for p in (ROOT, ROOT / 'tests'):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
-from test_minidump import MAP, build_dump, sample, x86_context  # noqa: E402
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+import importlib.util  # noqa: E402
+_spec = importlib.util.spec_from_file_location('w35_test_minidump', ROOT / 'tests' / 'test_minidump.py')   # the dump builder, by path
+_tm = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_tm)
+MAP, build_dump, sample, x86_context = _tm.MAP, _tm.build_dump, _tm.sample, _tm.x86_context
 from warscape.cli import main  # noqa: E402
 from warscape.verbs import crash  # noqa: E402
 
