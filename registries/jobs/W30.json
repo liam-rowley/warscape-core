@@ -3,10 +3,11 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) R1. ctl.py:155-156 applies min(d, 360-d) only when d <= 360, so asking for yaw 270 and reading back -90.00001 reports failed with a 0.0002 px fit (napoleon run 20261103_j24pc raw/f2_stock/y_270_cam.json; J8 and J24 both explained it away). Use abs((g - e + 180) % 360 - 180) wherever ctl compares angles, with host tests at 270 vs -90.00001, 0 vs 359.9999 and 180 vs -180. Then a jobs check rule: every result with status failed in a run folder a report cites is named in the report's deviations.",
   "title": "Yaw wrap in ctl readback, and failed ctl results named in the report",
   "phase": 1,
-  "status": "review",
+  "status": "fix",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
   "brief": "jobs/W30/brief.md",
-  "report": "jobs/W30/report.md"
+  "report": "jobs/W30/report.md",
+  "review": "jobs/W30/review.md"
 }
