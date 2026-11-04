@@ -10,7 +10,7 @@ From 0.29.0 (W10) `job.sh ctl <owner> ...` needs the game lock: the owner or the
 ## The protocol in one paragraph
 With `dev.ctl=1` the proxy watches `<dev.ctl_dir>`: a request is `<id>.cmd` (one line, a verb and its arguments), taken by renaming it to
 `<id>.cmd.taken`, answered by `<id>.done` (JSON, written atomically, last). Requests run one at a time, oldest write time first. An id is
-1 to 64 of `A-Za-z0-9._-`, not starting with `.` or `_`, and never reused (`_ids.txt` keeps them across launches). `CtlVerbs()` lists the verbs.
+1 to 64 of `A-Za-z0-9._-`, not starting with `.` or `_`, and never reused within a launch or while its `.done` exists (`_ids.txt` keeps them across launches, see "The folder"). `CtlVerbs()` lists the verbs.
 The ctl thread starts at the game's first `Direct3DCreate9`, never in DllMain (W33, C29; `thread: dev.ctl started` in `proxy.log`). A
 request written between process start and then waits for it and is not stale: it was written after the process was created.
 
@@ -21,6 +21,22 @@ leaves its `.cmd` behind). It is taken, its id is recorded as used, and it is an
 `proxy.log`. It is never run. There is no slack: process creation precedes the DLL's load, and no core driver writes a request before its
 launch returns, so a hand-run `job.sh ctl` issued before `job.sh launch` returns is refused: resend it. When the process start time is
 unknown (`GetProcessTimes` failed) every request is accepted and the ctl thread logs one warning at its start.
+
+## `lua`: which files it reads (W34, C8)
+A chunk runs with the game's rights, so `lua <file>` reads only under the game's Lua folder (`DevAdapter::luaDir`) and the ctl folder (`LuaPathAllowed`,
+`proxy/src/devcore.h`, host-tested). A relative path, and a relative `dev.ctl_dir`, resolve against the game folder; `/` and `\`, a `\\?\` prefix and ASCII case do not
+matter. Refused, never resolved: a `..` segment, a segment ending in a dot or a space, `:` after the drive (an alternate stream, `C:x`), a rooted path with no drive,
+UNC and device paths, a reserved device name, a NUL. The answer is `refused`, the reason `lua: <path> is outside the lua folder <luaDir> and the ctl folder`, and the
+bridge never sees the path. Links are not followed: a junction under a root is the folder owner's to make. A driver's scratch chunk goes in the ctl folder.
+
+## The folder (W34, C8)
+- **Owner-only.** The ctl thread gives `<dev.ctl_dir>` a protected DACL with one ACE (`D:PAI(A;OICI;FA;;;OW)`, wherever the folder is, new or existing) and logs
+  `ctl: folder <dir> is owner-only`, or `ctl: could not restrict <dir> (error N): continuing`: a failure never stops the channel (wine and FAT may refuse). Files made
+  from then on inherit it; a file already there keeps its old ACL (`SetFileSecurityW` does not walk the folder). A driver that runs as another user than the game
+  cannot use the folder: it must run as the game's user.
+- **Rotation.** At ctl start and every 500 handled requests the disk keeps the newest 200 `*.cmd.taken` files and, once `_ids.txt` holds more than 8192 ids, its last
+  4096 (`devcore.h` constants, no key). `.done` files are never deleted: a driver may be reading one. Every id stays refused for the whole launch (the set in memory), and
+  an id whose `.done` exists stays refused for good. An id older than the kept window with no `.done` can come back in a later launch, which is safe: a request from an earlier launch is refused as stale.
 
 ## `peek`: a read-only probe (0.18.0, W17)
     peek <site>[+|-<off>] [*[+|-<off>] ...] <len>

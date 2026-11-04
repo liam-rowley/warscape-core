@@ -1,5 +1,5 @@
 // adapter.cpp - the null adapter (J12): the smallest game adapter the proxy core builds and tests against in warscape-core's CI. No real
-// game: an identity no exe has, one engine site that is always refused, the config keys the core reads (fixture registries beside it),
+// game: an identity no exe has, engine sites only the smoke's second host build carries, the config keys the core reads (fixture registries beside it),
 // no console, no camera setter and no orders route. A game repo writes its own adapter.cpp in its proxy/<game>/ folder (docs/CONSUMING.md).
 // W6: a null GestureAdapter (a fixed camera, flat ground at y 0, three fake units, a commit that only counts) so the gesture layer builds,
 // starts and can be walked with `ctl gesture` without a game; controls.gestures ships off here.

@@ -290,11 +290,16 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
 
 ## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
-- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
-  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
-- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
-- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
-- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
+Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap).
+
+## DLL changes from W34's tag (W34, C35)
+- **`GameAdapter`:** the core asserts its size (`proxy/src/adapter.h`). A new field goes at the **end**, with a default, and a core change updates the size. Initialise it by name: `.gameName = ...`
+  compiles in the DLL's `-std=c++17` as a GNU extension, and a missing member still fails `-Wextra -Werror`. A positional list keeps compiling, but a field inserted mid-struct shifts it silently.
+- **ctl `lua`:** reads only under `luaDir` and the ctl folder ([PROXY_CTL.md](PROXY_CTL.md)). Move a chunk from anywhere else into one of the two.
+- **The ctl folder is owner-only:** a driver that runs as another user than the game cannot use it; say so in the pin-bump report.
+- **System keys** always reach the game, with RmlUi text focus too ([PROXY_UI.md](PROXY_UI.md)).
+- **`gen_tables.py --exe <staged copy>`:** add it to the exe-update checklist, after `exe_info.py` and before a PC run.
+- The generator and `proxy/src` changed, so the build id changes.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

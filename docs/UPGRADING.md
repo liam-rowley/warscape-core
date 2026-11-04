@@ -47,6 +47,20 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
 - **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
   `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
 
+## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
+- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
+  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
+- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
+- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
+- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
+
+## `gen_tables.py --exe`: the offline site check (W34, C7)
+`python3 core/proxy/tools/gen_tables.py --exe <staged exe copy>` checks every `engine_sites` row against a copy of the exe with no game running: the file's sha1, `TimeDateStamp` and
+`SizeOfImage` against the identity (`IDENTITY MISMATCH ...`), then one line per site, `MATCH <id> 0x<rva>` or `MISMATCH <id> 0x<rva>: <anchor|stock> byte <i> is <got>, the row says <want>`
+(`MISMATCH <id>: rva not in the file` outside every section's file bytes). A hook outside an executable section mismatches, as the DLL refuses it. The file is unrelocated, so the bytes compare as
+they stand, an absolute address in an anchor too. It does not know relocations: a patch value the DLL refuses as `RELOCATED VALUE` still reads `MATCH` here. It runs the row validation first and writes nothing;
+exit 0 all match, 1 a mismatch, 2 an unreadable file. `--allow-pin-mismatch` is for a file that carries the sites but is not the pinned build (the smoke's stand-in): one note for the identity, the bytes still decide.
+
 ## Gate changes in 0.36.0 (W28, C31): the steps at the pin bump
 - **`[gates] skip`** takes `"<gate>:<decision id>"` only; a bare name is a config error. Add a decisions row first, then skip under its id. Each skip prints a warning line.
 - **`verified_dates`** no longer takes `3-10`, "session", `.md)` or `v2` as a date: fix each flagged line with its true date or run id (`git log`, the report).
