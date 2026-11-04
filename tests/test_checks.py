@@ -199,5 +199,47 @@ class TestsGateSkips(unittest.TestCase):
                          ['C.test_a: r1', 'C.test_b: r2'])
 
 
+class RunRefs(unittest.TestCase):
+    """B13: the rule behind the `run_refs` gate, on plain inputs."""
+
+    def test_which_files_are_run_readmes(self):
+        self.assertEqual(checks.run_readmes(['harness/runs/20261102_a/README.md', 'runs/README.md', 'docs/README.md', 'runs/x/NOTES.md', 'reruns/x/README.md']),
+                         ['harness/runs/20261102_a/README.md', 'runs/README.md'])
+
+    def test_tokens_links_and_backticks_that_look_like_paths(self):
+        text = ('See [the log](logs/run.log#L3) and `harness/ctl.py:12`, `probes/x.lua`, `dir/`, [sibling](notes.md), `../up/y.md`.\n'
+                'Not paths: [web](https://a.b/c.md) `https://a.b/c.md` `/abs/x.txt` `C:/x/y.txt` `%APPDATA%/x.txt` `$HOME/x.txt` `~/x.txt` `back\\slash.txt` '
+                '`raw/chain1..3/` `glob/*.txt` `a/<b>.txt` `a/{b,c}.txt` `python3 x/y.py a` `a/b` `word` `file.txt` `--out=x/y.txt`.\n'
+                '```\n`in/fence.txt`\n```\n')
+        self.assertEqual([t for _, t in checks.run_ref_tokens(text)],
+                         ['logs/run.log', 'harness/ctl.py', 'probes/x.lua', 'dir/', 'notes.md', '../up/y.md'])
+        self.assertEqual(checks.run_ref_tokens('a\nb `x/y.txt`.')[0], (2, 'x/y.txt'))
+
+    def test_found_from_the_root_the_readme_a_suffix_or_an_ignored_path(self):
+        readme = 'adapter/runs/20261105_a/README.md'
+        index = checks.run_ref_index(['logs/a.log', 'adapter/runs/20261105_a/raw.log', 'adapter/probes/x.lua', 'core/harness/ctl.py', 'adapter/data/q.json'])
+        found = lambda tok, ign=None: checks.run_ref_found(tok, readme, index, ign)
+        self.assertTrue(found('logs/a.log'))                 # from the root
+        self.assertTrue(found('raw.log'))                    # from the README's folder
+        self.assertTrue(found('probes/x.lua'))               # the tail of a tracked file
+        self.assertTrue(found('harness/ctl.py'))             # a file inside a submodule (the index lists it)
+        self.assertTrue(found('data/'))                      # the tail of a tracked folder
+        self.assertFalse(found('logs/missing.log'))
+        self.assertFalse(found('../../../../etc/x.log'))
+        self.assertTrue(found('build/out.dll', lambda p: p == 'build/out.dll'))
+
+    def test_problems_name_the_readme_and_the_line_and_grandfathering_skips_old_runs(self):
+        index = checks.run_ref_index(['logs/a.log'])
+        readmes = {'runs/20261028_old/README.md': 'x\n`logs/gone.log`\n', 'runs/2026-11-03_new/README.md': 'x\ny `logs/a.log` `logs/gone.log`\n',
+                   'runs/nodate/README.md': '`logs/gone.log`\n'}
+        errs, checked, skipped = checks.run_ref_problems(readmes, index)
+        self.assertEqual((len(errs), checked, skipped), (3, 4, 0))
+        errs, checked, skipped = checks.run_ref_problems(readmes, index, since='2026-11-03')
+        self.assertEqual((checked, skipped), (3, 1))
+        self.assertEqual(sorted(e.split(': names ')[0] for e in errs), ['runs/2026-11-03_new/README.md:2', 'runs/nodate/README.md:1'])
+        self.assertEqual(checks.run_folder_date('runs/20261028_old/README.md'), '2026-10-28')
+        self.assertIsNone(checks.run_folder_date('runs/README.md'))
+
+
 if __name__ == '__main__':
     unittest.main()

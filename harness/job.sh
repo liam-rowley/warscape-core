@@ -2,7 +2,7 @@
 # purpose: agent helper on the PC (Git Bash): submit a watcher job, block inside ONE call until its result (or a timeout), print the output, return the job's exit code (refused 2, no answer 124); also take, refresh and release the game lock
 # usage: job.sh [--adapter FILE] <owner> <file|-> [timeout_s]  |  job.sh adapter  |  job.sh [--adapter FILE] lock <owner> <session> <purpose> [hang_s]  |  touch  |  unlock <owner> [--force]  |  status  |  root  |  scratch <owner>  |  ctl <owner> '<verb args>' [wait_s]
 # when: every time an agent runs something on the PC (launch, kill, profile, scripts): the watcher root comes from the adapter (state_dir + watcher_subdir), never a default path; waiting belongs here, not in repeated agent calls
-# not-a-verb: a bash helper agents call directly from Git Bash (python3 only reads JSON); the PC side of the protocol is harness/core/watcher.ps1
+# not-a-verb: a bash helper agents call directly from Git Bash (python3 only reads JSON); the PC side of the protocol is harness/watcher.ps1
 # scratch <owner> creates <state>/_scratch/<owner>/ and prints its Git Bash path (the only place for PC experiments; the Claude Code hook denies other writes there).
 # Body: a one-line control job (launch|kill|profile <name>|restore|update kit=<id>|restart|status|noop) or a cmd/ps1 script ('#ps1' first line or '#job type=ps1').
 # launch/kill/profile get ' owner=<owner>' appended when missing; a script without a '#job owner=' line gets one. Root: $WATCHER_ROOT when set (tests), else <adapter state_dir as a Git Bash path>/<watcher_subdir>.

@@ -75,8 +75,7 @@ class FailedResults(unittest.TestCase):
         self.assertEqual(len(self.probs(self.rep('none', other='bad.json'))), 1)
 
     def test_citation_followed_by_punctuation(self):
-        for cite in ('see runs/r1.', 'see (runs/r1)', 'runs/r1, and more', 'runs/r1.
-', 'runs/r1:'):
+        for cite in ('see runs/r1.', 'see (runs/r1)', 'runs/r1, and more', 'runs/r1.\n', 'runs/r1:'):
             self.assertEqual(len(self.probs(self.rep('none', cite=cite))), 1, cite)
 
     def test_no_citation_or_rule_off(self):

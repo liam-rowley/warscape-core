@@ -87,9 +87,18 @@ def check(ctx, rows, read, folders=()):
     """The whole queue check (`wsc jobs check` and the `jobs` gate): the core rules, then the repo's `jobs`-stage gate modules
     (warscape/gatemods.py). Returns (errors, warnings, summaries): the modules' non-empty summaries go on the `jobs check` line."""
     res = gatemods.run_stage(ctx, 'jobs', rows=rows, read=read, briefs=lambda: briefs(rows, read))
-    errs = problems(rows, read, folders) + gatemods.problems(res)
+    errs = views_problems(ctx.config) + problems(rows, read, folders) + gatemods.problems(res)
     summaries = [r.summary for r in res if r.summary and not (r.level == 'error' and not r.details)]
     return errs, gatemods.problems(res, 'warn'), summaries
+
+
+def views_problems(config):
+    """C19 (B49): a repo with a `jobs` registry cannot commit its registry views. `reg set` rewrites `<registries_dir>/jobs.md`, `policy` refuses
+    that file on a `brief/` branch and the `registries` gate refuses the branch without it, so no brief branch could ever pass."""
+    if 'jobs' in config['registries'] and config['views']['commit']:
+        return [f"views are committed beside a jobs registry: set `[views] commit = false` in wsc.toml (C19), git rm the committed "
+                f"`{config['registries_dir']}/*.md` views and git-ignore the views dir (`{config['views']['dir']}`)"]
+    return []
 
 
 STATUSES_WITH = {'brief': {'queued', 'review', 'fix', 'done'}, 'report': {'review', 'fix', 'done'}, 'review': {'fix', 'done'}}

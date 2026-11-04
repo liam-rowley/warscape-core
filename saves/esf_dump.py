@@ -2,7 +2,7 @@
 """esf_dump.py: read-only reader for Warscape ESF files (saves, startpos), offset based, no tree objects. Stdlib only.
 
 purpose: print the record skeleton, every subtree under a record path, or one grep-able line per node of an ESF save or startpos
-usage: python3 -I saves/core/esf_dump.py tree FILE [--depth N] | dump FILE --path A/B/C [--max-array N] [--limit-lines N] | lines FILE > FILE.tree.txt
+usage: python3 -I saves/esf_dump.py tree FILE [--depth N] | dump FILE --path A/B/C [--max-array N] [--limit-lines N] | lines FILE > FILE.tree.txt
 when: looking inside a save before a diff or a recipe (record names, child positions @N, values); esf_edit.py writes, esf_diff.py compares
 not-a-verb: a game-agnostic ESF codec run on the PC against saves outside the repo (warscape-core candidate, D10)
 

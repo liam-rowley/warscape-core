@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # purpose: screenshot of the headless virtual display (the rect headless_status.json names) through a read-only watcher job, saved as a JPEG; prints its path
-# usage: harness/core/shot.sh <owner> <out.jpg>   (out path as a Windows path or a Git Bash /c/... path; the game must be running headless)
+# usage: harness/shot.sh <owner> <out.jpg>   (out path as a Windows path or a Git Bash /c/... path; the game must be running headless)
 # when: before/after evidence in PC sittings (J15 console checks, J4 scenarios); no game lock needed, nothing is changed
 # not-a-verb: a PC sitting helper over job.sh, run in Git Bash on the PC
 set -u
