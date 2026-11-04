@@ -25,7 +25,7 @@ class CoreBump(unittest.TestCase):
         git(cls.src, 'add', '-A')
         git(cls.src, 'commit', '-q', '-m', 'a release')
         git(cls.src, 'tag', '-a', 'v0.31.0', '-m', 'v0.31.0')
-        git(cls.src, 'tag', 'v0.32.0')              # lightweight, at or above [release] annotated_from: not a release
+        git(cls.src, 'tag', 'v0.35.0')              # lightweight, at or above [release] annotated_from: not a release
         git(cls.src, 'tag', '-a', 'v0.0.1', '-m', 'old', 'HEAD~1')
         cls.base = t / 'game-base'
         fixture_game(cls.base)
@@ -70,7 +70,7 @@ class CoreBump(unittest.TestCase):
 
     def test_refusals(self):
         for args, want in ((('0.31.0',), 'not a release tag'), (('V0.31.0',), 'not a release tag'), (('v9.9.9',), 'not in the core'),
-                           (('v0.32.0',), 'lightweight tag')):
+                           (('v0.35.0',), 'lightweight tag')):
             rc, out = self.bump(*args)
             self.assertNotEqual(rc, 0, out)
             self.assertIn(want, out, args)

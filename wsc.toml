@@ -39,7 +39,7 @@ commit = false
 
 [jobs]
 id_prefix = "W"
-semver_from = 39     # W29 (C27): from W39 on a row carries `semver`, its brief a `Semver:` line, and its job/ branch leaves VERSION to the release workflow
+semver_from = 40     # W29 (C27): from W40 on a row carries `semver`, its brief a `Semver:` line, and its job/ branch leaves VERSION to the release workflow
 
 [jobs.text]
 wsc = "python3 wsc.py"
@@ -63,7 +63,7 @@ meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md"
 # Release tags by workflow (W29, C27; docs/CONSUMING.md, Releases): ci/release.yml.in, `wsc release`. annotated_from: the first version the
 # workflow tags (older tags stay lightweight, never rewritten). Each consumer's adapter compiles against the candidate before the tag.
 [release]
-annotated_from = "0.31.0"
+annotated_from = "0.34.0"
 consumers = [{name = "napoleon", repo = "liam-rowley/napoleon-remastered", adapter = "proxy/napoleon", ref = "main"}]
 
 [ci]

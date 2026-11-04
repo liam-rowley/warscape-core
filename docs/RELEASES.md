@@ -1,11 +1,11 @@
-# Releases: tags by workflow (0.31.0, core W29, C27)
+# Releases: tags by workflow (0.34.0, core W29, C27)
 
 The core's release tags are a function of a green `main`. Nobody tags by hand: not Liam, not an agent, not the orchestrator. The workflow is
 `ci/release.yml.in` (rendered to `.github/workflows/release.yml`), the code is `warscape/release.py` and `wsc release` (warscape/verbs/release.py).
 
 ## The flow
 1. A job row states its level: `semver` = `patch`, `minor`, `major` or `none` (no release: docs-only or row-only work). From `[jobs] semver_from`
-   (39 in the core) `jobs check` wants it from status `queued` on, the brief carries a matching `Semver: <level>` line in place of a "## VERSION"
+   (40 in the core) `jobs check` wants it from status `queued` on, the brief carries a matching `Semver: <level>` line in place of a "## VERSION"
    section, and `policy` refuses a `job/` branch that edits `VERSION`. Older rows count as `patch`, and their jobs still bump `VERSION` by hand.
 2. `gates` passes on `main`, and `release` starts (`workflow_run`, one at a time: `concurrency: release`). `wsc release check-green` passes only when
    every `[ci] required_checks` entry but `policy` concluded `success` or `skipped` on that commit and the commit is still `main`'s tip.
