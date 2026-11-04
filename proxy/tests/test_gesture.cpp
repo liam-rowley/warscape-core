@@ -399,10 +399,10 @@ static void FeedCases() {
         }
     }
     {   // B58 a (W20): the re-entry owner check is pure
-        Check(ReenteredBy(77, 77), "reenter: the owning thread is re-entering");
-        Check(!ReenteredBy(77, 78), "reenter: another thread is not");
-        Check(!ReenteredBy(0, 0), "reenter: owner 0 = no owner, never a match");
-        Check(!ReenteredBy(0, 5), "reenter: nobody holds the lock");
+        Check(wsp::ReenteredBy(77, 77), "reenter: the owning thread is re-entering");
+        Check(!wsp::ReenteredBy(77, 78), "reenter: another thread is not");
+        Check(!wsp::ReenteredBy(0, 0), "reenter: owner 0 = no owner, never a match");
+        Check(!wsp::ReenteredBy(0, 5), "reenter: nobody holds the lock");
     }
     {   Machine m; F(m, kWmLButtonDown, kMkLButton, 100, 100, A); F(m, kWmMouseMove, kMkLButton, 200, 100, A);
         FeedOut f = F(m, kWmMouseMove, 0, 210, 100, A); Check(f.sm.cancel && m.phase == kIdle && f.action == kPass, "feed: a move without the button cancels and passes"); }
