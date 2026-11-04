@@ -596,7 +596,7 @@ try {
             [IO.File]::WriteAllLines($trig, [string[]]@('', 'none'))
             $t = Run-Job 'launch owner=ci38 headless_wait_s=30' 'hrs' 60
             Assert-Eq $t.d.status 'failed' "exited at once ($($t.out))"
-            Assert-Match $t.d.reason 'is not running after the start \(exit code 2160 = the proxy refused' 'the generic line'
+            Assert-Match $t.d.reason 'is not running after the start \(exit code 2160 = the proxy refused|the game exited before reporting on_virtual' 'a generic line (seen gone, or seen alive then gone)'
             Assert-NotMatch $t.d.reason 'an old refusal' 'the stale detail is not reported'
         } finally {
             Remove-Item -LiteralPath $trig -Force -ErrorAction SilentlyContinue
