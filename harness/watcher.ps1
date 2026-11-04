@@ -8,7 +8,7 @@
 param([string]$Root = '', [string]$Adapter = '', [switch]$NoRun)
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.3.0'
+$Version = '1.4.0'
 $SrcDir = $PSScriptRoot
 if (-not $Root) { $Root = Join-Path $SrcDir '..' }
 $Root = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -231,7 +231,7 @@ function Get-Lock {
     $kv = Parse-KV ($Latin1.GetString($b))
     $age = ((Get-Date) - $fi.LastWriteTime).TotalSeconds
     return [pscustomobject]@{
-        owner = $kv['owner']; session = $kv['session']; purpose = $kv['purpose']; started = $kv['started']
+        owner = $kv['owner']; session = $kv['session']; purpose = $kv['purpose']; started = $kv['started']; raw = ($Latin1.GetString($b).Trim())
         hang_s = $kv['hang_s']; age_s = [int]$age; stale = ($age -gt (IntSet 'lock_stale_min') * 60); path = $p
     }
 }
@@ -241,14 +241,33 @@ function Check-Owner([string]$owner) {
     if ($l.stale) { return "game.lock (owner=$($l.owner)) is stale ($($l.age_s) s since its last refresh) and is being expired; take the lock again" }
     if (-not $l.owner) { return 'game.lock has no owner= field; rewrite it as owner=<you> session=<id> purpose=<text> started=<UTC>' }
     if (-not $owner) { return "the request carries no owner=, and game.lock is held by '$($l.owner)' (purpose: $($l.purpose)). Add owner=<lock owner> to the request" }
-    if ($owner -ne $l.owner) { return "owner=$owner does not hold the game: game.lock owner is '$($l.owner)' (purpose: $($l.purpose), $($l.age_s) s since refresh)" }
-    return $null
+    # W10 (H2): owners compare EXACTLY (the shell side is case-sensitive; -ne here ignored case and the two disagreed about who held the lock);
+    # the request owner may also be the lock's session id, so a holder that took the lock under a free-text name can send its jobs as its session
+    if ($owner -ceq $l.owner -or ($l.session -and $owner -ceq $l.session)) { return $null }
+    if ($owner -ieq $l.owner -or ($l.session -and $owner -ieq $l.session)) { return "owner=$owner differs only in case from the game.lock owner '$($l.owner)' (session '$($l.session)'): owners are compared exactly and are lower case, so lower-case it" }
+    return "owner=$owner does not hold the game: game.lock owner is '$($l.owner)' (purpose: $($l.purpose), $($l.age_s) s since refresh)"
 }
-function Expire-StaleLock {
-    $l = Get-Lock
+# B20 (W10): the same three steps as job.sh lock: the record that was read ($seen: its line and staleness), a move to a unique name that
+# overwrites nothing, then a check of what was moved: the same line AND still older than the stale limit (a touch changes the mtime, not
+# the line). If the check fails the lock is put back with a Move-Item that has no -Force (it fails when the name is taken: the moved file
+# then stays in _to_delete and the log says so). $seen is a parameter so a unit test can hand it a stale record while the disk holds a fresh lock.
+function Expire-StaleLock($seen = $null) {
+    $l = $seen; if (-not $l) { $l = Get-Lock }
     if (-not $l -or -not $l.stale) { return }
-    $name = "game.lock.expired_$($l.owner -replace '[^\w.\-]', '_')_$(UtcStamp (Get-Date))"
-    try { Move-Item -LiteralPath $l.path -Destination (Join-Path (ToDelete '') $name) -Force } catch { Log "lock: could not expire game.lock: $($_.Exception.Message)"; return }
+    $name = "game.lock.expired_$($l.owner -replace '[^\w.\-]', '_')_$(UtcStamp (Get-Date))_$([Guid]::NewGuid().ToString('N').Substring(0, 6))"
+    $dest = Join-Path (ToDelete '') $name
+    try { Move-Item -LiteralPath $l.path -Destination $dest -ErrorAction Stop } catch { Log "lock: could not expire game.lock: $($_.Exception.Message)"; return }
+    $same = $false; $old = $false
+    try {
+        $b = Read-Shared $dest
+        $same = (($Latin1.GetString($b).Trim()) -eq "$($l.raw)".Trim())
+        $old = (((Get-Date) - (Get-Item -LiteralPath $dest).LastWriteTime).TotalSeconds -gt (IntSet 'lock_stale_min') * 60)
+    } catch { }
+    if (-not ($same -and $old)) {
+        try { Move-Item -LiteralPath $dest -Destination $l.path -ErrorAction Stop; Log "lock: game.lock was refreshed or replaced after it was read as stale (owner=$($l.owner)); put back, not expired" }
+        catch { Log "lock: game.lock was refreshed or replaced after it was read as stale, but its name was taken meanwhile; the moved file stays in _to_delete\$name" }
+        return
+    }
     $act = Get-Active
     $tail = ''
     if ($act) { $tail = " Profile '$($act.name)' is active for owner=$($act.owner): it is restored under that owner as soon as the game is closed." }
@@ -330,6 +349,22 @@ function Kill-Game([string]$why, $out) {
     }
     $out.Add("killed: $(@($targets | ForEach-Object { "$($_.ProcessName) $($_.Id)" }) -join ', ')")
     return $true
+}
+
+# B27 (W10): after a successful kill the job returns when the world agrees: no game image in the process list and game_state not_running,
+# in watcher.status too (so `pc_deploy sync-lua` right after the kill is not refused). Bounded by zombie_wait_s; a timeout is the ZOMBIE failure.
+function Wait-NotRunning($out) {
+    $deadline = (Get-Date).AddSeconds((IntSet 'zombie_wait_s'))
+    do {
+        Pump
+        Watchdog
+        if (-not @(Get-GameProcs).Count -and $Game.state -eq 'not_running') { Write-Status; return $null }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    Write-Status
+    $msg = "ZOMBIE: the game is still listed $($S.zombie_wait_s) s after the kill returned (game_state $($Game.state)); PC may need a reboot before the game can run again."
+    Log $msg; $out.Add($msg)
+    return $msg
 }
 
 # ------------------------------------------------------------------------------------------------ launch ------------
@@ -472,7 +507,7 @@ function Apply-PrefsOverlay([byte[]]$bytes, [string]$setText) {
         $rx = New-Object Text.RegularExpressions.Regex ('(?m)^(' + [regex]::Escape($key) + '[ \t]+)([^;\r\n]*)(?=;)')
         if ($rx.IsMatch($text)) {
             $ev = [Text.RegularExpressions.MatchEvaluator]{ param($mm) $mm.Groups[1].Value + $val }
-            $text = $rx.Replace($text, $ev, 1)
+            $text = $rx.Replace($text, $ev)    # B30: every copy of the key (a prefs file may hold one twice; the game read the last)
         } else {
             if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $text += $nl }
             $text += "$key $val;" + $nl
@@ -489,8 +524,8 @@ function Get-PrefsValue([byte[]]$bytes, [string]$key) {
     if ($null -eq $bytes -or $bytes.Length -lt 2) { return $null }
     $e = Detect-Enc $bytes
     $text = $e.enc.GetString($bytes, $e.bom, $bytes.Length - $e.bom)
-    $m = [regex]::Match($text, '(?m)^' + [regex]::Escape($key) + '[ \t]+([^;\r\n]*?)\s*;')
-    if ($m.Success) { return $m.Groups[1].Value }
+    $ms = [regex]::Matches($text, '(?m)^' + [regex]::Escape($key) + '[ \t]+([^;\r\n]*?)\s*;')
+    if ($ms.Count) { return $ms[$ms.Count - 1].Groups[1].Value }     # B30: the LAST copy, which is what the game read
     return $null
 }
 # Key overlay on a text file, byte-transparent (BOM and encoding kept; 8-bit text goes through Latin-1 so UTF-8 content survives).
@@ -688,7 +723,7 @@ function Auto-Restore {
     $reason = $null
     if (-not $l) { $reason = "game.lock of owner=$($active.owner) was released or expired" }
     elseif ($l.stale) { return }                                      # expired on the next pass, then restored
-    elseif ($l.owner -ne $active.owner) { $reason = "game.lock now belongs to '$($l.owner)'" }
+    elseif ($l.owner -cne $active.owner) { $reason = "game.lock now belongs to '$($l.owner)'" }
     if (-not $reason) { return }
     if (Game-Running-Reason) {
         if (-not $PendingRestoreLogged) { Log "profile: auto-restore of '$($active.name)' (owner=$($active.owner)) pending: $reason, but the game is still running"; $script:PendingRestoreLogged = $true }
@@ -1107,7 +1142,7 @@ function Handle-Hang($p, $start, [string]$why, [string]$win) {
 # ------------------------------------------------------------------------------------------------ status ------------
 function Write-Status {
     $l = Get-Lock
-    $queue = @(Get-ChildItem -LiteralPath $JobsDir -Filter *.request -ErrorAction SilentlyContinue | Where-Object { $_.Name.EndsWith('.request') } | Sort-Object LastWriteTimeUtc, Name | ForEach-Object { $_.BaseName })
+    $queue = @(Get-Requests | ForEach-Object { $_.BaseName })
     $procs = @(Get-AllGameProcs | ForEach-Object { [ordered]@{ image = $_.image; pid = $_.pid } })
     $fl = Foreign-LockReason
     $st = [ordered]@{
@@ -1254,8 +1289,19 @@ function Ids-Used([string]$id) {
 }
 function Ids-Add([string]$id) { [IO.File]::AppendAllText($IdsPath, "$(UtcStr (Get-Date)) $id`r`n", $Utf8) }
 
+# The queued requests, oldest first. Only names ending in exactly '.request': a request job.sh withdrew (<id>.request.expired) is never run (H11).
+function Get-Requests { return @(Get-ChildItem -LiteralPath $JobsDir -Filter *.request -ErrorAction SilentlyContinue | Where-Object { $_.Name.EndsWith('.request') } | Sort-Object LastWriteTimeUtc, Name) }
+# B21 (W10): the text of a ps1 job script. The exit code is the LAST statement's: $LASTEXITCODE is reset first, and after the body the job
+# exits with it only when the last statement failed ($? is false) and left a native code. So a native failure handled earlier (a robocopy
+# 1, a grep miss) no longer fails a script whose last statement succeeded; a last native call that failed still does, with its code; an
+# explicit `exit N` never reaches the tail and wins. A tool whose non-zero code means success (robocopy 1 to 7) is handled by ending the
+# script with `exit 0`. Pure, so the unit suite tests the text (and runs it). A body that opens with param() cannot take the reset line first.
+function Wrap-Ps1Body([string]$body) {
+    return "`$global:LASTEXITCODE = 0`r`n" + $body + "`r`n# [watcher] the last statement's native failure fails the job; end the script with exit 0 when a non-zero code means success`r`nif ((-not `$?) -and `$LASTEXITCODE) { exit `$LASTEXITCODE }"
+}
+
 function Start-NextJob {
-    $f = Get-ChildItem -LiteralPath $JobsDir -Filter *.request -ErrorAction SilentlyContinue | Where-Object { $_.Name.EndsWith('.request') } | Sort-Object LastWriteTimeUtc, Name | Select-Object -First 1
+    $f = Get-Requests | Select-Object -First 1
     if (-not $f) { return $false }
     $id = $f.BaseName
     $taken = Join-Path $JobsDir "$id.taken"
@@ -1306,9 +1352,7 @@ function Start-NextJob {
             if ($c.type -eq 'ps1') {
                 # PowerShell 5.1 reads a script without a BOM as ANSI: a ps1 job body is UTF-8 from the shell, so it is saved WITH a BOM
                 # (the one deliberate exception; every data file the watcher writes is BOM-less).
-                # J13 question 1: a ps1 job whose last native or script call failed ($LASTEXITCODE) fails with that code (it used to end
-                # ok exit=0); an explicit `exit N` in the body still wins, since it never reaches this line
-                $u8 = $Utf8.GetString($Latin1.GetBytes($text)) + "`r`n# [watcher] the last native or script call's failure fails the job`r`nif (`$LASTEXITCODE) { exit `$LASTEXITCODE }"
+                $u8 = Wrap-Ps1Body $Utf8.GetString($Latin1.GetBytes($text))
                 [IO.File]::WriteAllBytes($c.script, [byte[]](@(0xEF, 0xBB, 0xBF) + $Utf8.GetBytes($u8 + "`r`n")))
             } else { [IO.File]::WriteAllText($c.script, $text + "`r`n", $Latin1) }
             $c.part = Join-Path $JobsDir "$id.part"
@@ -1345,7 +1389,12 @@ function Start-NextJob {
     try {
         switch ($c.type) {
             'launch' { $err = Launch-Job $hdr $c $o }
-            'kill' { $ok = Kill-Game "kill job $id owner=$($c.owner)" $o; if (-not $ok) { $err = 'ZOMBIE: the process survived taskkill /F /T - PC needs reboot' }; $script:LaunchAt = $null }
+            'kill' {
+                $ok = Kill-Game "kill job $id owner=$($c.owner)" $o
+                if (-not $ok) { $err = 'ZOMBIE: the process survived taskkill /F /T - PC needs reboot' }
+                else { $err = Wait-NotRunning $o }      # B27: .done appears only when watcher.status already says not_running
+                $script:LaunchAt = $null
+            }
             'profile' {
                 $name = $c.args | Select-Object -First 1
                 if (-not $name) { $err = 'usage: profile <name>|restore owner=<you>' }
