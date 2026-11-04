@@ -582,11 +582,14 @@ class MainHealth(unittest.TestCase):
         from warscape.verbs import jobs as jverb
         fake, _ = self.gh()
         ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': self.CFG})
-        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.remote_heads,
+                 jv.fetch_main, jv.claim)
         try:
             jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
             jv.print_red_prs = lambda root, offline: print('PR #1 job/J9: gates failed')
             jv.remote_branches = lambda root, offline: {'job/J60'}
+            jv.remote_heads = lambda root, offline: {'job/J60': 'abc1234'}
+            jv.fetch_main = jv.claim = lambda *a, **k: self.fail('next must not reach origin here')
             jv.branch_rows = lambda *a, **k: {'J60': jv.Branch(row('J60', status='review', title='T'), 0, 'abc1234')}
             jv.branch_checks = lambda *a, **k: 'CI line'
             jv.print_main_health = lambda cfg, root, offline: saved[5](cfg, root, offline, run=fake)
@@ -598,7 +601,8 @@ class MainHealth(unittest.TestCase):
                 self.assertEqual(rc, 0, action)
                 self.assertLess(text.index('Main CI is red'), text.index('PR #1 job/J9'), action)
         finally:
-            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.remote_heads,
+             jv.fetch_main, jv.claim) = saved
 
 
 class BranchChecks(unittest.TestCase):
@@ -814,13 +818,13 @@ class Steps(unittest.TestCase):
 class Autopilot(unittest.TestCase):
     """`view --serve --auto` (D36): the loop with fake snapshot, agents and launch seams."""
 
-    def make(self, on_branch, agents=lambda: [], snapshot=None, dry_run=False):
+    def make(self, on_branch, agents=lambda: [], snapshot=None, dry_run=False, ci=lambda sha: ('green', []), prune=lambda: (0, None)):
         self.launched, self.state = [], {'on': dict(on_branch)}
         def launch(a):
             self.launched.append(a[3])   # the session name
             return 'abcd1234'
         srv = jv.JobServer(snapshot or (lambda: (LROWS, files(), set(LBRANCHES) | {f'job/{j}' for j in self.state['on']},
-                                                 self.state['on'])), agents, launch, which=lambda n: n, dry_run=dry_run)
+                                                 self.state['on'])), agents, launch, which=lambda n: n, dry_run=dry_run, ci=ci, prune=prune)
         srv.log = False
         self.addCleanup(srv.server_close)
         self.lines = []
@@ -1019,6 +1023,385 @@ class BranchRows(unittest.TestCase):
         got = jv._blobs(ROOT, ['HEAD:warscape/jobq.py', 'HEAD:no/such/file'])
         self.assertIn('def branch_rows', got['HEAD:warscape/jobq.py'])
         self.assertIsNone(got['HEAD:no/such/file'])
+
+
+# ------------------------------------------------------------------ W26: claim, order, needs_pc, CI-gated autopilot
+sys.path.insert(0, str(ROOT / 'tests'))
+from _util import git as _ugit  # noqa: E402
+from warscape.repo import DEFAULTS as _DEFAULTS  # noqa: E402
+
+
+def tgit(cwd, *args):
+    p = _ugit(cwd, *args, check=False)
+    if p.returncode:
+        raise AssertionError(f'git {" ".join(args)} in {cwd} failed ({p.returncode}):\n{p.stdout}{p.stderr}')
+    return p.stdout.strip()
+
+
+class Claim(unittest.TestCase):
+    """`jobs next` claims job/<id> (brief/<id>) with a create-only push of origin/main before it prints the steps (decisions 1-5).
+    Real git: a bare temp origin and two clones A and B; nothing here reaches the real origin."""
+    ROWS = [row('J1', status='done'), row('J2', status='queued'), row('J3', status='queued'), row('J8')]
+
+    def setUp(self):
+        jv.configure_from(_DEFAULTS['jobs'])
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        d = Path(self._tmp.name).resolve()
+        self.origin, self.a, self.b = d / 'origin.git', d / 'a', d / 'b'
+        tgit(d, 'init', '-q', '--bare', str(self.origin))
+        tgit(d, 'clone', '-q', str(self.origin), str(self.a))
+        reg = self.a / 'registries' / 'jobs'
+        reg.mkdir(parents=True)
+        for r in self.ROWS:
+            (reg / f'{r["id"]}.json').write_text(json.dumps(r, indent=2) + '\n', encoding='utf-8', newline='\n')
+        tgit(self.a, 'add', '-A')
+        tgit(self.a, 'commit', '-q', '-m', 'm1')
+        tgit(self.a, 'push', '-q', 'origin', 'main')
+        tgit(d, 'clone', '-q', str(self.origin), str(self.b))
+
+    def remote(self, branch):
+        p = _ugit(self.origin, 'rev-parse', '--verify', '-q', f'refs/heads/{branch}', check=False)
+        return p.stdout.strip() or None
+
+    def main_sha(self):
+        return self.remote('main')
+
+    def live(self, clone):
+        return lambda: jv.remote_heads(clone, False)
+
+    def stale_once(self, clone, stale=None):
+        """A branch read that returns the list from before A's push once, then the real one (B started before A, fetched after)."""
+        calls = []
+        def read():
+            calls.append(1)
+            return dict(stale or {}) if len(calls) == 1 else jv.remote_heads(clone, False)
+        return read
+
+    def next(self, clone, read=None, rows=None, **kw):
+        return jv.next_claim(clone, rows or self.ROWS, read or self.live(clone), **kw)
+
+    def test_a_claims_and_b_moves_on_to_the_next_ready_job(self):
+        rc, out = self.next(self.a)
+        self.assertEqual(rc, 0, out)
+        sha = self.main_sha()
+        self.assertIn(f'Claimed: job/J2 now exists on origin at {sha[:7]}', out)
+        self.assertIn('git fetch origin job/J2', out)
+        self.assertIn('git checkout -b job/J2 origin/job/J2', out)
+        self.assertNotIn('push early', out)
+        self.assertEqual(self.remote('job/J2'), sha)
+        rc, out = self.next(self.b, self.stale_once(self.b))
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Claimed: job/J3 now exists on origin', out)
+        self.assertEqual((self.remote('job/J2'), self.remote('job/J3')), (sha, sha))
+
+    def test_a_brief_is_claimed_on_its_brief_branch(self):
+        rows = [row('J1', status='done'), row('J8')]
+        rc, out = self.next(self.a, rows=rows)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Claimed: brief/J8 now exists on origin', out)
+        self.assertIn('git checkout -b brief/J8 origin/brief/J8', out)
+        self.assertEqual(self.remote('brief/J8'), self.main_sha())
+
+    def test_a_refused_claim_never_moves_the_existing_branch(self):
+        """A plain push would fast-forward an empty claim to a newer main, and --force would overwrite work: both must stay put."""
+        self.assertEqual(self.next(self.a, rows=self.ROWS[:2])[0], 0)
+        first = self.remote('job/J2')
+        tgit(self.a, 'commit', '-q', '--allow-empty', '-m', 'm2')
+        tgit(self.a, 'push', '-q', 'origin', 'main')   # main moves on: B's origin/main is now a descendant of the claim
+        rc, out = self.next(self.b, lambda: {}, rows=self.ROWS[:2])
+        self.assertEqual(self.remote('job/J2'), first, out)
+        self.assertEqual(rc, 0)
+        self.assertIn('Nothing is ready', out)
+        self.assertIn('J2', out)
+        tgit(self.a, 'fetch', '-q', 'origin')
+        tgit(self.a, 'checkout', '-q', '-b', 'job/J2', 'origin/job/J2')
+        tgit(self.a, 'commit', '-q', '--allow-empty', '-m', 'work')
+        tgit(self.a, 'push', '-q', 'origin', 'job/J2')
+        work = self.remote('job/J2')
+        self.next(self.b, lambda: {}, rows=self.ROWS[:2])
+        self.assertEqual(self.remote('job/J2'), work)
+
+    def test_every_candidate_refused_is_nothing_ready_naming_them(self):
+        for j in ('J2', 'J3'):
+            tgit(self.a, 'push', '-q', 'origin', f'main:refs/heads/job/{j}')
+        rc, out = self.next(self.b, lambda: {}, rows=self.ROWS[:3])   # a read that never sees the claims
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith('Nothing is ready'), out)
+        self.assertIn('another session claimed J2, J3', out)
+
+    def test_at_most_five_attempts(self):
+        rows = [row('J1', status='done')] + [row(f'J{n}', status='queued') for n in range(2, 9)]
+        for r in rows[1:]:
+            tgit(self.a, 'push', '-q', 'origin', f'main:refs/heads/job/{r["id"]}')
+        tried = []
+        def counting(root, branch, run=subprocess.run):
+            tried.append(branch)
+            return jv.claim(root, branch, run)
+        rc, out = self.next(self.b, lambda: {}, rows=rows, claim_fn=counting)
+        self.assertEqual(tried, [f'job/J{n}' for n in range(2, 7)])
+        self.assertIn('another session claimed J2, J3, J4, J5, J6', out)
+        self.assertIn('5 attempts', out)
+
+    def test_a_failure_that_is_not_a_race_exits_1_and_claims_nothing(self):
+        tgit(self.b, 'remote', 'set-url', '--push', 'origin', str(Path(self._tmp.name) / 'missing.git'))
+        rc, out = self.next(self.b)
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn('Claimed', out)
+        self.assertNotIn('Take it', out)
+        self.assertIsNone(self.remote('job/J2'))
+        self.assertIsNone(self.remote('job/J3'))   # it did not move on as if it had lost a race
+        tgit(self.b, 'remote', 'remove', 'origin')   # no origin at all
+        rc, out = self.next(self.b, lambda: {})
+        self.assertEqual(rc, 1, out)
+        self.assertIsNone(self.remote('job/J2'))
+
+    def test_peek_offline_and_view_push_nothing(self):
+        rc, out = self.next(self.a, peek=True)
+        self.assertEqual(rc, 0)
+        self.assertIn('not claimed: --peek', out)
+        self.assertIn('git push origin --force-with-lease=refs/heads/job/J2: origin/main:refs/heads/job/J2', out)
+        rc, out = self.next(self.a, offline=True)
+        self.assertIn('(not claimed: --offline)', out)
+        jv.render_view(self.ROWS, files(), set(), 'now')
+        self.assertIsNone(self.remote('job/J2'))
+        self.assertEqual(tgit(self.origin, 'for-each-ref', 'refs/heads/job/', 'refs/heads/brief/'), '')
+
+    def test_id_claims_and_a_claimed_id_is_in_progress(self):
+        rc, out = self.next(self.a, jid='J3')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Claimed: job/J3', out)
+        rc, out = self.next(self.b, self.stale_once(self.b), jid='J3')
+        self.assertEqual(rc, 1)
+        self.assertIn('in progress', out)
+        rc, out = self.next(self.b, jid='J3')
+        self.assertEqual(rc, 1)
+        self.assertIn('J3 (queued): in progress on job/J3', out)
+
+    def test_the_claim_pushes_origin_main_not_head(self):
+        tgit(self.a, 'commit', '-q', '--allow-empty', '-m', 'local only')
+        head = tgit(self.a, 'rev-parse', 'HEAD')
+        self.assertEqual(self.next(self.a)[0], 0)
+        self.assertEqual(self.remote('job/J2'), self.main_sha())
+        self.assertNotEqual(self.remote('job/J2'), head)
+
+    def test_a_claimed_empty_branch_is_in_progress_and_nothing_to_review(self):
+        self.next(self.a)
+        heads = jv.remote_heads(self.b, False)
+        by = {r['id']: r for r in self.ROWS}
+        self.assertEqual(jv.not_ready('build', 'J2', by, set(heads)), 'J2 (queued): in progress on job/J2')
+        self.assertEqual(jv.pick_next(self.ROWS, set(heads))[1]['id'], 'J3')
+        on = jv.branch_rows(self.b, set(heads), False, 'registries')
+        self.assertEqual(on['J2'].row['status'], 'queued')
+        self.assertIsNone(jv.pick_branch('review', on))
+        self.assertIn('no report yet', jv.not_ready('review', 'J2', by, set(heads), on))
+        self.assertEqual(jv.lane(by['J2'], by, set(heads), on)[0], 'progress')
+
+    def test_a_stale_claim_is_listed_after_24_hours_and_only_when_empty(self):
+        self.next(self.a)                 # job/J2: an empty claim
+        self.next(self.a)                 # job/J3: gets a commit of its own
+        tgit(self.a, 'fetch', '-q', 'origin')
+        tgit(self.a, 'checkout', '-q', '-b', 'job/J3', 'origin/job/J3')
+        tgit(self.a, 'commit', '-q', '--allow-empty', '-m', 'work')
+        tgit(self.a, 'push', '-q', 'origin', 'job/J3')
+        tgit(self.b, 'fetch', '-q', 'origin')
+        heads = jv.remote_heads(self.b, False)
+        when = int(tgit(self.b, 'log', '-1', '--format=%ct', 'origin/main'))
+        self.assertEqual(jv.empty_claims(self.b, self.ROWS, heads, now=when + 23 * 3600), [])
+        lines = jv.empty_claims(self.b, self.ROWS, heads, now=when + 50 * 3600)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertTrue(lines[0].startswith('J2: claimed 2 d ago or less'), lines)
+        self.assertIn('nothing pushed; `git push origin --delete job/J2` releases it', lines[0])
+        rc, out = self.next(self.b, now=when + 50 * 3600, peek=True)
+        self.assertIn('J2: claimed', out)
+
+
+class Order(unittest.TestCase):
+    def test_phase_then_number(self):
+        self.assertEqual(jv.pick_next([row('J1', status='queued', phase=2), row('J5', status='queued', phase=1)], set())[1]['id'], 'J5')
+
+    def test_an_absent_phase_sorts_last(self):
+        r = row('J1', status='queued')
+        del r['phase']
+        self.assertEqual(jv.pick_next([r, row('J9', status='queued', phase=3)], set())[1]['id'], 'J9')
+        self.assertEqual(jv.pick_next([row('J1', phase=2), row('J4', phase=1)], set())[1]['id'], 'J4')   # briefs too, after builds
+
+    def test_dependencies_still_block_a_lower_phase(self):
+        rows = [row('J1', status='queued', phase=1, depends_on=['J7']), row('J5', status='queued', phase=2), row('J7', status='queued', phase=3)]
+        self.assertEqual(jv.pick_next(rows, set())[1]['id'], 'J5')
+
+
+class NeedsPc(unittest.TestCase):
+    """Decision 7: `[jobs] pc_state` and `WSC_PC_STATE` gate a needs_pc build where the PC state folder is absent."""
+    ROWS = [row('J1', status='done'), row('J2', status='queued', needs_pc=True), row('J3', status='queued')]
+
+    def setUp(self):
+        import os
+        from unittest import mock
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+        self.missing = self.dir / 'no_state'
+        env = mock.patch.dict('os.environ')
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop('WSC_PC_STATE', None)
+        self.addCleanup(jv.configure_from, _DEFAULTS['jobs'])
+
+    def cfg(self, pc_state):
+        jv.configure_from({**_DEFAULTS['jobs'], 'pc_state': pc_state})
+
+    def picked(self):
+        return jv.pick_next(self.ROWS, set())[1]['id']
+
+    def test_unset_is_unchanged(self):
+        self.cfg('')
+        self.assertEqual(self.picked(), 'J2')
+
+    def test_a_missing_folder_skips_the_row_with_the_reason(self):
+        self.cfg(str(self.missing))
+        by = {r['id']: r for r in self.ROWS}
+        self.assertEqual(jv.not_ready('build', 'J2', by, set()), f'J2 needs the PC ({self.missing} is absent here)')
+        self.assertEqual(self.picked(), 'J3')
+        self.assertEqual(jv.lane(by['J2'], by, set()), ('waiting', f'J2 needs the PC ({self.missing} is absent here)'))
+        self.assertIsNone(jv.not_ready('brief', 'J4', {**by, 'J4': row('J4', needs_pc=True)}, set()))   # a brief is written anywhere
+
+    def test_an_existing_folder_is_picked_and_vars_expand(self):
+        import os
+        self.cfg(str(self.dir))
+        self.assertEqual(self.picked(), 'J2')
+        os.environ['WSC_TEST_STATE'] = str(self.dir)
+        self.cfg('$WSC_TEST_STATE')
+        self.assertEqual(self.picked(), 'J2')
+
+    def test_the_environment_beats_the_key(self):
+        import os
+        self.cfg(str(self.dir))
+        os.environ['WSC_PC_STATE'] = ''
+        self.assertEqual(self.picked(), 'J3')
+        self.assertIn('no PC here', jv.not_ready('build', 'J2', {r['id']: r for r in self.ROWS}, set()))
+        self.cfg('')
+        os.environ['WSC_PC_STATE'] = str(self.missing)
+        self.assertEqual(self.picked(), 'J3')
+        os.environ['WSC_PC_STATE'] = str(self.dir)
+        self.assertEqual(self.picked(), 'J2')
+
+    def test_review_and_fix_are_not_gated(self):
+        self.cfg(str(self.missing))
+        by = {r['id']: r for r in self.ROWS}
+        self.assertIsNone(jv.not_ready('review', 'J2', by, {'job/J2'}, {'J2': row('J2', status='review', needs_pc=True)}))
+        self.assertIsNone(jv.not_ready('fix', 'J2', by, {'job/J2'}, {'J2': jv.Branch(row('J2', status='fix', needs_pc=True), 1)}))
+
+
+class BranchCi(unittest.TestCase):
+    """Decision 11: one read of a head's check runs, as a state."""
+    def ci(self, runs, rc=0):
+        return jv.branch_ci(ROOT, 'abc1234def', False, run=lambda a, **k: subprocess.CompletedProcess(
+            a, rc, json.dumps({'check_runs': runs}), 'HTTP 502' if rc else ''))[0]
+
+    def test_states(self):
+        ok = {'name': 'gates', 'status': 'completed', 'conclusion': 'success'}
+        self.assertEqual(self.ci([ok, {'name': 'policy', 'status': 'completed', 'conclusion': 'skipped'},
+                                  {'name': 'x', 'status': 'completed', 'conclusion': 'neutral'}]), 'green')
+        self.assertEqual(self.ci([{'name': 'policy', 'status': 'completed', 'conclusion': 'skipped'}]), 'green')
+        self.assertEqual(self.ci([ok, {'name': 'proxy', 'status': 'completed', 'conclusion': 'failure'}]), 'red')
+        self.assertEqual(self.ci([ok, {'name': 'proxy', 'status': 'completed', 'conclusion': 'cancelled'}]), 'red')
+        self.assertEqual(self.ci([ok, {'name': 'proxy', 'status': 'queued', 'conclusion': None}]), 'running')
+        self.assertEqual(self.ci([{'name': 'a', 'status': 'completed', 'conclusion': 'failure'}, {'name': 'b', 'status': 'in_progress'}]), 'running')
+        self.assertEqual(self.ci([]), 'none')
+        self.assertEqual(self.ci([ok], rc=1), 'unknown')
+        self.assertEqual(jv.branch_ci(ROOT, 'abc', True, run=None)[0], 'unknown')
+        self.assertEqual(jv.branch_ci(ROOT, None, False, run=None)[0], 'unknown')
+
+
+class AutopilotGates(unittest.TestCase):
+    """Decisions 11-13: review waits for green CI, fix for CI to finish; one needs_pc row at a time; the tick prunes."""
+    make = Autopilot.make
+
+    def ci_of(self, states):
+        self.ci_calls = []
+        def ci(sha):
+            self.ci_calls.append(sha)
+            return (states[sha] if isinstance(states, dict) else states), []
+        return ci
+
+    def test_review_starts_only_on_green_and_logs_a_deferral_once_per_head(self):
+        for state in ('red', 'running', 'none', 'unknown'):
+            srv = self.make({'J4': jv.Branch(row('J4', status='review', model='sonnet'), 0, 'aaa1111bbb')}, ci=self.ci_of(state))
+            srv.auto_tick()
+            srv.auto_tick()
+            self.assertEqual(self.launched, [], state)
+            self.assertEqual([l for l in self.lines if 'deferred' in l], [f'J4-review: deferred, CI {state} at aaa1111'], state)
+            self.assertNotIn(('J4', 'review'), srv.started)
+        srv = self.make({'J4': jv.Branch(row('J4', status='review', model='sonnet'), 0, 'aaa1111bbb')}, ci=self.ci_of('green'))
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J4-review'])
+
+    def test_a_deferral_does_not_set_started_so_green_later_starts(self):
+        states = {'aaa1111bbb': 'red'}
+        srv = self.make({'J4': jv.Branch(row('J4', status='review', model='sonnet'), 0, 'aaa1111bbb')}, ci=self.ci_of(states))
+        srv.auto_tick()
+        states['aaa1111bbb'] = 'green'
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J4-review'])
+        srv.auto_tick()   # started at this head: no further CI read for it
+        self.assertEqual(len(self.ci_calls), 2)
+
+    def test_fix_defers_only_while_ci_has_not_finished(self):
+        for state, started in (('running', []), ('none', []), ('red', ['J4-fix']), ('green', ['J4-fix']), ('unknown', ['J4-fix'])):
+            srv = self.make({'J4': jv.Branch(row('J4', status='fix', model='sonnet'), 1, 'ccc2222ddd')}, ci=self.ci_of(state))
+            srv.auto_tick()
+            self.assertEqual(self.launched, started, state)
+
+    def pc_snapshot(self, on):
+        rows = [dict(r, needs_pc=True) if r['id'] == 'J4' else r for r in LROWS]
+        rows += [row('J6', status='queued', needs_pc=True), row('J7', status='queued', needs_pc=True), row('J8', status='queued')]
+        return lambda: (rows, files(), {f'job/{j}' for j in on}, on)
+
+    def test_one_needs_pc_row_at_a_time(self):
+        on = {j: jv.Branch(row(j, status='review'), 0, f'{j.lower()}head') for j in ('J4', 'J6', 'J8')}
+        srv = self.make({}, snapshot=self.pc_snapshot(on))
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J4-review', 'J8-review'])   # J6 needs the PC too, J8 does not
+        self.assertIn('J6-review: deferred, J4 holds the PC', self.lines)
+
+    def test_a_live_session_of_another_pc_row_defers_and_a_non_pc_one_does_not(self):
+        on = {'J6': jv.Branch(row('J6', status='review'), 0, 'j6head')}
+        srv = self.make({}, snapshot=self.pc_snapshot(on), agents=lambda: [{'name': 'J7-build', 'state': 'working'}])
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+        self.assertIn('J6-review: deferred, J7 holds the PC', self.lines)
+        srv = self.make({}, snapshot=self.pc_snapshot(on), agents=lambda: [{'name': 'J8-build', 'state': 'working'},
+                                                                           {'name': 'J7-review', 'state': 'done'}])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J6-review'])
+
+    def test_the_tick_prunes_once_logs_a_removal_and_survives_a_failure(self):
+        calls = []
+        def prune(result):
+            def f():
+                calls.append(1)
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            return f
+        srv = self.make({}, prune=prune((0, None)))
+        srv.auto_tick()
+        self.assertEqual(len(calls), 1)
+        self.assertFalse([l for l in self.lines if 'prune' in l])
+        srv = self.make({}, prune=prune((2, None)))
+        srv.auto_tick()
+        self.assertIn('pruned 2 dead worktree registrations', self.lines)
+        for bad in ((0, 'fatal: not a git repository'), OSError('no git')):
+            srv = self.make({}, prune=prune(bad))
+            srv.auto_tick()
+            self.assertTrue(any(l.startswith('worktree prune failed') for l in self.lines), self.lines)
+            self.assertIn('nothing ready', self.lines[-1])
+        calls.clear()
+        srv = self.make({}, prune=prune((5, None)), dry_run=True)
+        srv.auto_tick()
+        self.assertEqual(calls, [])
+        self.assertIn('would prune dead worktree registrations', self.lines)
 
 
 class ThisRepo(unittest.TestCase):
