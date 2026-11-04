@@ -3,7 +3,7 @@
   "description": "Audit 2026-11-03 follow-ups (napoleon-remastered docs/audits/AUDIT_2026-11-03.md), raised by the W23 and napoleon J76 builders (filed here rather than in docs/BACKLOG.md, which is at its 30 KB cap). (1) The forged-status residual W23 documents (any write token can post a status named policy): refuse a job/ branch that adds or changes a file under .github/workflows/ or ci/ unless the brief on the base names that file, so a job cannot quietly add a workflow that posts a fake check (W23 report, open question 2; Liam accepted the residual on 2026-11-04 with this follow-up). (2) warscape/trailer.py's COMMIT match knows git's global options (git --no-pager commit, -P, --git-dir=, -c alias.X=, aliases), so a game hook no longer has to normalise the call before asking the core whether a commit lacks the trailer (napoleon J76 report). (3) A pull request into a branch other than main is judged with that branch's rules under pull_request_target: refuse a non-default base or pin the judge to the default branch, decided in the brief (W23 report, open question 1). Host tests for each. After W23 and W27 (policy.py).",
   "title": "Policy and hook follow-ups: workflow edits on job branches, global-option-aware commit match, non-main bases",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",
@@ -11,5 +11,6 @@
     "W23",
     "W27"
   ],
-  "brief": "jobs/W36/brief.md"
+  "brief": "jobs/W36/brief.md",
+  "report": "jobs/W36/report.md"
 }
