@@ -38,6 +38,9 @@ DEFAULTS = {
         'exempt': [],
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
+    # wsc agent-settings (W35, C28): the Claude Code command rules an agent may add to .claude/settings.json without asking, e.g.
+    # "Bash(git status:*)"; a rule is added only when one of these covers it. Empty (the default) = the verb is not configured.
+    'agent_settings': {'safe': []},
     'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`
               'dirs': [],                  # repo-relative folders of game gate modules (warscape/gatemods.py)
               'run_refs_since': ''},       # YYYY-MM-DD: the `run_refs` gate skips run folders dated before it ('' = checks every run README; C23)
