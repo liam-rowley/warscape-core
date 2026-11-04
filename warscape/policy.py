@@ -9,17 +9,41 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
   plan/*      planning: the `[policy] plan` globs. No code.
   meta/*      repo infrastructure: the `[policy] meta` globs.
-Anything else is refused. Every branch kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows
-numbered <prefix><last+1>, with a YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces.
-A repo's own rules (napoleon's rule 79, the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the
-decisions check: an `error` Result's details are policy errors.
+Anything else is refused. Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
+kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
+YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. A repo's own rules (napoleon's rule 79,
+the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the decisions check: an `error`
+Result's details are policy errors.
+
+A pull request is judged with its base's rules (core W23, C24). The verb's parent (warscape/policy_base.py `judge`) writes the base's rule
+inputs into a fresh temporary folder outside every repository and runs the base's code there in a child process (`wsc policy --judge`,
+which calls `run_check` here):
+  - the base tree: inside the core, the base commit's tree; in a game, the core commit the base's gitlink pins at the base's `[ci] core`, read
+    from the submodule's object store (never `core/` on disk, never the head's gitlink), plus the base's wsc.toml, every `[gates] dirs`
+    folder and the `[jobs] legacy` file. Git cannot find a repository from inside it (GIT_CEILING_DIRECTORIES);
+  - the head is data: the changed paths (merge base ... head, renames as a delete and an add), the blobs the rules read and the trailers of
+    its commits, read with git at the clone by sha. Nothing of the head is imported, executed or parsed as configuration;
+  - a branch that changes a rule input (the core, wsc.toml, the gate folders, the legacy file, the policy workflow or its template) gets a
+    note: what it changes judges the pull requests after it, never itself;
+  - fails closed: a ref that does not resolve, no merge base, an unreadable base wsc.toml, a missing gitlink, submodule or pin, an extraction
+    error, or a child that gives no verdict (any other exit, a crash, a timeout) is a refusal that names the fix;
+  - a base whose core has no `JUDGE_API` line predates W23: it is judged in-process with this checkout's code and configuration, with a note.
+`JUDGE_API` versions the child's arguments; a later core may only add optional ones, passed when the base's number allows them.
 """
 import json
 import re
 import subprocess
-from fnmatch import fnmatchcase
+from pathlib import Path
 
 from . import gatemods
+from .repo import DEFAULTS, git_env, matches
+
+# The judge's interface (the `--judge` child's arguments), read from a base core's text by warscape/policy_base.py: keep it on a line of its own.
+JUDGE_API = 1
+
+
+class Refusal(Exception):
+    """The base's rules cannot be run: a refusal (exit 1) whose message names the fix."""
 
 
 def settings(config):
@@ -32,13 +56,21 @@ def settings(config):
 
 
 def git(*args, cwd=None):
-    return subprocess.run(['git', *args], capture_output=True, text=True, check=True, cwd=cwd).stdout
+    return subprocess.run(['git', *args], capture_output=True, text=True, check=True, cwd=cwd, env=git_env()).stdout
 
 
 def show(ref, path, cwd=None):
-    """File text at ref, or None when it does not exist there."""
+    """File text at ref, or None when it does not exist there. A policy module reads the head with `show(facts['head'], path, cwd=facts['repo'])`."""
     try:
         return git('show', f'{ref}:{path}', cwd=cwd)
+    except subprocess.CalledProcessError:
+        return None
+
+
+def resolve(rev, cwd):
+    """The commit sha `rev` names in the repository at `cwd`, or None."""
+    try:
+        return git('rev-parse', '--verify', '--quiet', '--end-of-options', f'{rev}^{{commit}}', cwd=cwd).strip() or None
     except subprocess.CalledProcessError:
         return None
 
@@ -63,7 +95,7 @@ def rows_at(ref, cfg, cwd=None):
     if not names:
         return {}
     out = subprocess.run(['git', 'cat-file', '--batch'], input=''.join(f"{ref}:{cfg['reg_jobs']}/{n}\n" for n in names).encode(),
-                         capture_output=True, check=True, cwd=cwd).stdout
+                         capture_output=True, check=True, cwd=cwd, env=git_env()).stdout
     got, at = {}, 0
     for _ in names:
         nl = out.index(b'\n', at)
@@ -83,13 +115,16 @@ def verdict(review_text):
     return None
 
 
-def decisions_problems(base_text, head_text, cfg):
+def decisions_problems(base_text, head_text, cfg, base_ref='the base branch'):
     """Errors when the head decisions file is not the base's rows plus well-formed new rows at the end."""
     path, pre = cfg['decisions'], cfg['prefix']
     drow = re.compile(rf'^\|\s*{re.escape(pre)}(\d+)\s*\|')
     rows_ = lambda t: [l.rstrip() for l in (t or '').splitlines() if drow.match(l)]
     old, new, errs = rows_(base_text), rows_(head_text), []
-    if new[:len(old)] != old:
+    if len(new) < len(old) and old[:len(new)] == new:   # behind the base tip, not an edit (W23: the judge compares the head, not a merge)
+        lacks = [o.split('|')[1].strip() for o in old[len(new):]]
+        errs.append(f'{path}: merge {base_ref}: the base has rows this branch lacks ({", ".join(lacks[:5])})')
+    elif new[:len(old)] != old:
         changed = [o.split('|')[1].strip() for i, o in enumerate(old) if i >= len(new) or new[i] != o]
         errs.append(f'{path} is append only: rows {", ".join(changed[:5])} were changed, moved or removed '
                     f'(a reversal is a new dated row that names the one it replaces)')
@@ -106,17 +141,19 @@ def decisions_problems(base_text, head_text, cfg):
 
 
 def allowed(path, globs):
-    return any(fnmatchcase(path, g) for g in globs)
+    return matches(path, globs)
 
 
-def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=None, cfg=None, hook=None):
+def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=None, cfg=None, hook=None, base_ref=None):
     """Errors for this pull request. `base_file`/`head_file` are callables path -> text or None. `sessions`: callable path ->
     list with one set of trailer values per branch commit that touched it (job branches; an empty set is a commit without a trailer, which
     is refused; None skips the authorship check, for the pure-logic tests). `cfg`: settings(). `hook`: callable(facts) -> [str], the
-    repo's `policy`-stage gate modules (facts: branch, kind, jid, changed), called after the decisions check."""
+    repo's `policy`-stage gate modules (facts: branch, kind, jid, changed), called after the decisions check. `base_ref`: the base's name
+    for messages."""
     cfg = cfg or settings(_default_config())
     T, jd, trailer = cfg['text'], cfg['jobs_dir'], cfg['trailer']
-    errs = decisions_problems(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] and cfg['decisions'] in changed else []
+    errs = (decisions_problems(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg, base_ref or 'the base branch')
+            if cfg['decisions'] and cfg['decisions'] in changed else [])
     m = re.fullmatch(rf"(job|brief)/({re.escape(cfg['job_prefix'])}[1-9][0-9]*)", branch)
     kind = m.group(1) if m else branch.split('/', 1)[0] if '/' in branch else ''
     if hook:
@@ -183,29 +220,38 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
 
 
 def _default_config():
-    from .repo import DEFAULTS
     return DEFAULTS
 
 
-def collect_facts(ctx, branch, base='origin/main'):
-    """Everything `run` reads from git for one pull request: the merge base, the changed files and the facts handed to `policy`-stage gate modules."""
-    cwd = str(ctx.root)
-    mb = git('merge-base', base, 'HEAD', cwd=cwd).strip()
-    changed = [p for p in git('diff', '--name-only', f'{mb}...HEAD', cwd=cwd).splitlines() if p]
-    return {'root': ctx.root, 'branch': branch, 'base': base, 'head': 'HEAD', 'merge_base': mb, 'changed': changed}
+def diff_base(base, head, repo, base_ref=None, head_ref=None):
+    """(base sha, head sha, merge base, changed paths) at `repo`. Renames count as a delete and an add, and the output does not depend on
+    git config (diff.renames, core.quotePath), so the same two shas give the same paths anywhere. Raises Refusal."""
+    b, h = resolve(base, repo), resolve(head, repo)
+    if not b:
+        raise Refusal(f'--base {base_ref or base} does not resolve to a commit: `git fetch` first (a stale or missing base judges with the wrong rules)')
+    if not h:
+        raise Refusal(f'--head {head_ref or head} does not resolve to a commit: fetch the pull request head (`git fetch origin <branch>`)')
+    try:
+        mb = git('merge-base', b, h, cwd=repo).strip()
+    except subprocess.CalledProcessError:
+        raise Refusal(f'{base_ref or base} and {head_ref or head} have no merge base: the branch must be cut from the base (`git fetch` a full history)') from None
+    changed = [p for p in git('diff', '--name-only', '--no-renames', '-z', f'{mb}...{h}', cwd=repo).split('\0') if p]
+    return b, h, mb, changed
 
 
-def run_check(ctx, branch, base='origin/main', extra_facts=None):
-    """The errors and the changed files of `branch` against `base`, read from the repo at ctx.root (what `wsc policy` and CI run).
-    `extra_facts`: more facts for the `policy`-stage gate modules (`ctx.facts`), over the collected ones."""
+def run_check(ctx, branch, base, head, repo, extra_facts=None, base_ref=None):
+    """The errors and the changed files of `branch` (the commit `head`) against `base`, read with git at `repo` (the clone; refs resolve there
+    to shas). `ctx` holds the rules: the base tree in the `--judge` child, this checkout in the pre-W23 fallback. Its config and its gate
+    modules judge; `ctx.root` is never a git cwd. `extra_facts`: more facts for the `policy`-stage gate modules (`ctx.facts`)."""
     cfg = settings(ctx.config)
-    cwd = str(ctx.root)
-    facts = collect_facts(ctx, branch, base)
-    mb, changed, trailer = facts['merge_base'], facts['changed'], cfg['trailer']
+    repo = str(Path(repo).resolve())
+    b, h, mb, changed = diff_base(base, head, repo, base_ref)
+    base_ref = base_ref or base
+    facts = {'root': ctx.root, 'branch': branch, 'base': b, 'head': h, 'merge_base': mb, 'changed': changed, 'base_ref': base_ref, 'repo': repo}
+    trailer = cfg['trailer']
 
     def sessions(path):
-        key = f'{trailer}'
-        out = git('log', f'--format=%H%x1f%(trailers:key={key},valueonly,separator=%x1f)%x1e', f'{mb}..HEAD', '--', path, cwd=cwd)
+        out = git('log', f'--format=%H%x1f%(trailers:key={trailer},valueonly,separator=%x1f)%x1e', f'{mb}..{h}', '--', path, cwd=repo)
         recs = [r.strip('\n').split('\x1f') for r in out.split('\x1e') if r.strip()]
         return [{v.strip() for v in r[1:] if v.strip()} for r in recs]
 
@@ -214,6 +260,18 @@ def run_check(ctx, branch, base='origin/main', extra_facts=None):
     def hook(f):
         return gatemods.problems(gatemods.run_stage(ctx, 'policy', facts={**facts, **f, **(extra_facts or {})}))
 
-    errs = check(branch, changed, rows_at(mb, cfg, cwd), rows_at('HEAD', cfg, cwd), lambda p: show(base, p, cwd), lambda p: show('HEAD', p, cwd),
-                 sessions, cfg, hook)
+    errs = check(branch, changed, rows_at(mb, cfg, repo), rows_at(h, cfg, repo), lambda p: show(b, p, repo), lambda p: show(h, p, repo),
+                 sessions, cfg, hook, base_ref)
     return errs, changed
+
+
+def rule_input_note(config, changed, base_ref):
+    """The note for a branch that changes what judges pull requests (decided by the base's config), or ''."""
+    ci, core = config['ci'], config['ci']['core']
+    pats = ['wsc.toml', '.github/workflows/policy.yml', f"{ci['template_dir']}/policy.yml.in", *([core] if core else ['wsc.py', 'warscape/**']),
+            *(f'{d}/**' for d in config['gates']['dirs']), *([config['jobs']['legacy']] if config['jobs']['legacy'] else [])]
+    hit = [p for p in changed if matches(p, pats)]
+    if not hit:
+        return ''
+    shown = ', '.join(hit[:8]) + (f' and {len(hit) - 8} more' if len(hit) > 8 else '')
+    return f"policy: note: this branch changes {shown}: they judge pull requests after this one merges; this one was judged with {base_ref}'s"

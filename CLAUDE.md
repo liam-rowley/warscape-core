@@ -13,7 +13,8 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
 - The queue is the `jobs` registry (`registries/jobs/W<n>.json`, one file per job) with a folder `jobs/<id>/` per job (`brief.md`, `report.md`,
   `review.md`); a job in progress is a remote branch `job/<id>`. `python3 wsc.py jobs next` names the next job (or the brief to write, on `brief/<id>`);
   `jobs review` and `jobs fix` name the branch to review or fix; `jobs view` shows the queue; `jobs check` runs in the `jobs` gate.
-- The branch name decides what a pull request may change (`python3 wsc.py policy --branch <branch>`; the kinds are the docstring of `warscape/policy.py`).
+- The branch name decides what a pull request may change (`python3 wsc.py policy --branch <branch>`; the kinds are the docstring of `warscape/policy.py`),
+  judged with the base's rules, never the branch's own (C24): `git fetch` first, and a change to the policy proves itself with host tests.
   Work Liam asks for that is not in the queue becomes a `needs_brief` row on a `plan/` branch first. A job is reviewed by a fresh session (`docs/REVIEW.md`);
   never mark your own job `done`, never review a job you built. Everything a game can configure is in `docs/CONSUMING.md`, "The job pipeline".
 
