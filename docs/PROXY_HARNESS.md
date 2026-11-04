@@ -21,6 +21,8 @@ instead of keeping its own, and a host test that runs a shell script takes its b
 `$WSC_REQUIRE_BASH`).
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
 (watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+A headless launch whose game writes `refused` and exits before the watcher looks now fails with the proxy's own detail, not "not running after
+the start" (watcher 1.4.1, 0.30.1, W38); update the PC's watcher with `update kit=`.
 
 **The UI pin file** (`[proxy] ui_pins`, else `viewer/pins.json`; the `ui_pins` input) needs `rmlui`, `freetype`, `lua`, `stb_image` and
 `stb_image_write` (the PNG dump, since 0.10.0); copy a missing entry from the null game's `proxy/tests/null_game/viewer/pins.json`.
@@ -37,3 +39,17 @@ Engine sites and their config keys ([PROXY_SITES.md](PROXY_SITES.md)): from 0.16
 generated tables are byte-identical); after the pin bump run `python3 core/proxy/tools/gen_tables.py --check`.
 The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
 `stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
+
+## Guarded verbs (W35, C29)
+Two permissions sessions kept asking for are verbs whose guard holds the judgement; an agent runs them without a one-off ask.
+- **`wsc agent-settings allow|remove "<rule>" [...] [--file .claude/settings.json]`** adds a rule to `permissions.allow` only when a
+  `[agent_settings] safe = [...]` pattern in `wsc.toml` covers it (`"Bash(git status:*)"` covers itself, `Bash(git status --short:*)` and
+  `Bash(git status)`), no `deny` rule overlaps it, and it has no wildcard but a trailing `:*` and no shell operator (`Bash(*)`, `Bash(git:*)`,
+  `PowerShell(*)` refuse). Key order and indentation are kept; the write is atomic (a temporary file in the folder, then a replace) and the
+  old file is kept as `settings.json.bak` once per run. It never edits a hook or a `deny` entry, writes only a `.json` directly in a
+  `.claude` folder (no hook line needed: `.claude/` is not a protected folder) and refuses without `[agent_settings]`. Exit 0, 1 write failed, 2 refused.
+- **`job.sh vdisplay-aside <owner|-> <session> <why>`** moves `vdisplay_restore.json` to `_to_delete\vdisplay_restore_<utc>[_n].json.aside` (a unique
+  name, `mv -n`, checked), appends the record to `watcher.log` and prints the saved mode, only when the file exists, the lock is free or
+  `<owner>`'s, the watcher runs (`watcher.alive` under 15 s) and `watcher.status` lists no game process, and either the last `vdisplay: `
+  line of `watcher.log` (at or after the file's time) is a `RESTORE FAILED` or `pending restore dropped`, or the file is older than
+  `lock_stale_min`. Otherwise it refuses (2; 64 for usage or an empty why) with the next step. It never deletes and never sets the display mode.

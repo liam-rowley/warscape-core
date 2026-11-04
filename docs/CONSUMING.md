@@ -293,18 +293,16 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 - A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
 
-## Crash symbolisation and guarded verbs (0.35.0, core W35, C29; [PROXY_BUILD.md](PROXY_BUILD.md))
-- **Pin bump:** `build.sh` changed, so the build id is new: one 20-pass run (rule 79). Delete any game verb named `crash` or `agent-settings`.
-- **CI:** put `{{wsc proxy_map step=dll}}` right after the proxy build step, give that step `id: dll`, then `wsc ci render`; the job uploads
-  `proxy-map-<build id>` (90 days). **Release:** attach `d3d9.map` and `d3d9.map.json` (beside the DLL) to each release you publish.
-- **`wsc crash symbolise <dump> --map <d3d9.map> | --build-id <id>`** names the exception frame of a proxy dump from the map; refuses a map
-  whose sidecar disagrees with the log, the DLL or the dump.
-- **`wsc agent-settings allow|remove "<rule>"`** adds a rule to `.claude/settings.json` `permissions.allow` only when a `[agent_settings]
-  safe = [...]` pattern in `wsc.toml` covers it (e.g. `"Bash(git status:*)"`), no `deny` rule overlaps it and it has no wildcard or shell
-  operator; it never edits hooks or `deny`, writes only `.claude/*.json` (no hook line needed) and refuses without `[agent_settings]`.
-- **`job.sh vdisplay-aside <owner|-> <session> <why>`** moves a stale `vdisplay_restore.json` to `_to_delete\` (unique name, prints the
-  saved mode) only when the lock is free or yours, the watcher runs with no game, and its restore failed or dropped (the last `vdisplay:`
-  line of `watcher.log`) or the file is older than the stale limit. The watcher kit does not change.
+## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
+- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
+  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
+- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
+- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
+- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
+## Crash symbolisation and guarded verbs (0.35.0, core W35, C29)
+Pin bump: a new build id (`build.sh` changed: 20 passes); delete game verbs named `crash` or `agent-settings`; put `{{wsc proxy_map step=dll}}`
+after the proxy build step (give it `id: dll`) and `wsc ci render`; attach `d3d9.map` and `d3d9.map.json` to each release; set `[agent_settings] safe`.
+What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROXY_HARNESS.md](PROXY_HARNESS.md) "Guarded verbs".
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

@@ -8,7 +8,7 @@
 param([string]$Root = '', [string]$Adapter = '', [switch]$NoRun)
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.4.0'
+$Version = '1.5.0'
 $SrcDir = $PSScriptRoot
 if (-not $Root) { $Root = Join-Path $SrcDir '..' }
 $Root = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -42,7 +42,22 @@ $Defaults = [ordered]@{
 }
 $S = @{}
 $IniStamp = $null
-function Load-Settings {
+$ExeCheckRefused = $null     # W25 (H1): the weaker exe_check watcher.ini asks for while this running watcher keeps the stronger one
+$ExeCheckLogged = $null
+# A reload never weakens exe_check (W25, audit H1): the gate honours only 'warn' (Exe-Gate), so a running watcher whose value is anything else
+# keeps it when the ini now says 'warn'. Pure: @{ value = what the reload keeps; refused = the ini's value when it was refused, else $null }.
+function Reload-ExeCheck([string]$running, [string]$asked) {
+    if ($running -ne 'warn' -and $asked -eq 'warn') { return @{ value = $running; refused = $asked } }
+    return @{ value = $asked; refused = $null }
+}
+# At start: the stricter of the ini and a fresh restart.carry (written before a restart/update exit 3 or 4), so a restart job never undoes
+# the reload rule; a carry older than 5 minutes is ignored (the watcher was stopped, then started by hand: Liam's way to change it). Pure.
+function Resolve-ExeCheck([string]$ini, $carry) {
+    if ($carry -and $carry.age_s -le 300 -and $carry.exe_check -ne 'warn' -and $ini -eq 'warn') { return [string]$carry.exe_check }
+    return $ini
+}
+function Load-Settings([switch]$Reload) {
+    $prev = $S.exe_check
     $script:S = @{}
     foreach ($k in $Defaults.Keys) { $script:S[$k] = $Defaults[$k] }
     $ini = Join-Path $Root 'watcher.ini'
@@ -55,6 +70,16 @@ function Load-Settings {
         }
         $script:IniStamp = (Get-Item -LiteralPath $ini).LastWriteTimeUtc
     } else { $script:IniStamp = $null }
+    if ($Reload) { Set-ExeCheck (Reload-ExeCheck $prev $S.exe_check) }
+}
+function Set-ExeCheck($r) {
+    $script:S.exe_check = $r.value
+    $script:ExeCheckRefused = $r.refused
+    if (-not $r.refused) { $script:ExeCheckLogged = $null; return }
+    if ($ExeCheckLogged -ne $r.refused) {
+        $script:ExeCheckLogged = $r.refused
+        Log "settings: watcher.ini asks exe_check=$($r.refused); refused, a running watcher never weakens it (stop the watcher and start it by hand)"
+    }
 }
 function IntSet([string]$k) { $v = 0; if ([int]::TryParse([string]$S[$k], [ref]$v)) { return $v }; return [int]$Defaults[$k] }
 function NumSet([string]$k) { return [double]::Parse([string]$S[$k], $Inv) }
@@ -219,6 +244,24 @@ $LockSeen = $null
 $PumpDepth = 0
 $VdRetryAt = Get-Date        # next time a failed virtual-display restore may be retried
 Load-Settings
+# W25 (H1): the restart carry. A restart or update (exit 3/4) writes restart.carry with the exe_check in force; this start reads and removes it
+function Write-RestartCarry([string]$value) { Write-Atomic (RootPath 'restart.carry') "exe_check=$value`r`n" }
+function Read-RestartCarry {
+    $cp = RootPath 'restart.carry'
+    if (-not (Test-Path -LiteralPath $cp)) { return $null }
+    $c = $null
+    try {
+        $age = ((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $cp).LastWriteTimeUtc).TotalSeconds
+        foreach ($line in [IO.File]::ReadAllLines($cp)) { $kv = $line.Trim() -split '=', 2; if ($kv.Count -eq 2 -and $kv[0].Trim() -eq 'exe_check') { $c = @{ exe_check = $kv[1].Trim(); age_s = $age } } }
+    } catch { Log "restart.carry unreadable: $($_.Exception.Message)" }
+    Remove-Quiet $cp
+    return $c
+}
+$StartCarry = Read-RestartCarry
+$iniExe = [string]$S.exe_check
+$S.exe_check = Resolve-ExeCheck $iniExe $StartCarry
+if ($S.exe_check -ne $iniExe) { Set-ExeCheck @{ value = $S.exe_check; refused = $iniExe } }
+elseif ($S.exe_check -eq 'warn') { Log 'settings: exe_check=warn at start (watcher.ini): the exe check only warns before a launch (D2: the exe stays vanilla on disk)' }
 if (Test-Path -LiteralPath $Adapter) { Load-Adapter }
 
 # ------------------------------------------------------------------------------------------------ game lock ---------
@@ -327,7 +370,9 @@ function Kill-Game([string]$why, $out) {
     if (-not $targets.Count) { $out.Add('nothing to kill: no game process'); return $true }
     foreach ($p in $targets) {
         if ((IntSet 'test_fake_zombie') -eq 1) { $out.Add("TEST: test_fake_zombie=1, not killing $($p.ProcessName) pid $($p.Id)"); continue }
-        $r = & taskkill.exe /F /T /PID $p.Id 2>&1 | Out-String
+        # W38: a game that exits on its own just before this makes taskkill print "not found" on stderr, which under Stop is a terminating
+        # error in Windows PowerShell 5.1 ("watcher error"); it is an outcome to log, and the wait below sees the process gone
+        $r = & { $ErrorActionPreference = 'Continue'; & taskkill.exe /F /T /PID $p.Id 2>&1 | Out-String }
         $out.Add("taskkill /F /T /PID $($p.Id) ($($p.ProcessName)): $($r.Trim())")
     }
     $deadline = (Get-Date).AddSeconds((IntSet 'zombie_wait_s'))
@@ -370,11 +415,12 @@ function Wait-NotRunning($out) {
 # ------------------------------------------------------------------------------------------------ launch ------------
 # ------------------------------------------------------------------------------------------------ exe identity ------
 # J18 (J5 ledger row 28, D2: the exe stays vanilla on disk): the game exe is hashed before every launch and compared with the sha1 in
-# exe_identity.json (pc_deploy.py stages it beside adapter.json from proxy/<adapter>/identity.json). The hash is cached by size + mtime.
+# exe_identity.json (pc_deploy.py stages it beside adapter.json from proxy/<adapter>/identity.json). W25 (H12): the launch gate hashes the
+# exe every launch (Exe-Check -Fresh); only the status check uses a cache, keyed on path, size, mtime and creation time.
 $ExeCache = $null
 $ExeState = $null
 function Exe-IdentityPath { return (Join-Path (Split-Path -Parent $Adapter) 'exe_identity.json') }
-function Exe-Check {
+function Exe-Check([switch]$Fresh) {
     $exe = GamePath $A.game_image
     $want = $null
     $idp = Exe-IdentityPath
@@ -383,8 +429,8 @@ function Exe-Check {
     if (-not (Test-Path -LiteralPath $exe)) { $detail = "the game exe $exe is not there" }
     else {
         $it = Get-Item -LiteralPath $exe
-        $key = "$($it.Length)|$($it.LastWriteTimeUtc.Ticks)"
-        if (-not $ExeCache -or $ExeCache.key -ne $key) { $script:ExeCache = @{ key = $key; sha1 = (Get-FileHash -LiteralPath $exe -Algorithm SHA1).Hash.ToLower() } }
+        $key = "$exe|$($it.Length)|$($it.LastWriteTimeUtc.Ticks)|$($it.CreationTimeUtc.Ticks)"
+        if ($Fresh -or -not $ExeCache -or $ExeCache.key -ne $key) { $script:ExeCache = @{ key = $key; sha1 = (Get-FileHash -LiteralPath $exe -Algorithm SHA1).Hash.ToLower() } }
         $sha = $ExeCache.sha1
         if (-not $want) { $detail = "no exe identity to check $($A.game_image) against ($idp missing or unreadable: install a harness kit built by pc_deploy.py)" }
         elseif ($sha -eq $want) { $ok = $true; $detail = "$($A.game_image) sha1 $sha is the vanilla build in exe_identity.json" }
@@ -395,7 +441,7 @@ function Exe-Check {
 }
 # The launch gate: $null to go ahead (a warning in $out under exe_check=warn), else the refusal.
 function Exe-Gate($out) {
-    $x = Exe-Check
+    $x = Exe-Check -Fresh
     if ($x.ok -eq $true) { $out.Add("exe check: ok, $($x.detail)"); return $null }
     if ($S.exe_check -eq 'warn') { $out.Add("WARNING (watcher): exe check failed, launching anyway (exe_check=warn): $($x.detail)"); Log "exe check (warn): $($x.detail)"; return $null }
     Log "exe check: launch refused: $($x.detail)"
@@ -922,12 +968,25 @@ function Start-WinProbe($out) {
     else { $out.Add("WARNING: the window probe in $rel did not report ready within 30 s; the launch goes ahead") }
     return $dir
 }
+# W38: a refusal this launch's game wrote before it exited (the proxy writes `refused`, then exits with exit_code), read once more when the
+# game is already gone, so a fast refusal keeps its detail. Its pid must be the game's; with no pid seen, the file must be written since the launch.
+function Headless-Refused([string]$sp, [int]$gpid, [datetime]$sinceUtc) {
+    if (-not (Test-Path -LiteralPath $sp)) { return $null }
+    $st = Read-JsonRetry $sp 3
+    if (-not $st -or $st.state -ne 'refused') { return $null }
+    if ($gpid) { if ([int]$st.pid -ne $gpid) { return $null } }
+    elseif ((Get-Item -LiteralPath $sp).LastWriteTimeUtc -lt $sinceUtc.AddSeconds(-1)) { return $null }
+    return "HEADLESS FAILED: the proxy refused the launch: $($st.detail) (exit code $($st.exit_code); nothing was shown on a real monitor)"
+}
 # Waits for the proxy's status file to name this pid on_virtual (ok) or refused; anything else in time is fail closed (the game is killed).
-function Headless-Wait([int]$waitS, $out) {
+function Headless-Wait([int]$waitS, $out, [datetime]$sinceUtc) {
     $hl = $A.headless
     $sp = GamePath $hl.status_file
     $g = @(Get-GameProcs)
-    if (-not $g.Count) { return "HEADLESS FAILED: $($A.game_image) is not running after the start (exit code $($hl.exit_code) = the proxy refused; read $($hl.status_file))" }
+    if (-not $g.Count) {
+        $r = Headless-Refused $sp 0 $sinceUtc; if ($r) { return $r }
+        return "HEADLESS FAILED: $($A.game_image) is not running after the start (exit code $($hl.exit_code) = the proxy refused; read $($hl.status_file))"
+    }
     $gpid = $g[0].Id
     $deadline = (Get-Date).AddSeconds($waitS)
     $last = '(no status yet)'
@@ -947,7 +1006,10 @@ function Headless-Wait([int]$waitS, $out) {
                 return "HEADLESS FAILED: the proxy refused the launch: $($st.detail) (exit code $($st.exit_code); nothing was shown on a real monitor)"
             }
         }
-        if (-not (Get-Process -Id $gpid -ErrorAction SilentlyContinue)) { return "HEADLESS FAILED: the game exited before reporting on_virtual (last status: $last)" }
+        if (-not (Get-Process -Id $gpid -ErrorAction SilentlyContinue)) {
+            $r = Headless-Refused $sp $gpid $sinceUtc; if ($r) { return $r }   # W38: it wrote `refused` after this loop's read, then exited
+            return "HEADLESS FAILED: the game exited before reporting on_virtual (last status: $last)"
+        }
         Start-Sleep -Milliseconds 250
     }
     [void](Kill-Game 'headless status timeout' $out)
@@ -973,7 +1035,7 @@ function Launch-Job($hdr, $c, $o) {
     if ($g.Count) { $o.Add("running: $($A.game_image) pid $($g[0].Id)") } else { $o.Add("WARNING: $($A.game_image) not seen in the process list after the start (it may have exited at once)") }
     if ($headless) {
         $ws = 180; if ($hdr['headless_wait_s']) { $ws = [int]$hdr['headless_wait_s'] }
-        $err = Headless-Wait $ws $o
+        $err = Headless-Wait $ws $o ($LaunchAt.ToUniversalTime())   # W38: a status written since the launch is its own
         if ($err) { return $err }
     }
     if ($hdr['wait_log']) { $ws = 120; if ($hdr['wait_s']) { $ws = [int]$hdr['wait_s'] }; if (-not (Wait-LogLine $hdr['wait_log'] $ws $o)) { return "launch: the log line '$($hdr['wait_log'])' did not appear" } }
@@ -1158,6 +1220,7 @@ function Write-Status {
         profile_active = (Get-Active)
         last_hang = $LastHang
         exe = $ExeState
+        exe_check = $S.exe_check; exe_check_refused = $ExeCheckRefused
     }
     Write-Atomic $StatusPath ($st | ConvertTo-Json -Depth 6)
 }
@@ -1175,7 +1238,7 @@ function Pump {
     $script:PumpDepth++
     try {
         $ini = RootPath 'watcher.ini'
-        if ((Test-Path -LiteralPath $ini) -and (Get-Item -LiteralPath $ini).LastWriteTimeUtc -ne $IniStamp) { Load-Settings; Log 'settings: watcher.ini reloaded' }
+        if ((Test-Path -LiteralPath $ini) -and (Get-Item -LiteralPath $ini).LastWriteTimeUtc -ne $IniStamp) { Load-Settings -Reload; Log 'settings: watcher.ini reloaded' }
         $l = Get-Lock
         $sig = if ($l) { "$($l.owner)|$($l.purpose)" } else { '' }
         if ($sig -ne $LockSeen) { Log "lock: $(if ($l) { "held by owner=$($l.owner) purpose=$($l.purpose)" } else { 'free' })"; $script:LockSeen = $sig }
@@ -1503,7 +1566,11 @@ while ($true) {
         if (-not $Cur) {
             if (Test-Path -LiteralPath (RootPath 'restart.request')) { Remove-Quiet (RootPath 'restart.request'); Log 'restart.request'; $RestartAfter = 3 }
             if (Test-Path -LiteralPath (RootPath 'watcher.stop')) { Remove-Quiet (RootPath 'watcher.stop'); Log 'watcher.stop: stopping'; $exitCode = 11; break }
-            if ($RestartAfter) { $exitCode = $RestartAfter; Log "watcher restarting (exit $exitCode)"; break }
+            if ($RestartAfter) {
+                $exitCode = $RestartAfter
+                if ($exitCode -in 3, 4) { try { Write-RestartCarry $S.exe_check } catch { Log "restart.carry not written: $($_.Exception.Message)" } }   # W25: the next start keeps it
+                Log "watcher restarting (exit $exitCode)"; break
+            }
         }
         if (((Get-Date) - $LastPrune).TotalMinutes -ge 10) { Prune }
     } catch {

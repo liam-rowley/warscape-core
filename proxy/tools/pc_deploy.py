@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Kit, install, uninstall and check the proxy on the PC with sha-checked copies and a byte-exact uninstall.
 
-purpose: build a proxy kit (built DLL, default config, pinned DXVK) or a harness kit (the watcher, its adapter and profiles; manifest with sha256 and unique staged names; both carry a sha-checked exe_identity.json), install the proxy into the game folder with sha-checked copies (refused when the exe is not the vanilla build the identity names), uninstall it back to the pre-install snapshot, edit the installed config, check the exe sha after each of them, snapshot and diff a game folder; status reports the exe verdict, any .git in or above the game folder and files no install owns (J18)
-usage: pc_deploy.py sync-lua --game G --state S [--dry-run] | kit [--what proxy|harness] [--out DIR] | send --kit DIR --state S | snapshot --game G --out F | install --kit DIR --game G --state S [--assume-closed] | uninstall --game G --state S [--assume-closed] | set --game G [--state S] key=value... | status --game G --state S | diff A B
-when: every time built proxy or harness files go to the game folder or the watcher (never copy them by hand); runs in Git Bash on the PC from the repo checkout: `kit` builds into build/kits, `send` puts a kit sha-checked under <state>/kits/<id> (for install and the watcher's `update kit=<id>`); install/uninstall ask the running watcher (<state>/watcher/watcher.status), else tasklist, whether a game of either title is running
+purpose: build a proxy kit (built DLL, default config, pinned DXVK) or a harness kit (the watcher, its adapter and profiles; manifest with sha256 and unique staged names; both carry a sha-checked exe_identity.json), install the proxy into the game folder with sha-checked copies (refused when the exe is not the vanilla build the identity names), uninstall it back to the pre-install snapshot, edit the installed config, check the exe sha after each of them, snapshot and diff a game folder; status reports the exe verdict, any .git in or above the game folder, files no install owns (J18) and, with nothing installed, a stray config file or mod folder (W25); install, uninstall, set and sync-lua take the game lock through job.sh and write the ini and install.json atomically (W25)
+usage: pc_deploy.py sync-lua --game G --state S [--dry-run] [LOCK] | kit [--what proxy|harness] [--out DIR] | send --kit DIR --state S | snapshot --game G --out F | install --kit DIR --game G --state S [--move-stray] [LOCK] | uninstall --game G --state S [LOCK] | set --game G [--state S] [LOCK] key=value... | status --game G --state S | diff A B   (LOCK = [--assume-closed] [--owner O] [--session ID] [--job-sh FILE])
+when: every time built proxy or harness files go to the game folder or the watcher (never copy them by hand); runs in Git Bash on the PC from the repo checkout: `kit` builds into build/kits, `send` puts a kit sha-checked under <state>/kits/<id> (for install and the watcher's `update kit=<id>`); install/uninstall/set/sync-lua take (or use the caller's) game lock with --session or $WSC_SESSION_ID (exit 2 when another holds it), then ask the running watcher (<state>/watcher/watcher.status), else tasklist, whether a game of either title is running (--assume-closed skips only that question)
 not-a-verb: a deploy script with its own subcommands that the PC's installer also runs from a kit folder (a copy travels in every kit), so it stays stdlib only and outside the wsc CLI (whether it becomes a verb: J20 report)
 """
 import argparse
+import contextlib
 import datetime
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -52,6 +54,167 @@ def sha1_file(p, chunk=1 << 20):
         for b in iter(lambda: f.read(chunk), b''):
             h.update(b)
     return h.hexdigest()
+
+
+class Refused(SystemExit):
+    """A refusal the CLI exits 2 on, as job.sh does: the game lock is held by another session, or no session names the holder (W25)."""
+
+    def __init__(self, msg):
+        super().__init__(msg)
+        self.code = 2
+
+
+# ---- atomic writes (W25, audit H7): a crash or a reader never sees half an ini or half an install record -------------------------------
+ATOMIC_RETRIES, ATOMIC_RETRY_S = 5, 0.2
+
+
+def write_atomic(path, data):
+    """Write data (str as UTF-8, or bytes) to a temp file in the same folder (same volume, so the replace is atomic on Windows and POSIX),
+    flush and fsync it, then os.replace it over path. On Windows the replace raises PermissionError while another process holds path open
+    without share-delete: retried ATOMIC_RETRIES times ATOMIC_RETRY_S apart, then refused with path untouched and the temp removed."""
+    path = Path(path)
+    b = data.encode('utf-8') if isinstance(data, str) else data
+    tmp = path.with_name(f'{path.name}.{utc_stamp()}.{os.getpid()}.tmp')
+    with open(tmp, 'wb') as f:
+        f.write(b)
+        f.flush()
+        os.fsync(f.fileno())
+    last = None
+    for i in range(ATOMIC_RETRIES + 1):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as e:
+            last = e
+            if i < ATOMIC_RETRIES:
+                time.sleep(ATOMIC_RETRY_S)
+    # the temp is this call's own copy, written a moment ago: removing it is not the PC's "move, never delete" case (that rule is about
+    # the user's files); path itself was never touched
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    raise SystemExit(f'pc_deploy: cannot replace {path} ({last}): another program holds it open; nothing was written, the file is as it was. '
+                     'Close that program and run again.')
+
+
+# ---- the game lock (W25, audit H7): taken through W10's job.sh, never a second implementation of its protocol -------------------------
+OWNER_RX = re.compile(r'^[a-z0-9][a-z0-9_-]{0,39}$')
+
+
+def resolve_identity(owner=None, session=None, env=None):
+    """(owner, session, problem), the rule of harness/ctl.py resolve_identity (W10): the session id is --session, else $WSC_SESSION_ID, else
+    the id Claude Code exports to its Bash tool ($CLAUDE_CODE_SESSION_ID); the owner is --owner, else the session id."""
+    env = os.environ if env is None else env
+    sid = (session or env.get('WSC_SESSION_ID') or env.get('CLAUDE_CODE_SESSION_ID') or '').strip().lower() or None
+    own = owner or sid
+    if not own:
+        return None, None, ('no session id for the game lock: pass --session <id> or set WSC_SESSION_ID (Claude Code exports CLAUDE_CODE_SESSION_ID '
+                            'to its Bash tool), or pass --owner <name> knowing that two sessions with that name exclude each other only through the pair rule')
+    if not OWNER_RX.match(own):
+        return None, None, f"owner '{own}' must match ^[a-z0-9][a-z0-9_-]{{0,39}}$ (lower case: the session id, or a job id like j18)"
+    return own, sid or own, None
+
+
+_BASH = []
+
+
+def git_bash():
+    """The bash that runs job.sh: warscape/gitbash.py's answer from a repo checkout (never the WSL launcher), else the same search inline
+    (a kit copy on the PC has no repo around it)."""
+    if _BASH:
+        return _BASH[0]
+    try:
+        own = layout.own_root() if layout else None
+        if own and str(own) not in sys.path:
+            sys.path.insert(0, str(own))
+        b = importlib.import_module('warscape.gitbash').git_bash()
+    except Exception:   # noqa: BLE001  (a kit copy: no warscape package)
+        b = shutil.which('bash')
+        if os.name == 'nt':
+            s = (b or '').replace('\\', '/').lower()
+            if '/git/' not in s or '/windows/system32/' in s or '/windowsapps/' in s:
+                cands = [Path(os.environ[v]) / 'Git' / 'bin' / 'bash.exe' for v in ('ProgramFiles', 'ProgramW6432') if os.environ.get(v)]
+                if os.environ.get('LOCALAPPDATA'):
+                    cands.append(Path(os.environ['LOCALAPPDATA']) / 'Programs' / 'Git' / 'bin' / 'bash.exe')
+                b = next((str(c) for c in cands if c.is_file()), None)
+    _BASH.append(b)
+    return b
+
+
+def bash_path(p):
+    """How Git Bash names a Windows path (C:\\x -> /c/x); a POSIX path is unchanged."""
+    s = str(p).replace('\\', '/')
+    return f'/{s[0].lower()}{s[2:]}' if len(s) > 1 and s[1] == ':' else s
+
+
+def job_sh_candidates(explicit=None):
+    """Where job.sh is, in order: --job-sh FILE (only it, when given), beside this script (a harness kit's copy), the repo's harness scripts.
+    The watcher's installer places no job.sh under the watcher root (install.ps1 copies only the manifest's src/ and profiles/ files)."""
+    if explicit:
+        return [Path(explicit)] if Path(explicit).is_file() else []
+    out = [HERE / 'job.sh']
+    try:
+        out.append(harness_scripts() / 'job.sh')
+    except (SystemExit, Exception):   # noqa: BLE001  (a kit copy: no repo)
+        pass
+    return [p for p in out if p.is_file()]
+
+
+def run_job_sh(js, root, *args):
+    """job.sh <args> with the watcher root in $WATCHER_ROOT (so no adapter is needed): a CompletedProcess."""
+    env = {**os.environ, 'WATCHER_ROOT': bash_path(root)}
+    return subprocess.run([git_bash(), str(js), *args], capture_output=True, text=True, env=env, timeout=60)
+
+
+class GameLock:
+    def __init__(self, js, root, owner, verb):
+        self.js, self.root, self.owner, self.verb = js, root, owner, verb
+
+    def touch(self):
+        r = run_job_sh(self.js, self.root, 'touch', self.owner)
+        if r.returncode != 0:
+            print(f'pc_deploy {self.verb}: warning: could not refresh the game lock: {(r.stderr or r.stdout).strip()}')
+
+
+@contextlib.contextmanager
+def game_lock(state, owner, session, verb, job_sh=None):
+    """The game lock around a verb that writes the game folder (W25 decision 1): (a) `job.sh holds <owner>` passes, so the caller already
+    holds it (a session that took it for a launch): used, never released here; (b) else `job.sh lock <owner> <session> pc_deploy-<verb>`,
+    released in `finally` with `unlock <owner>`; refused: Refused naming the holder. No state or no <state>/watcher folder: no watcher, so
+    nothing can launch a game and there is no lock to hold: proceeds and says so. Yields a GameLock (touch()) or None."""
+    if state is None:
+        print(f'pc_deploy {verb}: no --state, so no game lock could be taken (the watcher cannot be seen)')
+        yield None
+        return
+    root = Path(state) / 'watcher'
+    if not root.is_dir():
+        print(f'pc_deploy {verb}: no watcher folder {root}: nothing can launch a game here, so there is no game lock to take')
+        yield None
+        return
+    own, sess, why = resolve_identity(owner, session)
+    if why:
+        raise Refused(f'pc_deploy {verb}: refused: {why}. Nothing was changed.')
+    js = next(iter(job_sh_candidates(job_sh)), None)
+    if js is None:
+        raise Refused(f'pc_deploy {verb}: refused: a watcher folder {root} exists, so the game lock is needed, but no job.sh was found'
+                      + (f' at {job_sh}' if job_sh else ' beside this script or in the repo') + ': pass --job-sh FILE. Nothing was changed.')
+    if not git_bash():
+        raise Refused(f'pc_deploy {verb}: refused: no Git Bash to run {js} with (the WSL bash is never used). Nothing was changed.')
+    if run_job_sh(js, root, 'holds', own).returncode == 0:
+        print(f'pc_deploy {verb}: {own} already holds the game lock: using it (left held)')
+        yield GameLock(js, root, own, verb)
+        return
+    r = run_job_sh(js, root, 'lock', own, sess, f'pc_deploy-{verb}')
+    if r.returncode != 0:
+        raise Refused(f'pc_deploy {verb}: refused, the game lock is not free: {(r.stderr or r.stdout).strip()}. Wait for it with '
+                      f'`job.sh lock --wait <s> {own} {sess} <purpose>` (this verb then uses it), or see who has it with `job.sh status`. Nothing was changed.')
+    print(f'pc_deploy {verb}: {r.stdout.strip()}')
+    try:
+        yield GameLock(js, root, own, verb)
+    finally:
+        u = run_job_sh(js, root, 'unlock', own)
+        print(f'pc_deploy {verb}: ' + ((u.stdout or '').strip() if u.returncode == 0 else f'warning: could not release the game lock: {(u.stderr or u.stdout).strip()}'))
 
 
 # ---- the exe identity (J18, J5 ledger row 28: the exe stays vanilla on disk) ------------------------------------------------------
@@ -176,7 +339,29 @@ def pc_rules(game, state, ident):
         bad += bool(foreign)
     else:
         lines.append('foreign: not checked, nothing installed by this tool (no pre-install snapshot)')
+        # W25 (H8): with nothing installed, a path the mod owns by name is a leftover the next install would snapshot as vanilla
+        strays = stray_owned(game, owned_by_name(ident or {}))
+        lines += [f'stray: {s} (nothing is installed: left by an earlier install or by hand; move it to {Path(state) / "_to_delete"})' for s in strays]
+        bad += bool(strays)
     return bad, lines
+
+
+def owned_by_name(src):
+    """The paths the mod owns by NAME (W25 decision 7): its config file and its mod folder, named for this proxy and in no vanilla game
+    folder. d3d9.dll is not among them: a ReShade or DXVK wrapper there is legitimately foreign."""
+    return [n for n in (src.get('config_file'), (src['mod_dir'].rstrip('/') + '/') if src.get('mod_dir') else None) if n]
+
+
+def stray_owned(game, names, by_sha=None):
+    """The paths among `names` that exist in the game folder, plus each path of `by_sha` ({path: {sha256, ...}}) that is a file whose sha256
+    is one of its set (our own d3d9.dll left behind, told apart from a foreign wrapper). Called while nothing is installed."""
+    game = Path(game)
+    out = [n for n in names if (game / n.rstrip('/')).exists()]
+    for n, shas in (by_sha or {}).items():
+        p = game / n.rstrip('/')
+        if n not in out and p.is_file() and sha256_file(p) in shas:
+            out.append(n)
+    return out
 
 
 def record_exe(rec, game, ident, action, stamp):
@@ -295,20 +480,41 @@ def build_kit(out, adapter=None, dll=None, dxvk_dir=None, build_id=None, identit
     return kdir
 
 
+def safe_rel(path):
+    """W25 (H12): the path as a POSIX relative path, or None when it could leave its folder. Windows takes a backslash as a separator, so
+    it is one here too; refused: empty, a leading /, a drive or stream colon anywhere (C:, x:ads), and any empty, . or .. segment."""
+    p = str(path).replace('\\', '/')
+    if not p or p.startswith('/') or ':' in p or any(s in ('', '.', '..') for s in p.split('/')):
+        return None
+    return p
+
+
+def plain_name(name):
+    """A staged or kit file name: one file name, no separator, colon or dot segment (it is joined to the kit folder)."""
+    return safe_rel(name) is not None and '/' not in str(name).replace('\\', '/')
+
+
 def verify_kit(kdir):
-    """Every staged file must exist with the manifest's sha256 and size. Returns (manifest, problems)."""
+    """Every staged file must exist with the manifest's sha256 and size; every path is a safe relative path (safe_rel, normalised in the
+    returned manifest) inside what the kit owns. Returns (manifest, problems)."""
     kdir = Path(kdir)
     man = json.loads((kdir / 'manifest.json').read_text(encoding='utf-8'))
     bad = []
     for e in man['files']:
-        p = kdir / e['staged']
-        if not p.exists():
-            bad.append(f"{e['staged']}: missing")
-        elif p.stat().st_size != e['size'] or sha256_file(p) != e['sha256']:
-            bad.append(f"{e['staged']}: sha256 {sha256_file(p)[:12]} != manifest {e['sha256'][:12]} (stale or partial copy: re-send under a new name)")
-        if '..' in e['path'].split('/') or e['path'].startswith('/'):
+        if not plain_name(e['staged']):
+            bad.append(f"{e['staged']}: not a plain file name in the kit folder (not a relative path inside the game folder either)")
+        else:
+            p = kdir / e['staged']
+            if not p.exists():
+                bad.append(f"{e['staged']}: missing")
+            elif p.stat().st_size != e['size'] or sha256_file(p) != e['sha256']:
+                bad.append(f"{e['staged']}: sha256 {sha256_file(p)[:12]} != manifest {e['sha256'][:12]} (stale or partial copy: re-send under a new name)")
+        rel = safe_rel(e['path'])
+        if rel is None:
             bad.append(f"{e['path']}: not a relative path inside the game folder")
-        if not any(e['path'] == o or (o.endswith('/') and e['path'].startswith(o)) for o in man['owned']):
+            continue
+        e['path'] = rel
+        if not any(rel == o or (o.endswith('/') and rel.startswith(o)) for o in man['owned']):
             bad.append(f"{e['path']}: outside the paths the kit owns")
     ei = man.get('exe_identity')
     if not ei:
@@ -389,11 +595,17 @@ def verify_harness_kit(kdir):
         bad.append('not a harness kit')
     for e in man['files']:
         p = kdir / e['staged']
-        if not p.exists() or p.stat().st_size != e['size'] or sha256_file(p) != e['sha256']:
+        if not plain_name(e['staged']):
+            bad.append(f"{e['staged']}: not a plain file name in the kit folder")
+        elif not p.exists() or p.stat().st_size != e['size'] or sha256_file(p) != e['sha256']:
             bad.append(f"{e['staged']}: missing or sha256 differs from the manifest (stale or partial copy: re-send under a new name)")
-        if '..' in e['path'].split('/') or e['path'].startswith('/') or e['path'].split('/')[0] not in ('src', 'profiles'):
+        rel = safe_rel(e['path'])
+        if rel is None or rel.split('/')[0] not in ('src', 'profiles'):
             bad.append(f"{e['path']}: outside src/ and profiles/")
     for k in man['kit_files']:
+        if not plain_name(k['name']):
+            bad.append(f"{k['name']}: not a plain file name in the kit folder")
+            continue
         p = kdir / k['name']
         if not p.exists() or sha256_file(p) != k['sha256']:
             bad.append(f"{k['name']}: missing or sha256 differs from the manifest")
@@ -561,7 +773,11 @@ def move_out(src, dest):
 
 
 # ---- install / uninstall ------------------------------------------------------------------------------------------------------
-def install(kit, game, state, assume_closed=False):
+def install(kit, game, state, assume_closed=False, owner=None, session=None, job_sh=None, move_stray=False):
+    """Install a verified kit. W25: under the game lock (game_lock: taken, or the caller's used), the running check after the lock is held; with
+    nothing installed, a stray config file or mod folder refuses before the pre-install snapshot (move_stray: moved to
+    <state>/_to_delete/stray_<stamp>/ first); `owned` is the union of every installed kit's set; everything at a path the record did not own
+    yet is backed up, and a recorded backup whose move never happened (a failed earlier run) is taken now."""
     game, state = Path(game), Path(state)
     man, bad = verify_kit(kit)
     if bad:
@@ -573,31 +789,70 @@ def install(kit, game, state, assume_closed=False):
     if ok is not True:   # before any change (J18): the proxy's engine sites are anchored to one build
         raise SystemExit(f'pc_deploy install: {line}' + chr(10) + 'pc_deploy install: nothing was installed.')
     print(f'pc_deploy install: {line}')
-    require_closed(game, man, assume_closed, state)
-    state.mkdir(parents=True, exist_ok=True)
+    with game_lock(state, owner, session, 'install', job_sh) as lk:
+        require_closed(game, man, assume_closed, state)
+        return _install(kit, game, state, man, ident, lk, move_stray)
+
+
+def _install(kit, game, state, man, ident, lk, move_stray):
     stamp = utc_stamp()
     rec_path = state / STATE_FILE
     rec = json.loads(rec_path.read_text(encoding='utf-8')) if rec_path.exists() else None
+    kit_shas = {e['sha256'] for e in man['files']}
+    if rec is None:   # W25 (H8): our own leftover would be snapshotted as vanilla and put back by every uninstall
+        names = owned_by_name(man)
+        strays = stray_owned(game, names, {o: kit_shas for o in man['owned'] if o not in names})
+        if strays and not move_stray:
+            raise SystemExit(f"pc_deploy install: refused before the pre-install snapshot: nothing is installed, yet {', '.join(strays)} "
+                             "(a path this mod owns) is in the game folder: left by an earlier install or by hand. A snapshot now would record it "
+                             f"as vanilla and every uninstall would put it back. Move it to {state / '_to_delete'} by hand, or run again with "
+                             '--move-stray (moves it there, never deletes). Nothing was changed.')
+        for s in strays:
+            dest = state / '_to_delete' / f'stray_{stamp}' / s.rstrip('/')
+            move_out(game / s.rstrip('/'), dest)
+            print(f'pc_deploy install: --move-stray: moved the stray {s} to {dest}')
+    state.mkdir(parents=True, exist_ok=True)
+    if lk:
+        lk.touch()   # the snapshot and the copies are the slow part
     def save():   # the record is on disk BEFORE each change to the game folder, so a failed install can still be uninstalled
-        rec_path.write_text(json.dumps(rec, indent=2) + '\n', encoding='utf-8')
+        write_atomic(rec_path, json.dumps(rec, indent=2) + '\n')
     if rec is None:
         pre = snapshot(game)
         (state / 'snapshots').mkdir(exist_ok=True)
         pre_path = state / 'snapshots' / f'pre_install_{stamp}.json'
         pre_path.write_text(json.dumps(pre), encoding='utf-8')
         rec = {'pre_snapshot': str(pre_path.relative_to(state)), 'backups': [], 'history': [], 'kit_id': None, 'build_id': None,
-               'installed_utc': None, 'files': []}
-        rec.update({'owned': man['owned'], 'mod_dir': man['mod_dir'], 'exe_name': man['exe_name'], 'config_file': man['config_file'], 'other_exes': man.get('other_exes', [])})
-        save()
-        # anything already at a path the kit owns is foreign (not ours): back it up for the uninstall to restore
-        for o in man['owned']:
-            p = game / o.rstrip('/')
-            if p.exists():
-                b = state / 'backup' / stamp / o.rstrip('/')
-                rec['backups'].append({'path': o.rstrip('/'), 'backup': str(b.relative_to(state))})
-                save()
-                move_out(p, b)
-                print(f'pc_deploy install: backed up the existing {o} to {b}')
+               'installed_utc': None, 'files': [], 'owned': []}
+        rec.update({'mod_dir': man['mod_dir'], 'exe_name': man['exe_name'], 'config_file': man['config_file'], 'other_exes': man.get('other_exes', [])})
+    # W25 (G5): owned is the union of every installed set, so uninstall moves whatever any installed kit owned
+    old = list(rec.get('owned', []))
+    new = [o for o in man['owned'] if o not in old]
+    rec['owned'] = old + new
+    by = rec.setdefault('owned_by', {})
+    for o in old:
+        by.setdefault(o, rec.get('kit_id'))
+    for o in new:
+        by[o] = man['kit_id']
+    save()
+
+    def ours(rel):   # this kit's own file at rel (or under the folder rel), byte for byte: not foreign
+        rel = rel.rstrip('/')
+        return any((e['path'] == rel or e['path'].startswith(rel + '/')) and (game / e['path']).is_file()
+                   and sha256_file(game / e['path']) == e['sha256'] for e in man['files'])
+    # W25 (decision 9): a backup recorded just before a move that never happened (a failed earlier run) is taken now, never sent to _to_delete
+    for b in rec['backups']:
+        if not (state / b['backup']).exists() and (game / b['path']).exists() and not ours(b['path']):
+            move_out(game / b['path'], state / b['backup'])
+            print(f"pc_deploy install: backed up the existing {b['path']} to {state / b['backup']} (the earlier run recorded it but never moved it)")
+    # anything already at a path no installed kit owned yet is foreign (not ours): back it up for the uninstall to restore
+    for o in new:
+        p = game / o.rstrip('/')
+        if p.exists():
+            b = state / 'backup' / stamp / o.rstrip('/')
+            rec['backups'].append({'path': o.rstrip('/'), 'backup': str(b.relative_to(state))})
+            save()
+            move_out(p, b)
+            print(f'pc_deploy install: backed up the existing {o} to {b}')
     rec['exe_identity'] = {'sha1': ident['sha1'], 'exe_name': man['exe_name']}   # on disk before any change: a failed install's uninstall checks it
     rec['history'].append({'utc': stamp, 'action': 'install started', 'kit_id': man['kit_id']})
     save()
@@ -614,26 +869,31 @@ def install(kit, game, state, assume_closed=False):
         if sha256_file(dest) != e['sha256']:
             raise SystemExit(f'pc_deploy install: {dest} does not verify after the copy')
         print(f"pc_deploy install: {e['path']} sha256 {e['sha256'][:12]} ok")
-    rec.update({'kit_id': man['kit_id'], 'build_id': man['build_id'], 'installed_utc': stamp, 'owned': man['owned'],
+    rec.update({'kit_id': man['kit_id'], 'build_id': man['build_id'], 'installed_utc': stamp,
                 'files': [{k: e[k] for k in ('path', 'sha256', 'size')} for e in man['files']], 'mod_dir': man['mod_dir'],
                 'exe_name': man['exe_name'], 'config_file': man['config_file'], 'game_config_files': man.get('game_config_files', []),
                 'packs': man.get('packs', {})})
     rec['history'].append({'utc': stamp, 'action': 'install', 'kit_id': man['kit_id']})
     after = record_exe(rec, game, ident, 'install', stamp)
-    rec_path.write_text(json.dumps(rec, indent=2) + '\n', encoding='utf-8')
+    save()
     print(f"pc_deploy install: kit {man['kit_id']} installed (build {man['build_id']})")
     if after is not True:
         raise SystemExit('pc_deploy install: the exe is not vanilla after the install (see above)')
     return rec
 
 
-def uninstall(game, state, assume_closed=False):
+def uninstall(game, state, assume_closed=False, owner=None, session=None, job_sh=None):
     game, state = Path(game), Path(state)
     rec_path = state / STATE_FILE
     if not rec_path.exists():
         raise SystemExit(f'pc_deploy uninstall: no {STATE_FILE} in {state}: nothing installed by this tool')
     rec = json.loads(rec_path.read_text(encoding='utf-8'))
-    require_closed(game, rec, assume_closed, state)
+    with game_lock(state, owner, session, 'uninstall', job_sh):
+        require_closed(game, rec, assume_closed, state)
+        return _uninstall(game, state, rec, rec_path)
+
+
+def _uninstall(game, state, rec, rec_path):
     stamp = utc_stamp()
     for o in rec['owned']:   # the whole owned set, including what the DLL wrote at runtime (logs, dumps, DXVK caches, the notice)
         p = game / o.rstrip('/')
@@ -755,12 +1015,16 @@ def wait_for_restore(state, wait_s, sleep=time.sleep):
         f"(job.sh unlock <owner>); waited {waited} s (--wait-restore N to wait longer). Nothing was written.")
 
 
-def set_keys(game, pairs, config_file, state=None, wait_restore=30, sleep=time.sleep):
+def set_keys(game, pairs, config_file, state=None, wait_restore=30, sleep=time.sleep, assume_closed=False, owner=None, session=None, job_sh=None):
     """Returns 0, or 1 when the exe is not vanilla afterwards (checked after, never refused; recorded in install.json when there is one).
-    B39: waits for (--wait-restore, default 30 s) or refuses on a pending watcher profile restore before it writes."""
+    B39: waits for (--wait-restore, default 30 s) or refuses on a pending watcher profile restore before it writes (first: a restore completes
+    only while the lock is free). W25: then the game lock, then the running check (refused while a game runs; --assume-closed), then an
+    atomic write (write_atomic) of the ini."""
+    rec_path = Path(state) / STATE_FILE if state else None
+    rec = json.loads(rec_path.read_text(encoding='utf-8')) if rec_path and rec_path.exists() else None
+    ident = None if rec else default_identity()
     if not config_file:   # the installed kit's name for it, else the identity's (a kit copy: the one beside it)
-        rec0 = Path(state) / STATE_FILE if state else None
-        config_file = (json.loads(rec0.read_text(encoding='utf-8')).get('config_file') if rec0 and rec0.exists() else None) or (default_identity() or {}).get('config_file')
+        config_file = (rec or {}).get('config_file') or (ident or {}).get('config_file')
         if not config_file:
             raise SystemExit('pc_deploy set: no --config-file and no install record or identity that names it')
     p = Path(game) / config_file
@@ -768,15 +1032,20 @@ def set_keys(game, pairs, config_file, state=None, wait_restore=30, sleep=time.s
     if bad:
         raise SystemExit(f'pc_deploy set: expected key=value, got {bad}')
     wait_for_restore(state, wait_restore, sleep)
-    text = p.read_bytes().decode('utf-8')
-    sets = resolve_keys(text, dict(x.split('=', 1) for x in pairs))
-    p.write_bytes(edit_ini(text, sets).encode('utf-8'))
-    print(f'pc_deploy set: {p.name}: ' + ', '.join(f'{k}={v}' for k, v in sets.items()))
-    rec_path = Path(state) / STATE_FILE if state else None
-    rec = json.loads(rec_path.read_text(encoding='utf-8')) if rec_path and rec_path.exists() else None
-    ok = record_exe(rec, game, (rec or {}).get('exe_identity') or default_identity(), 'set', utc_stamp())
-    if rec is not None:
-        rec_path.write_text(json.dumps(rec, indent=2) + '\n', encoding='utf-8')
+    with game_lock(state, owner, session, 'set', job_sh):
+        src = rec or ident or {}
+        if src.get('exe_name'):
+            require_closed(game, {'mod_dir': src.get('mod_dir', ''), 'exe_name': src['exe_name'], 'other_exes': src.get('other_exes', [])}, assume_closed, state)
+        elif not assume_closed:
+            raise SystemExit('pc_deploy set: refusing: no install record or identity names the game exe, so whether the game runs cannot be checked '
+                             '(pass --assume-closed once Liam has confirmed it is closed). Nothing was written.')
+        text = p.read_bytes().decode('utf-8')
+        sets = resolve_keys(text, dict(x.split('=', 1) for x in pairs))
+        write_atomic(p, edit_ini(text, sets).encode('utf-8'))
+        print(f'pc_deploy set: {p.name}: ' + ', '.join(f'{k}={v}' for k, v in sets.items()))
+        ok = record_exe(rec, game, (rec or {}).get('exe_identity') or default_identity(), 'set', utc_stamp())
+        if rec is not None:
+            write_atomic(rec_path, json.dumps(rec, indent=2) + '\n')
     return 1 if ok is False else 0
 
 
@@ -813,17 +1082,25 @@ def lua_files(adapter=None):
             for p in sorted(ldir.rglob('*')) if p.is_file() and p.suffix in ('.lua', '.txt') and p.name != 'wrappers.txt']
 
 
-def sync_lua(game, state, adapter=None, assume_closed=False, dry_run=False):
+def sync_lua(game, state, adapter=None, assume_closed=False, dry_run=False, owner=None, session=None, job_sh=None):
     """Bring the installed Lua files (the dev scripts and battle presets) up to the repo's, no new kit: each changed file is staged under a
     unique name (<sha12>__<name>) beside its destination, sha-checked, then moved into place; the old copy goes to <state>/_to_delete and
-    install.json is updated, so uninstall stays byte-exact. Files the install does not own are never touched. Returns the changed paths."""
+    install.json is updated, so uninstall stays byte-exact. Every dev Lua path is under the mod folder, which the install owns whole, so a
+    file already at one of them (edited on the PC, or put there by hand) is replaced like any owned file: its old copy goes to _to_delete,
+    never deleted (B72 a). Under the game lock unless dry_run (W25). Returns the changed paths."""
     game, state = Path(game), Path(state)
     rec_path = state / STATE_FILE
     if not rec_path.exists():
         raise SystemExit('pc_deploy sync-lua: nothing is installed (no install.json): install a kit first')
     rec = json.loads(rec_path.read_text(encoding='utf-8'))
-    if not dry_run:
+    if dry_run:
+        return _sync_lua(game, state, rec, rec_path, adapter, dry_run)
+    with game_lock(state, owner, session, 'sync-lua', job_sh):
         require_closed(game, rec, assume_closed, state)
+        return _sync_lua(game, state, rec, rec_path, adapter, dry_run)
+
+
+def _sync_lua(game, state, rec, rec_path, adapter, dry_run):
     stamp = utc_stamp()
     known = {f['path']: f for f in rec['files']}
     changed = []
@@ -853,7 +1130,7 @@ def sync_lua(game, state, adapter=None, assume_closed=False, dry_run=False):
         rec['history'].append({'utc': stamp, 'action': 'sync-lua', 'files': changed})
     exe_ok = None if dry_run else record_exe(rec, game, rec.get('exe_identity') or default_identity(), 'sync-lua', stamp)   # never refuses
     if not dry_run:
-        rec_path.write_text(json.dumps(rec, indent=2) + '\n', encoding='utf-8')
+        write_atomic(rec_path, json.dumps(rec, indent=2) + '\n')
     print(f"pc_deploy sync-lua: {len(changed)} file(s) {'would change' if dry_run else 'changed'}")
     if exe_ok is False:
         raise SystemExit('pc_deploy sync-lua: the exe is not vanilla after the sync (see above)')
@@ -866,13 +1143,28 @@ def main():
     k = sub.add_parser('kit'); k.add_argument('--out', default=str(ROOT / 'build' / 'kits')); k.add_argument('--adapter', help='the proxy adapter folder (default: layout.py proxy-adapter)'); k.add_argument('--dll'); k.add_argument('--what', choices=['proxy', 'harness'], default='proxy')
     sd = sub.add_parser('send'); sd.add_argument('--kit', required=True); sd.add_argument('--state', required=True)
     s = sub.add_parser('snapshot'); s.add_argument('--game', required=True); s.add_argument('--out', required=True)
-    i = sub.add_parser('install'); i.add_argument('--kit', required=True); i.add_argument('--game', required=True); i.add_argument('--state', required=True); i.add_argument('--assume-closed', action='store_true')
-    u = sub.add_parser('uninstall'); u.add_argument('--game', required=True); u.add_argument('--state', required=True); u.add_argument('--assume-closed', action='store_true')
-    c = sub.add_parser('set'); c.add_argument('--game', required=True); c.add_argument('--state'); c.add_argument('--config-file', help="the proxy's config file name (default: the identity's config_file)"); c.add_argument('--wait-restore', type=int, default=30, help='seconds to wait for a pending watcher profile restore before refusing (0 refuses at once; default 30)'); c.add_argument('pairs', nargs='+')
+    def lock_args(q):   # W25: the game lock (W10's job.sh) and the running check
+        q.add_argument('--assume-closed', action='store_true', help='skip only the is-a-game-running question (Liam vouches); the lock is still taken')
+        q.add_argument('--owner', help='the game lock owner (default: the session id)')
+        q.add_argument('--session', help='the session id (default: $WSC_SESSION_ID, then $CLAUDE_CODE_SESSION_ID)')
+        q.add_argument('--job-sh', help='the job.sh to take the lock with (default: beside this script, then the repo harness)')
+    i = sub.add_parser('install'); i.add_argument('--kit', required=True); i.add_argument('--game', required=True); i.add_argument('--state', required=True); lock_args(i)
+    i.add_argument('--move-stray', action='store_true', help='nothing installed but a stray config file or mod folder: move it to <state>/_to_delete/stray_<stamp>/ first')
+    u = sub.add_parser('uninstall'); u.add_argument('--game', required=True); u.add_argument('--state', required=True); lock_args(u)
+    c = sub.add_parser('set'); c.add_argument('--game', required=True); c.add_argument('--state'); c.add_argument('--config-file', help="the proxy's config file name (default: the identity's config_file)"); c.add_argument('--wait-restore', type=int, default=30, help='seconds to wait for a pending watcher profile restore before refusing (0 refuses at once; default 30)'); lock_args(c); c.add_argument('pairs', nargs='+')
     st = sub.add_parser('status'); st.add_argument('--game', required=True); st.add_argument('--state', required=True)
-    sl = sub.add_parser('sync-lua'); sl.add_argument('--game', required=True); sl.add_argument('--state', required=True); sl.add_argument('--assume-closed', action='store_true'); sl.add_argument('--dry-run', action='store_true')
+    sl = sub.add_parser('sync-lua'); sl.add_argument('--game', required=True); sl.add_argument('--state', required=True); lock_args(sl); sl.add_argument('--dry-run', action='store_true')
     d = sub.add_parser('diff'); d.add_argument('a'); d.add_argument('b')
     a = ap.parse_args()
+    try:
+        return run(a)
+    except Refused as e:   # the lock is held by another, or no session: exit 2, as job.sh does
+        print(str(e), file=sys.stderr)
+        return 2
+
+
+def run(a):
+    lk = {k: getattr(a, k, None) for k in ('owner', 'session', 'job_sh')}
     if a.cmd == 'kit':
         if a.what == 'harness':
             build_harness_kit(a.out, a.adapter)
@@ -885,15 +1177,15 @@ def main():
         Path(a.out).write_text(json.dumps(snap), encoding='utf-8')
         print(f'pc_deploy snapshot: {len(snap)} entries -> {a.out}')
     elif a.cmd == 'install':
-        install(a.kit, a.game, a.state, a.assume_closed)
+        install(a.kit, a.game, a.state, a.assume_closed, move_stray=a.move_stray, **lk)
     elif a.cmd == 'uninstall':
-        return 0 if uninstall(a.game, a.state, a.assume_closed) else 1
+        return 0 if uninstall(a.game, a.state, a.assume_closed, **lk) else 1
     elif a.cmd == 'set':
-        return set_keys(a.game, a.pairs, a.config_file, a.state, a.wait_restore)
+        return set_keys(a.game, a.pairs, a.config_file, a.state, a.wait_restore, assume_closed=a.assume_closed, **lk)
     elif a.cmd == 'status':
         return status(a.game, a.state)
     elif a.cmd == 'sync-lua':
-        sync_lua(a.game, a.state, assume_closed=a.assume_closed, dry_run=a.dry_run)
+        sync_lua(a.game, a.state, assume_closed=a.assume_closed, dry_run=a.dry_run, **lk)
     elif a.cmd == 'diff':
         out = diff_snapshots(json.loads(Path(a.a).read_text()), json.loads(Path(a.b).read_text()))
         print('\n'.join(out) if out else 'identical')
