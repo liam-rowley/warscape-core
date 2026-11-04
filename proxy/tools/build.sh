@@ -152,9 +152,11 @@ ui_lua_obj() {
   rm -f "$O.part.o" "$O.all.o"
 }
 
+# $4 = the linker map to write beside the DLL (W35, C28), empty = link without -Map (repro's check that the flag moves no byte).
 build_dll() {
-  local S="$1" A="$2" O="$3" L="$3.lua"; mkdir -p "$L"
-  local CC="${CXX/g++/gcc}" SRCS=() n
+  local S="$1" A="$2" O="$3" M="${4:-}" L="$3.lua"; mkdir -p "$L"
+  local CC="${CXX/g++/gcc}" SRCS=() n MAPF=()
+  [[ -z "$M" ]] || MAPF=(-Wl,-Map,"$M.raw")
   for n in $SOURCES; do [[ "$n" == ui_lua.cpp ]] || SRCS+=("$S/$n"); done   # ui_lua.cpp goes in through ui_lua_obj (its Lua made local)
   for c in $LUA_CORE; do
     "$CC" -std=gnu99 -O2 -w -ffile-prefix-map="$LUA_SRC/"=lua/ -c -o "$L/$c.o" "$LUA_SRC/$c.c"
@@ -167,8 +169,18 @@ build_dll() {
   # one commit (review of J1, 2026-10-28). `build.sh repro` proves it stays fixed.
   "$CXX" -std=c++17 -O2 -s -shared -Wall -Wextra -Wshadow -Werror -DWSP_BUILD_ID="\"$BUILD_ID\"" -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
     -ffile-prefix-map="$S/"=core/ -ffile-prefix-map="$A/"=adapter/ -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp -Wl,--disable-auto-image-base -Wl,--enable-stdcall-fixup \
-    -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" -o "$O" "${SRCS[@]}" "$A/adapter.cpp" \
+    -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" "${MAPF[@]}" -o "$O" "${SRCS[@]}" "$A/adapter.cpp" \
     "$L"/*.o $(LC_ALL=C ls "$U"/rml/*.o "$U"/ft/*.o) "$S/d3d9.def" -ldbghelp -ladvapi32
+  [[ -n "$M" ]] || return 0
+  # W35 (C28): the GNU ld map, made reproducible (checkout paths become labels, gcc's temporary objects are named after their sources
+  # in link order: warscape/minidump.py normalise_map), and its sidecar d3d9.map.json {dll, build_id, dll_sha256, image_base, size,
+  # size_of_image}. No --cref: `wsc crash symbolise` needs only the sections and symbols. No timestamp enters either file.
+  local names=()
+  for n in "${SRCS[@]}"; do names+=("${n#"$S/"}"); done; names+=(adapter/adapter.cpp)
+  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from warscape.minidump import write_map; sys.exit(write_map(sys.argv[2:]))' "$OWN" \
+    --raw "$M.raw" --out "$M" --dll "$O" --build-id "$BUILD_ID" --sources "${names[*]}" --sub "$(dirname "$O")/=out/" --sub "$S/=core/" \
+    --sub "$A/=adapter/" --sub "$U/=ui/" --sub "$ROOT/=root/" || { echo "build.sh: the linker map could not be normalised (above)"; exit 3; }
+  rm -f "$M.raw"
 }
 
 python3 "$OWN/proxy/tools/gen_tables.py" --check
@@ -179,8 +191,13 @@ if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
   CXX="$(command -v i686-w64-mingw32-g++-win32 || command -v i686-w64-mingw32-g++ || true)"
   [[ -n "$CXX" ]] || { echo "build.sh: no i686 mingw-w64 g++ (sudo apt-get install -y --no-install-recommends \$(python3 $TC apt), or build.sh --docker)"; exit 2; }
   toolchain_check "$CXX"
-  build_dll "$SRC" "$ADIR" "$OUT/$ADAPTER/d3d9.dll"
-  echo "build.sh: $OUT/$ADAPTER/d3d9.dll build $BUILD_ID sha256 $(sha256sum "$OUT/$ADAPTER/d3d9.dll" | cut -c1-64)"
+  build_dll "$SRC" "$ADIR" "$OUT/$ADAPTER/d3d9.dll" "$OUT/$ADAPTER/d3d9.map"
+  BUILD_LINE="build.sh: $OUT/$ADAPTER/d3d9.dll build $BUILD_ID sha256 $(sha256sum "$OUT/$ADAPTER/d3d9.dll" | cut -c1-64)"
+  echo "$BUILD_LINE"
+  # W35: the build line beside the map (the artifact carries it), and the artifact's name for CI's proxy_map block: what this build
+  # printed, never a second computation
+  printf '%s\n' "${BUILD_LINE#build.sh: "$OUT/$ADAPTER/"}" > "$OUT/$ADAPTER/d3d9.map.build.txt"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then { echo "map_name=proxy-map-$BUILD_ID"; echo "map_files=$OUT/$ADAPTER/d3d9.map*"; } >> "$GITHUB_OUTPUT"; fi
   if command -v i686-w64-mingw32-objdump >/dev/null; then
     DEPS="$(i686-w64-mingw32-objdump -p "$OUT/$ADAPTER/d3d9.dll" | awk '/DLL Name/{print tolower($3)}' | sort -u | tr '\n' ' ')"
     echo "build.sh: imports $DEPS"
@@ -193,7 +210,8 @@ if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
     done
   fi
   summary "### proxy DLL: $ADAPTER" "" "- build id: \`$BUILD_ID\`" \
-    "- \`d3d9.dll\` sha256 \`$(sha256sum "$OUT/$ADAPTER/d3d9.dll" | cut -c1-64)\`, $(wc -c < "$OUT/$ADAPTER/d3d9.dll" | tr -d ' ') bytes" "- $TOOLCHAIN_LINE"
+    "- \`d3d9.dll\` sha256 \`$(sha256sum "$OUT/$ADAPTER/d3d9.dll" | cut -c1-64)\`, $(wc -c < "$OUT/$ADAPTER/d3d9.dll" | tr -d ' ') bytes" "- $TOOLCHAIN_LINE" \
+    "- linker map: \`d3d9.map\` $(wc -c < "$OUT/$ADAPTER/d3d9.map" | tr -d ' ') bytes with \`d3d9.map.json\` (CI keeps them as artifact \`proxy-map-$BUILD_ID\`, 90 days)"
 fi
 
 if [[ "$WHAT" == tests || "$WHAT" == all ]]; then
@@ -218,13 +236,24 @@ if [[ "$WHAT" == repro ]]; then
   # The same inputs must give the same bytes from any checkout path (container, CI runner, worktree, either layout): build again
   # from copies of the core sources and the adapter.
   [[ -f "$OUT/$ADAPTER/d3d9.dll" ]] || { echo "build.sh repro: build the dll first"; exit 2; }
-  R="$(mktemp -d)/elsewhere_$RANDOM"; mkdir -p "$R"
+  R="$(mktemp -d)/elsewhere_$RANDOM"; mkdir -p "$R/out" "$R/nomap"
   cp -a "$SRC" "$R/src"; cp -a "$ADIR" "$R/adapter"   # the build id was computed above
   CXX="$(command -v i686-w64-mingw32-g++-win32 || command -v i686-w64-mingw32-g++)"
   toolchain_check "$CXX"
-  build_dll "$R/src" "$R/adapter" "$R/other.dll"
-  if cmp -s "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll"; then echo "build.sh repro: identical from another path"; rm -rf "$(dirname "$R")"; summary "- repro: identical from another path"
-  else echo "build.sh repro: FAILED: the DLL depends on the checkout path"; cmp -l "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll" | head -5; exit 1; fi
+  [[ -f "$OUT/$ADAPTER/d3d9.map" ]] || { echo "build.sh repro: no d3d9.map beside the DLL: build the dll again (W35)"; exit 2; }
+  build_dll "$R/src" "$R/adapter" "$R/out/d3d9.dll" "$R/out/d3d9.map"
+  if cmp -s "$OUT/$ADAPTER/d3d9.dll" "$R/out/d3d9.dll"; then echo "build.sh repro: identical from another path"; summary "- repro: identical from another path"
+  else echo "build.sh repro: FAILED: the DLL depends on the checkout path"; cmp -l "$OUT/$ADAPTER/d3d9.dll" "$R/out/d3d9.dll" | head -5; exit 1; fi
+  # W35 (C28): the map is reproducible too (the same labels and names from another path), and so is its sidecar
+  if cmp -s "$OUT/$ADAPTER/d3d9.map" "$R/out/d3d9.map" && cmp -s "$OUT/$ADAPTER/d3d9.map.json" "$R/out/d3d9.map.json"; then
+    echo "build.sh repro: the linker map and its sidecar are identical from another path ($(wc -c < "$R/out/d3d9.map" | tr -d ' ') bytes)"; summary "- repro: the linker map is identical from another path"
+  else echo "build.sh repro: FAILED: the linker map depends on the checkout path"; diff "$OUT/$ADAPTER/d3d9.map" "$R/out/d3d9.map" | head -10; diff "$OUT/$ADAPTER/d3d9.map.json" "$R/out/d3d9.map.json"; exit 1; fi
+  # W35: the map flag never moves a byte of the DLL: link once more without it (a difference is the job's kill criterion, never waived)
+  build_dll "$R/src" "$R/adapter" "$R/nomap/d3d9.dll" ""
+  WITH="$(sha256sum "$R/out/d3d9.dll" | cut -c1-64)"; WITHOUT="$(sha256sum "$R/nomap/d3d9.dll" | cut -c1-64)"
+  if cmp -s "$R/out/d3d9.dll" "$R/nomap/d3d9.dll"; then echo "build.sh repro: identical without the map flag (sha256 $WITH with -Map, $WITHOUT without)"; rm -rf "$(dirname "$R")"
+    summary "- repro: identical without the map flag (sha256 \`$WITHOUT\`)"
+  else echo "build.sh repro: FAILED: the map flag changes the DLL (sha256 $WITH with -Map, $WITHOUT without)"; cmp -l "$R/out/d3d9.dll" "$R/nomap/d3d9.dll" | head -5; exit 1; fi
 fi
 
 if [[ "$WHAT" == smoke ]]; then
@@ -307,6 +336,22 @@ if [[ "$WHAT" == smoke ]]; then
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
   [[ -z "$SITE" ]] || grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
-  echo "build.sh smoke: passed (8 launches under wine, 2 dumps)"
+  # 9) W35 (C28): a fault inside the DLL, named from the linker map. The host calls the export wsp_sentinel with a bad lua_State
+  #    (dev.lua_bridge on, the override's plan allows engine reads), the Lua core's lua_gettop reads through it, the unhandled filter
+  #    writes the dump, and `wsc crash symbolise` (standard library only) names lua_gettop as the exception frame. The dump and the log
+  #    are kept beside the smoke folder (CI uploads them) so the same command can be run on them anywhere.
+  [[ -f "$OUT/$ADAPTER/d3d9.map" ]] || { echo "build.sh smoke: no d3d9.map beside the DLL: build the dll again (W35)"; exit 2; }
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\nminidump=1\r\n[dev]\r\nlua_bridge=1\r\n' > "$G/$INI"
+  run dllfault || true
+  check "UNHANDLED exception 0xc0000005"; check "minidump (unhandled) written"
+  dmp="$(grep -o 'minidump (unhandled) written: .*' "$G/$MOD/logs/proxy.log" | sed 's/.*\\//' | tr -d '\r')"
+  [[ -s "$G/$MOD/dumps/$dmp" ]] || { echo "build.sh smoke: the DLL fault's dump ($dmp) is missing or empty"; ls -la "$G/$MOD/dumps"; exit 1; }
+  cp "$G/$MOD/dumps/$dmp" "$OUT/smoke_dll_fault.dmp"; cp "$G/$MOD/logs/proxy.log" "$OUT/smoke_dll_fault.log"
+  SYM="$(python3 "$OWN/wsc.py" --root "$OWN" crash symbolise "$OUT/smoke_dll_fault.dmp" --map "$OUT/$ADAPTER/d3d9.map" --log "$OUT/smoke_dll_fault.log" --dll "$G/d3d9.dll")" \
+    || { echo "build.sh smoke: wsc crash symbolise did not name the DLL fault (exit $?)"; echo "$SYM"; exit 1; }
+  printf '%s\n' "$SYM"
+  grep -q '^exception frame: d3d9\.dll+0x[0-9a-f]*  \.text: _lua_gettop+0x' <<< "$SYM" || { echo "build.sh smoke: the exception frame is not lua_gettop"; exit 1; }
+  echo "build.sh smoke: passed (9 launches under wine, 3 dumps; the DLL fault named from the map)"
+  summary "- smoke: a fault in the DLL symbolised from the map: \`$(grep '^exception frame:' <<< "$SYM")\`"
   summary "- smoke: self_hash in proxy.log matches d3d9.dll ($SH_MS ms under wine)"
 fi

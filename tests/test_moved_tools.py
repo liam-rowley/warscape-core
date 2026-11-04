@@ -413,7 +413,8 @@ class LinkerMap(unittest.TestCase):
         b = (ROOT / 'proxy' / 'tools' / 'build.sh').read_text()
         self.assertIn('-Wl,-Map,', b)
         self.assertIn('d3d9.map.json', b)
-        rep = b[b.index('if [[ "$WHAT" == repro ]]'):b.index('if [[ "$WHAT" == smoke ]]')]
+        i = b.rindex('if [[ "$WHAT" == repro ]]')
+        rep = b[i:b.index('if [[ "$WHAT" == smoke ]]', i)]
         self.assertIn('cmp -s "$OUT/$ADAPTER/d3d9.map"', rep)
         self.assertIn('without the map flag', rep)
         self.assertNotIn('--cref', b)

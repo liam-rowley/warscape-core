@@ -715,7 +715,7 @@ class ProxyMap(unittest.TestCase):
 
     def test_the_block_names_the_id_from_the_build_line_and_pins_a_sha(self):
         text = ci_render.render_text('    steps:\n{{wsc proxy_map step=dll}}\n', {**CFG, 'core': ''}, 'ci/x.yml.in')
-        self.assertRegex(text, r'uses: actions/upload-artifact@[0-9a-f]{40}')
+        self.assertRegex(text, r'uses: actions/upload-artifact@[0-9a-f]{40}')
         self.assertIn('name: ${{ steps.dll.outputs.map_name }}', text)
         self.assertIn('retention-days: 90', text)
         self.assertIn('${{ steps.dll.outputs.map_files }}', text)

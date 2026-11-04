@@ -65,14 +65,24 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends $(python3 proxy/tools/toolchain.py apt)
           dpkg-query -W -f '${Package}=${Version}\n' '*mingw-w64*'
 {{wsc fetch_cache}}
-      - run: proxy/tools/build.sh all
-      - name: the DLL is byte-identical when built from another checkout path
+      - id: dll
+        run: proxy/tools/build.sh all
+{{wsc proxy_map step=dll}}
+      - name: the DLL and its linker map are byte-identical from another checkout path, and the DLL without the map flag
         run: proxy/tools/build.sh repro
-      - name: smoke test the DLL under wine (a stand-in exe loads it; guard verdicts, config, log, clean detach)
+      - name: smoke test the DLL under wine (a stand-in exe loads it; guard verdicts, config, log, clean detach, a DLL fault symbolised)
         run: |
           sudo dpkg --add-architecture i386 && sudo apt-get update -q
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends wine wine32:i386
           proxy/tools/build.sh smoke
+      # W35: the smoke's DLL fault (its minidump and proxy.log), so `wsc crash symbolise` can be run on a real dump anywhere
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: proxy-smoke-dll-fault
+          path: proxy/tests/null_game/build/proxy/smoke_dll_fault.*
+          retention-days: 30
+          if-no-files-found: ignore
       - name: smoke test a game without gestures (W37, the null game with no GestureAdapter, so steps 6 and 7 take the inert path)
         env:
           WSP_GAME_ROOT: proxy/tests/null_game_no_gesture
