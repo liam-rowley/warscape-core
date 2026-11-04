@@ -20,7 +20,7 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
 
 ## While you work
 - Work on a branch; commit and push after every meaningful step. `main` changes only through the job queue (below, C18): a `job/W<n>`
-  branch is merged by its independent reviewer on green CI. Tags (`vX.Y.Z`) are cut by Liam only, after the merge, and `VERSION` says the
+  branch is merged by its independent reviewer on green CI. Tags are made by the release workflow (C27); jobs state a `semver` level and no longer edit `VERSION` (from `[jobs] semver_from`), and `VERSION` says the
   same number (`core_pin` gate). Every commit carries a `Claude-Session: <session id>` trailer (the `policy` check reads it).
 - **A learning becomes code first.** When something bites (a timing, a trap, a wrong default), fix it in the tool, its default,
   a schema rule, a guard or a gate so the next agent cannot hit it. Prose is the last resort, in the doc that owns the topic.

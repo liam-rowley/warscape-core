@@ -191,6 +191,20 @@ class CoreMode(Branches, unittest.TestCase):
         for res in (self.ci('meta/dec'), self.local('meta/dec')):
             self.assertRefused(res, 'docs/DECISIONS.md is append only: rows C1 were changed', JUDGED)
 
+    def test_a_release_branch_is_judged_by_the_bases_rules(self):
+        """W29 (C27): release/vX.Y.Z may change only VERSION, one step above the base's; a head that widens its own kind changes nothing."""
+        base = self.text('VERSION').strip()
+        a, b, _ = map(int, base.split('.'))
+        nxt = f'{a}.{b + 1}.0'
+        self.branch(f'release/v{nxt}', {'VERSION': nxt + '\n'})
+        for res in (self.ci(f'release/v{nxt}'), self.local(f'release/v{nxt}')):
+            self.assertEqual(res[0], 0, res)
+        evil = self.text('warscape/policy.py').replace("if extra or not changed:", "if False:")
+        self.branch(f'release/v{a}.{b + 2}.0', {'VERSION': f'{a}.{b + 2}.0\n', 'warscape/policy.py': evil})
+        for res in (self.ci(f'release/v{a}.{b + 2}.0'), self.local(f'release/v{a}.{b + 2}.0')):
+            self.assertRefused(res, 'a release branch may change only VERSION; it changes warscape/policy.py', JUDGED)
+            self.assertIn('one patch, minor or major step', res[2])
+
     def test_a_head_verb_module_that_patches_check_at_import_changes_nothing(self):
         mod = ('import warscape.policy as P\nP.check = lambda *a, **k: []\nNAME = "evil"\nHELP = "x"\n\n\n'
                'def add_arguments(p):\n    pass\n\n\ndef run(args, ctx):\n    return 0\n')

@@ -79,7 +79,7 @@ def run(args, ctx):
             for line in lines:
                 _say(line)
             _out(go='true' if state == 'green' else 'false')
-            _say(f'{args.sha[:12]}: {state}')
+            _say(f"{args.sha[:12]}: {'green' if state == 'green' else 'stale: nothing to do' if state == 'stale' else 'not green: no release'}")
             return 1 if state == 'red' else 0
         if args.action == 'check-consumers':
             head = R.git(['rev-parse', 'HEAD'], ctx.root).strip()
