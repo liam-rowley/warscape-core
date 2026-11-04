@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import netfetch  # noqa: E402  (W24, B62: the download retried on network flakes, never a sha mismatch or a failed patch)
 
 ROOT = layout.game_root()   # downloads and output under the game repo's build/ (J12)
 PIN = {
@@ -50,6 +51,11 @@ CORE = ['lapi.c', 'lcode.c', 'ldebug.c', 'ldo.c', 'ldump.c', 'lfunc.c', 'lgc.c',
         'lparser.c', 'lstate.c', 'lstring.c', 'ltable.c', 'ltm.c', 'lundump.c', 'lvm.c', 'lzio.c', 'lauxlib.c']
 
 
+def _get(url):
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
 def fetch(out):
     out = Path(out)
     stamp = out / 'PATCHED'
@@ -59,8 +65,7 @@ def fetch(out):
     cache = ROOT / 'build' / 'downloads' / 'lua-5.1.1.tar.gz'
     data = cache.read_bytes() if cache.exists() else None
     if data is None or hashlib.sha256(data).hexdigest() != PIN['sha256']:
-        with urllib.request.urlopen(PIN['url'], timeout=120) as r:
-            data = r.read()
+        data = netfetch.retry(lambda: _get(PIN['url']), f'fetch_lua {PIN["url"]}')   # the sha check below is outside the retry
         got = hashlib.sha256(data).hexdigest()
         if got != PIN['sha256']:
             raise SystemExit(f'fetch_lua: {PIN["url"]} has sha256 {got}, pinned {PIN["sha256"]}: refusing')

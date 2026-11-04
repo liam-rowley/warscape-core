@@ -129,7 +129,8 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends $(python3 proxy/tools/toolchain.py apt)
           dpkg-query -W -f '${Package}=${Version}\n' '*mingw-w64*'
       # fetch cache (W21): the raw downloads (tarballs, RmlUi and FreeType checkouts), keyed by the pins and [ci] salt, never the patched
-      # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte.
+      # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte, and
+      # the fetchers retry their own downloads and git fetches on a network flake inside build.sh (W24), never a wrong byte.
       - id: fetch_key
         run: python3 proxy/tools/netfetch.py ci-cache >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v5
@@ -137,8 +138,6 @@ jobs:
         with:
           path: ${{ steps.fetch_key.outputs.paths }}
           key: fetch-1-${{ steps.fetch_key.outputs.key }}
-      # every source build.sh compiles, each fetcher retried on a network flake (build.sh then makes no network call)
-      - run: python3 proxy/tools/netfetch.py prefetch
       - run: proxy/tools/build.sh all
       - name: the DLL is byte-identical when built from another checkout path
         run: proxy/tools/build.sh repro

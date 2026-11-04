@@ -11,12 +11,16 @@ build from the same sources (the consumer's decision D37), so both read one pin 
 fetcher. The Lua copy is the viewer's: float lua_Number (the engine's number type) and nothing else; the proxy's engine-patched core
 (fetch_lua.py: the engine's dummynode, no GC step) is a different copy for the engine's own lua_State. The host links this one with
 its symbols made local (build.sh), so the two never meet.
-Needs git (RmlUi, FreeType) and network; downloads are cached under the output folder.
+Needs git (RmlUi, FreeType) and network; downloads are cached under the output folder. Each download and git fetch is retried on a
+network flake (netfetch.retry, W24, B62; one stderr line per retry), never a sha mismatch or a failed patch. A checkout is trusted only
+when HEAD is the pinned commit and the working tree equals HEAD; anything else (a fetch that failed after `git init`, a cache restored in
+part, another pin) is removed and fetched again.
 """
 import argparse
 import hashlib
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -25,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
+import netfetch  # noqa: E402  (not a DLL input: it changes whether a download succeeds, never a byte)
 
 LUACONF = [
     ('#define LUA_NUMBER_DOUBLE\n#define LUA_NUMBER\tdouble', '#define LUA_NUMBER\tfloat   /* Warscape engine build */'),
@@ -39,15 +44,25 @@ def git(*args, cwd):
                           capture_output=True, text=True).stdout.strip()
 
 
+def _head(d):
+    try:
+        return git('rev-parse', '--verify', '--quiet', 'HEAD', cwd=d)
+    except subprocess.CalledProcessError:
+        return None
+
+
 def fetch_git(name, pin, out):
     d = out / name
-    if (d / '.git').exists() and git('rev-parse', 'HEAD', cwd=d) == pin['commit']:
-        print(f'fetch_ui: {name} {pin["version"]} at {pin["commit"][:12]} already')
-        return
+    if (d / '.git').exists():
+        if _head(d) == pin['commit'] and netfetch._git_ok(d):
+            print(f'fetch_ui: {name} {pin["version"]} at {pin["commit"][:12]} already')
+            return
+        shutil.rmtree(d, onexc=netfetch._force_remove)   # git's objects are read-only, which Windows refuses to delete
+        print(f'fetch_ui: {name}: removed {d} (HEAD not the pinned {pin["commit"][:12]}, unreadable, or a working tree that differs '
+              f'from it); fetching again', file=sys.stderr, flush=True)
     d.mkdir(parents=True, exist_ok=True)
-    if not (d / '.git').exists():
-        git('init', '-q', cwd=d)
-    git('fetch', '-q', '--depth', '1', pin['repo'], pin['commit'], cwd=d)
+    git('init', '-q', cwd=d)
+    netfetch.retry(lambda: git('fetch', '-q', '--depth', '1', pin['repo'], pin['commit'], cwd=d), f'fetch_ui {name}')
     git('checkout', '-q', '--force', 'FETCH_HEAD', cwd=d)
     head = git('rev-parse', 'HEAD', cwd=d)
     if head != pin['commit']:
@@ -55,11 +70,15 @@ def fetch_git(name, pin, out):
     print(f'fetch_ui: {name} {pin["version"]} at {head[:12]}')
 
 
+def _get(url):
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
 def download(url, sha, cache):
     data = cache.read_bytes() if cache.exists() else None
     if data is None or hashlib.sha256(data).hexdigest() != sha:
-        with urllib.request.urlopen(url, timeout=120) as r:
-            data = r.read()
+        data = netfetch.retry(lambda: _get(url), f'fetch_ui {url}')   # the sha check below is outside the retry
         got = hashlib.sha256(data).hexdigest()
         if got != sha:
             sys.exit(f'fetch_ui: {url} has sha256 {got}, pinned {sha}: refusing')
