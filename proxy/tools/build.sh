@@ -63,6 +63,8 @@ fi
 # W24 (C24): the toolchain is checked before the first mingw compile of dll, all and repro: every pinned package at its version and $CXX
 # owned by one of them (toolchain.py check). Off the pin the build is refused (exit 2) unless WSP_TOOLCHAIN=any, which builds and marks the
 # id -dirty once: a DLL from another toolchain is not the DLL the committed id names. `id` above never gets here (rule 79 needs no compiler).
+# W24: the CI step summary, when $GITHUB_STEP_SUMMARY is set (every consumer's CI gets it with no template change; a PC build writes none)
+summary() { if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then printf '%s\n' "$@" >> "$GITHUB_STEP_SUMMARY"; fi; }
 TOOLCHAIN_LINE=""
 toolchain_check() {   # $1 = the mingw g++ the build will use
   [[ -n "$TOOLCHAIN_LINE" ]] && return 0
@@ -188,6 +190,8 @@ if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
       [[ " $EXP " == *" $e "* ]] || { echo "build.sh: export $e missing (decorated?)"; exit 3; }
     done
   fi
+  summary "### proxy DLL: $ADAPTER" "" "- build id: \`$BUILD_ID\`" \
+    "- \`d3d9.dll\` sha256 \`$(sha256sum "$OUT/$ADAPTER/d3d9.dll" | cut -c1-64)\`, $(wc -c < "$OUT/$ADAPTER/d3d9.dll" | tr -d ' ') bytes" "- $TOOLCHAIN_LINE"
 fi
 
 if [[ "$WHAT" == tests || "$WHAT" == all ]]; then
@@ -217,7 +221,7 @@ if [[ "$WHAT" == repro ]]; then
   CXX="$(command -v i686-w64-mingw32-g++-win32 || command -v i686-w64-mingw32-g++)"
   toolchain_check "$CXX"
   build_dll "$R/src" "$R/adapter" "$R/other.dll"
-  if cmp -s "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll"; then echo "build.sh repro: identical from another path"; rm -rf "$(dirname "$R")"
+  if cmp -s "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll"; then echo "build.sh repro: identical from another path"; rm -rf "$(dirname "$R")"; summary "- repro: identical from another path"
   else echo "build.sh repro: FAILED: the DLL depends on the checkout path"; cmp -l "$OUT/$ADAPTER/d3d9.dll" "$R/other.dll" | head -5; exit 1; fi
 fi
 
@@ -290,4 +294,5 @@ if [[ "$WHAT" == smoke ]]; then
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
   grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
   echo "build.sh smoke: passed (8 launches under wine, 2 dumps)"
+  summary "- smoke: self_hash in proxy.log matches d3d9.dll ($SH_MS ms under wine)"
 fi
