@@ -300,6 +300,8 @@ In the pin-bump commit, because the render guard and the new facts fail otherwis
 - Core CI red after three fix attempts for a cause in this change: stop and report. Version collision as in VERSION; never rebase a pushed branch.
 
 ## Open questions (with recommendations; the builder follows the recommendation unless Liam says otherwise)
+Answered 2026-11-04 by Liam: all three as recommended ("Yes, pull_request_target", "Accept and document it", "Yes, keep the fallback").
+
 1. **`pull_request_target` for the policy workflow?** Recommended: yes (decision 8).
    - It is the only per-repository way to take the workflow from the base. The job never runs head content, and the head's names reach scripts through
      `env:` only.
