@@ -1,3 +1,18 @@
+## Round 2 (2026-11-04, branch job/W20 at 4d39110)
+
+**Verdict: merge.**
+
+Machines: `wsc gates` 13 ok after merging main. CI on the reviewed pre-merge head (927df7e) was still running when I read it; the merged head gets its own run and auto-merge waits for every required check on it (including the `-Wshadow` builds, which only CI can compile). Risk-first reading: the round-1 blocker area, `hk_DIState`/`hk_DIData` in `proxy/src/ui_host.cpp`.
+
+Round 1 answered in `## Fix round 1` of the report:
+1. Blocker (shadowed `mask`): fixed. The hooks read the published word as `dim`, the button bitmap is `btns`, and the decision is the pure `UiDiBlankButtons(dim, GestureOwnsMouse())` / `UiDiBlankWheel(dim)` in `ui_core.h:93-96`. `test_ui_core.cpp` tests all 16 word/owner combinations, that a held left button is not the route word, and lints the hooks (no `mask` token, the pure calls present). `build.sh` compiles the proxy and the host tests with `-Wshadow`. Read in the diff: the keyboard branch and the `GetDeviceData` hook are consistent.
+2. Should-fix (coverage): closed by the same function and test.
+3 to 5. Accepted, no action; B58 e stays in `docs/BACKLOG.md`.
+
+Fixed by me on the branch: `VERSION` conflicted with main (0.27.0 after W24); I merged `origin/main` and renumbered 0.23.0 to 0.28.0 (one merge commit). The report's "0.23.0" mentions are a dated record and are left.
+
+Residual risk (not a finding): `-Wshadow` may flag older code that nobody compiled with it; CI would show that as a red `proxy` check and block the auto-merge.
+
 ## Round 1 (2026-11-04, branch job/W20 at 83cb39c)
 
 **Verdict: merge after fixes.**
