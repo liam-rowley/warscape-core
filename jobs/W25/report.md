@@ -26,7 +26,7 @@ Decisions as numbered in the brief.
 - **14, `safe_rel` (H12).** Backslashes become `/`. Refused: an empty path, a leading `/`, any `:`, and any empty, `.` or `..` segment. `verify_kit` stores the normalised path in the manifest it returns (so `install` never writes a backslash name on POSIX). `plain_name` refuses a `staged` or `kit_files[].name` that contains a separator. `verify_harness_kit` keeps its "outside src/ and profiles/" message. The proxy kit keeps "not a relative path inside the game folder".
 - **15, one ESF index.** `Esf.set_value(container, index, value)` uses `container[index]` and raises `ValueError` naming `@N` when the node is a record or array. `docs/CONSUMING.md` says a caller must move from the old index to `@N`.
   - Napoleon callers: none. `git grep set_value origin/main -- . ':!core'` in `napoleon-remastered` (read-only) finds nothing; the only hits on disk are copies of `esf_edit.py` itself in scratch worktrees.
-- **Docs.** `docs/CONSUMING.md` has the new section "pc_deploy takes the lock; exe_check is a start-time setting". `docs/DECISIONS.md` has C29 (proposed, reversible), and `registries/tools.jsonl` has the `pc_deploy` header row.
+- **Docs.** `docs/CONSUMING.md` has the new section "pc_deploy takes the lock; exe_check is a start-time setting". `docs/DECISIONS.md` has C28 (proposed, reversible), and `registries/tools.jsonl` has the `pc_deploy` header row.
 
 ## Evidence
 - Tests, red first: commit fc5f6c2 on `job/W25`.
@@ -66,11 +66,12 @@ Decisions as numbered in the brief.
 - **`set` with neither an install record nor an identity** cannot run the running check, so it refuses unless `--assume-closed` is given. The brief does not cover this case; refusing is the safe side.
 - **`SetWaitsForRestore` needs Git Bash now.** Its fake watcher folder means `set` takes the lock, so the class now sets `WSC_SESSION_ID` and skips without Git Bash, the same way `test_job_sh` does.
 - **Integration case rewritten.** The existing integration case `exe check (J18)` edited the ini to `warn` and expected the launch to go ahead. That is exactly what decision 11 forbids, so the case was rewritten as described in Evidence.
-- **The `docs/CONSUMING.md` section is five lines, not a full section.** `main` is at 28.7 KB of the 30 KB cap and `job/W15` adds 1.8 KB, so a longer section would fail `doc_size` for whichever of the two merges second. The detail is in the `pc_deploy.py` header and docstrings, and in C29.
+- **The `docs/CONSUMING.md` section is five lines, not a full section.** `main` is at 28.7 KB of the 30 KB cap and `job/W15` adds 1.8 KB, so a longer section would fail `doc_size` for whichever of the two merges second. The detail is in the `pc_deploy.py` header and docstrings, and in C28.
+- **Decision number.** The decision is C28, the number `wsc policy` asks for against `main`. `job/W15` also adds a C28: whichever of the two merges second renumbers its row after merging `main` (here: `docs/DECISIONS.md`, the `docs/CONSUMING.md` heading and this report).
 - **Out of scope, moved to napoleon:** `stage_save.py` refusing `&` in save names and `load_save.sh` quoting `$JOB` live in napoleon-remastered (`saves/napoleon/`), not in the core (open question 4). The napoleon audit's Corrections already moved them to J91. The W25 row's description still names them; the reviewer may trim it (the row text is not this job's to rewrite).
 
 ## Open questions
-1. **A watcher crash is not a restart.** A watcher that crashes, or whose powershell is killed (any exit but 3, 4, 10 or 11), is restarted by `watch.cmd` after 4 s with no carry, so it reads the ini as written. An agent able to kill the watcher process could still weaken `exe_check`. Recommended: leave this to the agent hook, which already denies most process kills. If not, a later job can keep a refreshed carry while the watcher runs and remove it only on exit 11. The gap is written into C29.
+1. **A watcher crash is not a restart.** A watcher that crashes, or whose powershell is killed (any exit but 3, 4, 10 or 11), is restarted by `watch.cmd` after 4 s with no carry, so it reads the ini as written. An agent able to kill the watcher process could still weaken `exe_check`. Recommended: leave this to the agent hook, which already denies most process kills. If not, a later job can keep a refreshed carry while the watcher runs and remove it only on exit 11. The gap is written into C28.
 2. **Unchanged recommendations.** Open questions 1 to 5 in the brief were followed as recommended. Question 4 goes to napoleon J91.
 
 ## What napoleon must do after the tag
