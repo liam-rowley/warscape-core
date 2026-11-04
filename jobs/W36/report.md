@@ -45,9 +45,10 @@ The base in the second run is this branch because `origin/main` does not have th
 **Gates:** `python3 wsc.py gates` (full, 2026-11-04, on the merge with W35, c90cf9b): 15 ok, 1 warn, 0 failed; 999 host tests passed, 5 skipped. The warn is only those skips: the hook test needs a POSIX sh and symlinks, and four discovery tests need capstone, neither of which this PC has. An earlier full run failed one test (`test_the_queue_passes_jobs_check`) because this report existed before its row said so; setting the row fixed it.
 
 ## CI
-On commit `fcc67bf`, pull request #110:
-- **`gates`, run 41931100907:** attempt 1 failed in `gates (ubuntu-latest)` only, on a timing test this job does not touch (open question 4). Attempt 2, a rerun of that job, passed: `gates (ubuntu-latest)`, `gates (windows-latest)`, `harness-windows` and `changes` all success, `proxy` skipped.
-- **`policy`, run 41931121695:** skipped, as for every draft, so CI has not judged this branch yet; the reviewer's ready pull request gets the first real run. The local run from this checkout against `origin/main` 2390136 was refused only for the missing `review.md` and the row not being `done`, which a job in review lacks.
+Pull request #110:
+- **`gates`, run 41933842361, on commit `d602a60` (the merge with W35):** success on attempt 1: `gates (ubuntu-latest)`, `gates (windows-latest)`, `harness-windows`, `proxy` and `changes`.
+- **`gates`, run 41931100907, on commit `fcc67bf` (before that merge):** attempt 1 failed in `gates (ubuntu-latest)` only, on a timing test this job does not touch (open question 4); attempt 2, a rerun of that job, passed.
+- **`policy`, run 41933846332:** skipped, as for every draft, so CI has not judged this branch yet; the reviewer's ready pull request gets the first real run. The local run from this checkout against `origin/main` 2390136 was refused only for the missing `review.md` and the row not being `done`, which a job in review lacks.
 
 ## Merges with main
 Merged 209ca5a (W41's plan row) and then 2390136 (W35), never rebased. W35 took C35, so this job's row is C36, after it; `docs/DECISIONS.md` differs from `origin/main` by that one added line. W35 pushed `docs/CONSUMING.md` over the cap with this job's lines, so this job's own lines were shortened: the base rule now lives in the `bases` comment there and the template detail in `docs/UPGRADING.md`.
