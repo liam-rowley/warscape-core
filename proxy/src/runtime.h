@@ -29,7 +29,7 @@ struct Runtime {
     bool         inDllMain = false;       // DllMain's PROCESS_ATTACH / PROCESS_DETACH work is running (StartThread refuses, W33)
 };
 Runtime& Rt();
-// dllmain.cpp: the one way a proxy thread starts (W33, C28). It refuses inside DllMain (one LOGE naming the thread): a thread started
+// dllmain.cpp: the one way a proxy thread starts (W33, C29). It refuses inside DllMain (one LOGE naming the thread): a thread started
 // under the loader lock runs beside a game that may still be single-threaded on an unserialised heap. Otherwise CreateThread,
 // CloseHandle and "thread: <name> started (tid N)". headless.cpp's two starts run off DllMain through its Ensure (the source lint).
 bool StartThread(LPTHREAD_START_ROUTINE fn, const char* name);

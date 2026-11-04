@@ -34,7 +34,7 @@ The options weighed against it (subtree, a vendored copy, `pip install`) and the
 - **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
 - `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
 
-## DLL changes in 0.33.0 (W33, C28)
+## DLL changes in 0.34.0 (W33, C29)
 - **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
   row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
   tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".
@@ -303,6 +303,13 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
   request is withdrawn (`.request.expired`), so a script that relied on it staying queued must pass a longer wait and run in the background.
 - A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
+
+## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
+- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
+  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
+- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
+- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
+- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

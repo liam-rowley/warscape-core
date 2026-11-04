@@ -307,7 +307,7 @@ if [[ "$WHAT" == smoke ]]; then
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
   [[ -z "$SITE" ]] || grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
-  #    W33 (C28): no dev thread starts in DllMain: both start after the first Direct3DCreate9, and the ctl thread watches after its start line
+  #    W33 (C29): no dev thread starts in DllMain: both start after the first Direct3DCreate9, and the ctl thread watches after its start line
   at() { grep -n -m1 -F "$1" "$G/$MOD/logs/proxy.log" | cut -d: -f1; }
   CREATE="$(at 'Direct3DCreate9(sdk=32)')"; T_STATE="$(at 'thread: dev.state started')"; T_CTL="$(at 'thread: dev.ctl started')"; WATCH="$(at 'ctl: watching')"
   if [[ -z "$CREATE" || -z "$T_STATE" || -z "$T_CTL" || -z "$WATCH" ]] || (( T_STATE < CREATE || T_CTL < CREATE || WATCH < T_CTL )); then
