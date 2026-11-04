@@ -118,6 +118,19 @@ commit = false              # views go to the git-ignored dir (default "_scratch
   With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
   registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
   either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
+- **Removing a row (W15):** `python3 core/wsc.py reg remove <reg> <id>...` replaces `git rm registries/<name>/<file>.json`. It refuses, writing
+  nothing, while an `x-ref` field, a tool's `superseded:<id>`, a tool file still in the repo or a `jobs/<id>/` folder points at a row, or when
+  the removal adds a check problem; rows that only point at each other go in one call.
+
+## Tool retirement (0.31.0, core W15, C28; opt-in)
+A tool's last use is the later of its row's `last_used` (the floor: the day the row was added, or `wsc reg set tools <id> last_used=<date>`)
+and the newest `done` job whose `jobs/<id>/report.md` cites it, dated by the newest `## Round N (YYYY-MM-DD, ...)` heading of its `review.md`
+(a legacy review: the first date in its first 5 lines). It is derived from the working tree at check time; nothing writes it into rows.
+- **Citation:** the tool's `path` as a whole path (`core/` before it still counts; `xharness/job.sh` or `harness/job.sh.bak` does not), or,
+  for a verb, `wsc <verb>`, `wsc.py <verb>` or `wsc.<verb>`.
+- **Opt in:** `[tools] retire_after_days = 90` (default 0: off; the core keeps 0, its tools' uses are in its consumers' reports). Then
+  `python3 core/wsc.py reg check tools` warns per stale live tool, naming where its date came from (`(jobs/J12/report.md)` or `(row)`):
+  supersede it, `reg remove` it after deleting the file, or cite it in the next report that uses it.
 
 ## Extending a core schema (0.17.0)
 A game that needs a field a core schema lacks does not copy the schema (its copy would miss every later core change): its own schema
@@ -304,5 +317,8 @@ From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discover
   x86 tools (`x86re`, `console_cmds`, `exe_strings build`) need capstone and pefile in the RE environment: `python3 core/discovery/re_env.py <dir outside the repo>` downloads the
   wheels pinned by sha256 in that file and builds the venv, then run the tool with `<dir>/venv/.../python -I`. A tool that lacks its extra stops with a message that names this fix;
   the host tests skip the capstone cases without it.
+- **`find` and the exe index (0.31.0, W15):** `python3 core/wsc.py find <word>` also searches the adapter's `exe_strings.tsv.gz` for exe-shaped
+  words (4+ characters with an inner `_` or a lower-to-upper case change: `gfx_hardware_shadows`, `CampaignUI`; every word must appear, as literals,
+  case-insensitively); `--exe` forces it for any word, `--in exe_strings` searches only it. Without the table `find` prints what it always did.
 - **Re-run steps:** `python3 core/wsc.py discovery all` on the PC, then `discovery check` and `git diff --stat` (empty when nothing changed in the game); `discovery check` and
   `discovery gate` need only committed files and belong in the game's thin real-repo test.

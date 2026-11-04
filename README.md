@@ -30,6 +30,7 @@ python3 wsc.py --help                      # verbs: reg, find, gates, jobs, poli
 python3 wsc.py find shadow resolution      # one search across every registry
 python3 wsc.py reg add tools path/to/tool.py
 python3 wsc.py reg set engine_facts some.fact state=verified date=2026-10-28 evidence=runs/20261028_a
+python3 wsc.py reg remove engine_facts some.fact   # refused, nothing written, while any row, tool file or job folder points at it
 python3 wsc.py gates --fast                # what the pre-push hook runs; `gates` alone adds the host tests (CI)
 git config core.hooksPath .githooks        # once per clone
 ```
