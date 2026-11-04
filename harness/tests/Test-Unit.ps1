@@ -139,6 +139,64 @@ Test-Case 'game lock: absent, empty, owner rules, refresh by mtime, staleness af
     Assert-Match $log 'LOCK EXPIRED: game.lock owner=alice' 'logged'
     Assert-Match $log '^\[\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\] ' 'log lines start with a UTC timestamp'
 }
+Test-Case 'game lock (W10, H2): owners compare case-sensitively and the lock''s session id also holds it' {
+    $lock = Join-Path $root 'game.lock'
+    [IO.File]::WriteAllText($lock, "owner=claude-acc session=3815a970-aaaa purpose=t started=2026-10-28T10:00:00Z`r`n", $Utf8)
+    Assert-True ($null -eq (Check-Owner 'claude-acc')) 'the owner holds it'
+    Assert-True ($null -eq (Check-Owner '3815a970-aaaa')) 'the session id holds it'
+    Assert-Match (Check-Owner 'Claude-Acc') 'lower' 'a different-case owner is refused, and the text says to lower-case it'
+    Assert-Match (Check-Owner '3815A970-AAAA') 'lower' 'a different-case session id is refused'
+    Assert-Match (Check-Owner 'bob') 'does not hold the game' 'another owner'
+    Remove-Item -LiteralPath $lock -Force
+}
+Test-Case 'Expire-StaleLock $seen (B20): a lock that was refreshed or replaced after it was read is put back, not expired' {
+    $lock = Join-Path $root 'game.lock'; $td = Join-Path $root '_to_delete'
+    $before = @(Get-ChildItem $td -Filter 'game.lock.expired_*' -ErrorAction SilentlyContinue).Count
+    # the record read was a stale alice lock; by the time the move happens the disk holds a fresh bob lock
+    [IO.File]::WriteAllText($lock, "owner=bob session=s2 purpose=new started=2026-10-28T11:00:00Z`r`n", $Utf8)
+    $seen = [pscustomobject]@{ owner = 'alice'; session = 's1'; purpose = 'old'; age_s = 2000; stale = $true; path = $lock; raw = 'owner=alice session=s1 purpose=old started=2026-10-28T10:00:00Z' }
+    Expire-StaleLock $seen
+    Assert-True (Test-Path -LiteralPath $lock) 'the fresh lock is still there'
+    Assert-Match ([IO.File]::ReadAllText($lock)) 'owner=bob' 'and it is bob''s'
+    Assert-Eq @(Get-ChildItem $td -Filter 'game.lock.expired_*' -ErrorAction SilentlyContinue).Count $before 'nothing of it was left in _to_delete'
+    Assert-Match ([IO.File]::ReadAllText($LogPath)) 'put back' 'logged'
+    # the same line, but touched (fresh mtime) after it was read: the line alone is not enough
+    [IO.File]::WriteAllText($lock, "owner=alice session=s1 purpose=old started=2026-10-28T10:00:00Z`r`n", $Utf8)
+    Expire-StaleLock $seen
+    Assert-True (Test-Path -LiteralPath $lock) 'a touched lock is kept'
+    Assert-Eq @(Get-ChildItem $td -Filter 'game.lock.expired_*' -ErrorAction SilentlyContinue).Count $before 'nothing left behind'
+    Remove-Item -LiteralPath $lock -Force
+}
+Test-Case 'Wrap-Ps1Body (B21): the exit code comes from the last statement, checked by running the wrapper under this PowerShell' {
+    $w = Wrap-Ps1Body 'Write-Output hi'
+    Assert-Match $w '^\$global:LASTEXITCODE = 0' 'LASTEXITCODE is reset before the body'
+    Assert-Match $w 'if \(\(-not \$\?\) -and \$LASTEXITCODE\) \{ exit \$LASTEXITCODE \}\s*$' 'the tail tests the last statement'
+    Assert-NotMatch $w 'if \(\$LASTEXITCODE\)' 'not the old tail'
+    if (-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) { Write-Host '      (no powershell.exe: only the text was checked)'; return }
+    $d = New-Tmp 'wrap'
+    $cases = @(
+        @{ body = "cmd /c exit 3`r`nWrite-Output ok"; want = 0; why = 'a handled early native failure, last statement fine' },
+        @{ body = "Write-Output a`r`ncmd /c exit 4"; want = 4; why = 'a last native failure keeps its code' },
+        @{ body = "cmd /c exit 3`r`nexit 0"; want = 0; why = 'ending in exit 0 (robocopy style)' },
+        @{ body = "cmd /c exit 2`r`nexit 7"; want = 7; why = 'an explicit exit N still wins' }
+    )
+    $i = 0
+    foreach ($c in $cases) {
+        $i++; $f = Join-Path $d "c$i.ps1"
+        [IO.File]::WriteAllBytes($f, [byte[]](@(0xEF, 0xBB, 0xBF) + $Utf8NoBom.GetBytes((Wrap-Ps1Body $c.body) + "`r`n")))
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f | Out-Null
+        Assert-Eq $LASTEXITCODE $c.want $c.why
+    }
+    Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+}
+Test-Case 'job queue (W10): a withdrawn request (*.request.expired) is never listed as queued' {
+    New-Item -ItemType Directory -Path $JobsDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $JobsDir 'q-1.request'), 'noop', $Utf8)
+    [IO.File]::WriteAllText((Join-Path $JobsDir 'q-2.request.expired'), 'noop', $Utf8)
+    $names = @(Get-Requests | ForEach-Object { $_.Name })
+    Remove-Item -LiteralPath (Join-Path $JobsDir 'q-1.request'), (Join-Path $JobsDir 'q-2.request.expired') -Force
+    Assert-Eq ($names -join ',') 'q-1.request' 'only the live request'
+}
 Test-Case 'foreign lock (another watcher on this PC) is read, never written' {
     $fl = $A.foreign_locks[0]; New-Item -ItemType Directory -Path (Split-Path $fl) -Force | Out-Null
     Assert-True ($null -eq (Foreign-LockReason)) 'none'
@@ -488,6 +546,14 @@ Test-Case 'overlay (prefs): a missing key is appended as "key value;", an empty 
     Assert-Eq (Get-PrefsValue $base 'x_pos') '0' 'Get-PrefsValue reads a value'
     Assert-Eq (Get-PrefsValue $base 'x_res') '3840' 'Get-PrefsValue x_res'
     Assert-True ($null -eq (Get-PrefsValue $base 'nope')) 'and $null for a missing key'
+}
+Test-Case 'overlay (prefs, B30): a key held twice is set in every copy, Get-PrefsValue reads the last copy' {
+    $dup = "k 5; # k <int>, first #`r`nz 1; # z #`r`nk 6; # k <int>, second #`r`n"
+    $base = Prefs-Bytes $dup
+    Assert-Eq (Get-PrefsValue $base 'k') '6' 'the last copy is what the game read'
+    $out = Apply-Overlay $base "k 9`n" 'prefs' 'p'
+    Assert-Eq (Prefs-Text $out) ($dup.Replace('k 5;', 'k 9;').Replace('k 6;', 'k 9;')) 'both copies set, every other byte unchanged'
+    Assert-Eq (Get-PrefsValue $out 'k') '9' 'read back'
 }
 
 # ---- headless overlay: snapshot, overlay on top, restore byte for byte -----------------------------------------------------------------

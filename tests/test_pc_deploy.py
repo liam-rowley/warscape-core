@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -507,6 +508,93 @@ class HarnessKit(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'does not verify'):
             pd.send_kit(kit, self.t / 'state2')
         self.assertFalse((self.t / 'state2' / 'kits').exists())
+
+
+class SetWaitsForRestore(unittest.TestCase):
+    """B39 (W10): `pc_deploy set` waits for, or refuses on, the watcher's pending profile restore (profiles/_active.json), because a restore
+    that runs after the set puts the old keys back (napoleon J9, run 20261101_j9pc)."""
+
+    def setUp(self):
+        use_fixture_game(self)
+        self.tmp = tempfile.TemporaryDirectory()
+        t = Path(self.tmp.name)
+        self.game, self.state = t / 'game', t / 'state'
+        self.game.mkdir()
+        self.ini = self.game / 'nullgame.ini'
+        self.ini.write_bytes(b'[proxy]
+backend=dxvk
+')
+        self.w = self.state / 'watcher'
+        (self.w / 'profiles').mkdir(parents=True)
+        (self.w / 'watcher.status').write_text(json.dumps({'processes': [], 'lock': {'owner': 'o1'}}), encoding='utf-8')
+        (self.w / 'watcher.alive').write_text('x')
+        self.active = self.w / 'profiles' / '_active.json'
+        self.active.write_text(json.dumps({'name': 'j9-prof', 'owner': 'o1'}), encoding='utf-8')
+        self.before = self.ini.read_bytes()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def set(self, **kw):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = pd.set_keys(self.game, ['proxy.backend=system'], 'nullgame.ini', kw.pop('state', self.state), **kw)
+        return rc, out.getvalue()
+
+    def test_a_pending_restore_refuses_and_leaves_the_ini_alone(self):
+        sleeps = []
+        with self.assertRaises(SystemExit) as e:
+            self.set(wait_restore=3, sleep=sleeps.append)
+        msg = str(e.exception)
+        self.assertIn('j9-prof', msg)
+        self.assertIn('owner o1', msg)
+        self.assertIn('held by o1', msg)
+        self.assertIn('not running', msg)
+        self.assertEqual(sleeps, [1, 1, 1])   # polled once a second for the whole wait
+        self.assertEqual(self.ini.read_bytes(), self.before)
+
+    def test_wait_restore_zero_refuses_at_once(self):
+        sleeps = []
+        with self.assertRaises(SystemExit):
+            self.set(wait_restore=0, sleep=sleeps.append)
+        self.assertEqual(sleeps, [])
+        self.assertEqual(self.ini.read_bytes(), self.before)
+
+    def test_a_restore_that_finishes_during_the_wait_lets_set_write(self):
+        threading.Timer(1.0, lambda: self.active.unlink()).start()
+        t0 = time.time()
+        rc, out = self.set(wait_restore=20)
+        self.assertEqual(rc, 0)
+        self.assertLess(time.time() - t0, 10)
+        self.assertIn(b'backend=system', self.ini.read_bytes())
+
+    def test_no_state_writes_and_says_it_cannot_see_a_restore(self):
+        rc, out = self.set(state=None)
+        self.assertEqual(rc, 0)
+        self.assertIn('cannot be seen', out)
+        self.assertIn(b'backend=system', self.ini.read_bytes())
+
+    def test_a_state_without_a_watcher_folder_writes_and_says_so(self):
+        rc, out = self.set(state=Path(self.tmp.name) / 'nowatcher')
+        self.assertEqual(rc, 0)
+        self.assertIn('cannot be seen', out)
+        self.assertIn(b'backend=system', self.ini.read_bytes())
+
+    def test_no_pending_restore_writes_as_before(self):
+        self.active.unlink()
+        rc, out = self.set()
+        self.assertEqual(rc, 0)
+        self.assertIn(b'backend=system', self.ini.read_bytes())
+
+    def test_the_cli_has_wait_restore(self):
+        r = subprocess.run([sys.executable, str(ROOT / 'proxy/tools/pc_deploy.py'), 'set', '--game', str(self.game), '--state', str(self.state),
+                            '--config-file', 'nullgame.ini', '--wait-restore', '0', 'proxy.backend=system'],
+                           capture_output=True, text=True, env={**os.environ, 'WSP_GAME_ROOT': str(pd.ROOT)})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('j9-prof', r.stderr)
+        self.assertEqual(self.ini.read_bytes(), self.before)
 
 
 if __name__ == '__main__':

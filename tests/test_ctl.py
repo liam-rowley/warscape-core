@@ -684,5 +684,71 @@ class Orders(unittest.TestCase):
         self.assertEqual([u['id'] for u in r['units']], [1, 2])
 
 
+class Identity(unittest.TestCase):
+    """W10 (H2): the lock owner is the session. ctl.py's owner defaults to the session id (--session, $WSC_SESSION_ID, then the variable
+    Claude Code exports); with none it refuses and names the fix; an explicit --owner still works."""
+    NONE = {}
+
+    def test_the_session_comes_from_the_flag_then_wsc_session_id_then_claude_code(self):
+        self.assertEqual(ctl.resolve_identity(None, 'S-1', {'WSC_SESSION_ID': 'b', 'CLAUDE_CODE_SESSION_ID': 'c'}), ('s-1', 's-1', None))
+        self.assertEqual(ctl.resolve_identity(None, None, {'WSC_SESSION_ID': 'b', 'CLAUDE_CODE_SESSION_ID': 'c'}), ('b', 'b', None))
+        sid = '3815a970-03f3-4397-abff-a5c927662efa'
+        self.assertEqual(ctl.resolve_identity(None, None, {'CLAUDE_CODE_SESSION_ID': sid}), (sid, sid, None))
+
+    def test_no_session_refuses_and_names_the_fix(self):
+        o, s, why = ctl.resolve_identity(None, None, self.NONE)
+        self.assertIsNone(o)
+        for word in ('--session', 'WSC_SESSION_ID', '--owner'):
+            self.assertIn(word, why)
+
+    def test_an_explicit_owner_still_works_and_is_validated(self):
+        self.assertEqual(ctl.resolve_identity('claude-ctl', None, self.NONE), ('claude-ctl', 'claude-ctl', None))
+        self.assertEqual(ctl.resolve_identity('claude-ctl', 'sess9', self.NONE), ('claude-ctl', 'sess9', None))
+        self.assertIn('must match', ctl.resolve_identity('Claude-Ctl', None, self.NONE)[2])
+
+    def test_main_refuses_without_a_session_or_owner(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
+            for k in ('WSC_SESSION_ID', 'CLAUDE_CODE_SESSION_ID'):
+                os.environ.pop(k, None)
+            rc = ctl.main(['state'])
+        self.assertEqual(rc, 2)
+        r = json.loads(out.getvalue())
+        self.assertEqual(r['status'], 'refused')
+        self.assertIn('WSC_SESSION_ID', r['reason'])
+
+    def test_main_uses_the_session_as_the_owner_unless_one_is_named(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        def transport(owner, adapter=None):
+            seen.append(owner)
+            raise Stop
+
+        adapter = _TMP / 'adapter_identity.json'
+        adapter.write_text(json.dumps({'state_dir': str(_TMP), 'game': 'g'}), encoding='utf-8')
+        for argv, env, want in ((['state'], {'WSC_SESSION_ID': 'sess-a'}, 'sess-a'),
+                                (['--owner', 'claude-ctl', 'state'], {'WSC_SESSION_ID': 'sess-a'}, 'claude-ctl'),
+                                (['--session', 'sess-b', 'state'], {}, 'sess-b')):
+            with mock.patch.dict(os.environ, env), mock.patch.object(ctl, 'job_sh_transport', transport), \
+                    mock.patch.object(ctl, 'Pc', lambda *a, **k: None), contextlib.redirect_stdout(io.StringIO()):
+                if 'WSC_SESSION_ID' not in env:
+                    os.environ.pop('WSC_SESSION_ID', None)
+                    os.environ.pop('CLAUDE_CODE_SESSION_ID', None)
+                with self.assertRaises(Stop):
+                    ctl.main(['--adapter', str(adapter), '--no-pc', *argv])
+            self.assertEqual(seen[-1], want)
+
+
 if __name__ == '__main__':
     unittest.main()
