@@ -61,6 +61,7 @@ DEFAULTS = {
         'failed_results': '',              # glob (relative to a run folder a report cites) of ctl result JSONs: one with status "failed" must be named in ## Deviations ('' = off)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
         'pc_state': '',                    # the PC state folder ($VAR, ~ expanded): a needs_pc build is not ready where it is absent ('' = no gating; WSC_PC_STATE overrides, "" = no PC here; W26)
+        'claim_hours': 4,                  # a review claim (refs/claims/<id>/round-<n>, core W27) older than this may be taken over
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
             'policy': '{wsc} policy',      # the policy command, before ` --branch B --base REF`
@@ -76,6 +77,9 @@ DEFAULTS = {
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
+        'decisions_cite_job': False,       # a decisions row added on job/<id> must contain <id>, the brief that required it (core W27 rule F)
+        'thin_merge_lines': 500,           # a `merge` on more changed lines than this outside jobs/ and the registries...
+        'thin_merge_files': 20,            # ...or more files, whose newest round cites no evidence, is a warning (core W27 rule E)
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
         'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
                  'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
@@ -171,6 +175,11 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: gates.run_refs_since must be "" or a date YYYY-MM-DD')
     if not isinstance(cfg['policy']['commit_msg_hook'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.commit_msg_hook must be true or false')
+    if not isinstance(cfg['policy']['decisions_cite_job'], bool):
+        raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
+    for t, k in (('policy', 'thin_merge_lines'), ('policy', 'thin_merge_files'), ('jobs', 'claim_hours')):
+        if isinstance(cfg[t][k], bool) or not isinstance(cfg[t][k], (int, float)) or cfg[t][k] < 0:
+            raise ConfigError(f'{CONFIG_NAME}: {t}.{k} must be a number of at least 0')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     return cfg

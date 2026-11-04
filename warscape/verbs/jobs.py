@@ -16,9 +16,12 @@ pull request with a failed check (one `gh pr list` call; `--offline` skips both)
 check runs (one `gh api` call) above the steps. `view` writes one self-contained HTML page (default `_scratch/jobs.html`) and opens it;
 `view --serve` serves it on 127.0.0.1 and the buttons post (id, action) to the server, which checks a per-run token, Origin, Host, content
 type, readiness against fresh branches and no live session of the same name (`claude agents --json`, fail closed), then runs
-`claude --bg` itself; no permission flag is ever passed.
+`claude --bg` itself; no permission flag is ever passed. `review` (and the server, for a review) first claims the round: the remote ref
+refs/claims/<id>/round-<n> (warscape/claims.py, core W27); a round claimed by another session within `[jobs] claim_hours` is refused naming
+it, and an unreadable origin refuses (`--offline` claims nothing). `next`, `review` and `view` print the live claims; `next` and `review`
+release the claims of finished rounds.
 W26: `next` claims before it prints: a create-only `git push` of origin/main to `job/<id>` (`brief/<id>` for a brief); a claim another session
-won moves on to the next ready job (at most 5 tries); `--peek` and `--offline` claim nothing. It orders by (phase, number) and, with `[jobs] pc_state`
+won moves on to the next ready job (at most 5 tries); `--peek` and `--offline` claim and release nothing. It orders by (phase, number) and, with `[jobs] pc_state`
 or `WSC_PC_STATE`, skips a needs_pc build where that folder is absent. `--auto` starts a review only on a green head, a fix once CI has finished,
 one needs_pc row at a time, and prunes dead worktree registrations each tick. `worktrees` prints the stale-worktree warnings (warscape/worktrees.py).
 The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
@@ -49,6 +52,7 @@ def add_arguments(p):
     p.add_argument('--peek', action='store_true', help='next: print what would be picked and the push that would claim it; claim nothing')
     p.add_argument('--prune', action='store_true', help='worktrees: run git worktree prune (registrations whose folder is gone) and say how many it removed')
     p.add_argument('--interval', type=int, default=300, help='view --serve --auto: seconds between autopilot ticks (default %(default)s)')
+    p.add_argument('--session', help='review: the name the round is claimed for (default $WSC_SESSION_ID, $CLAUDE_CODE_SESSION_ID, then user@host)')
 
 
 def refuse(why):
@@ -64,6 +68,8 @@ def run(args, ctx):
 
     def done_ids(rs):   # the job branches branch_rows skips; --all reads them too
         return set() if getattr(args, 'all', False) else {r['id'] for r in rs if r.get('status') == 'done'}
+
+    hours = ctx.config['jobs'].get('claim_hours', 4)
 
     def read(p):
         f = ctx.root / p
@@ -109,7 +115,8 @@ def run(args, ctx):
         srv = J.JobServer(snapshot, J.list_agents, lambda argv: J.start_session(argv, ctx.root), port=args.port, dry_run=args.dry_run,
                           root=ctx.root, log_path=ctx.root / '_scratch' / 'jobs_auto.log', ctx=ctx,
                           main_line=lambda: J.main_html(J.main_state(ctx.config['ci'], ctx.root, args.offline)),
-                          ci=lambda sha: J.branch_ci(ctx.root, sha, args.offline), prune=lambda: W.prune(ctx.root))
+                          ci=lambda sha: J.branch_ci(ctx.root, sha, args.offline), prune=lambda: W.prune(ctx.root),
+                          claim=None if args.offline else lambda jid, n, head, who: J.take_claim(ctx.root, jid, n, head, who, hours))
         print(f'jobs view: serving {srv.url}{" (dry run: nothing is started)" if args.dry_run else ""}; Ctrl+C stops it', flush=True)
         stop = threading.Event()
         if args.auto:
@@ -127,20 +134,22 @@ def run(args, ctx):
 
     mstate = J.print_main_health(ctx.config['ci'], ctx.root, args.offline)   # W22: a red main first, then the pull requests
     J.print_red_prs(ctx.root, args.offline)
-    if args.action == 'next':   # W26: claim, then print (decisions 1-5)
-        rc, text = J.next_claim(ctx.root, rows, lambda: J.remote_heads(ctx.root, args.offline), jid=args.id,
-                                peek=getattr(args, 'peek', False), offline=args.offline)
+    branches = J.remote_branches(ctx.root, args.offline)
+    if args.action == 'next':   # W27: live review claims, releasing those whose job branch is gone (never on --peek); W26: claim, then print
+        peek = getattr(args, 'peek', False)
+        J.print_claims(ctx.root, args.offline, branches, release=not peek)
+        rc, text = J.next_claim(ctx.root, rows, lambda: J.remote_heads(ctx.root, args.offline), jid=args.id, peek=peek, offline=args.offline)
         if rc:
             return refuse(text)
         print(text)
         return 0
 
-    branches = J.remote_branches(ctx.root, args.offline)
     if args.action == 'view':
         out = ctx.root / args.out
         out.parent.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         on_branch = J.branch_rows(ctx.root, branches, args.offline, reg_dir, done=done_ids(rows))
+        J.print_claims(ctx.root, args.offline, branches)
         out.write_text(J.render_view(rows, read, branches, stamp, on_branch, root=ctx.root, ctx=ctx, main_html=J.main_html(mstate)), encoding='utf-8')
         print(f'jobs view: {len(rows)} jobs -> {out}')
         if not args.no_open:
@@ -162,8 +171,25 @@ def run(args, ctx):
                 f'{j} ({(J.branch_state(b).row or {}).get("status", "no row")})' for j, b in sorted(on_branch.items(), key=lambda x: J.num(x[0])))
                 or 'no job branches'))
             return 0
+    if action == 'review':   # W27: release the claims of rounds the branches already have, then claim this round (the push is the lock)
+        J.print_claims(ctx.root, args.offline, branches, {j: J.branch_state(b).rounds for j, b in on_branch.items()}, release=True)
+        if args.offline:
+            print('(round not claimed: --offline)')
+        else:
+            from ..claims import ClaimError, ref, session_name
+            who, n = session_name(getattr(args, 'session', None)), on_branch[jid].rounds + 1
+            try:
+                held, c = J.take_claim(ctx.root, jid, n, on_branch[jid].head, who, hours)
+            except ClaimError as e:
+                return refuse(f'cannot claim round {n} of {jid}: {e}: the claim cannot be proved, so the review does not start '
+                              '(--offline skips the claim, for local tests only)')
+            if not held:
+                return refuse(f'round {n} of {jid} is claimed by {c.session} ({ref(jid, n)}, stale after {hours} h): review another job '
+                              f'(--id) or wait')
+            print(f'Claimed round {n} of {jid} ({ref(jid, n)}) for {who}.')
     rounds = on_branch[jid].rounds   # not_ready has already refused a 4th review and a fix with no round
     print(J.branch_checks(ctx.root, f'job/{jid}', on_branch[jid].head, args.offline))
     title = (on_branch[jid].row or by.get(jid) or {}).get('title', '')
-    print(J.review_steps(jid, rounds) if action == 'review' else J.fix_steps(jid, rounds, title))
+    hb = J.branch_state(on_branch[jid]).handback
+    print(J.review_steps(jid, rounds, hb) if action == 'review' else J.fix_steps(jid, rounds, title, hb))
     return 0

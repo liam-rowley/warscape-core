@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -583,8 +584,10 @@ class MainHealth(unittest.TestCase):
         fake, _ = self.gh()
         ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': self.CFG})
         saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.remote_heads,
-                 jv.fetch_main, jv.claim)
+                 jv.fetch_main, jv.claim, jv.print_claims, jv.take_claim)
         try:
+            jv.print_claims = lambda *a, **k: None   # W27: no claim on the real origin from a test
+            jv.take_claim = lambda *a: (True, None)
             jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
             jv.print_red_prs = lambda root, offline: print('PR #1 job/J9: gates failed')
             jv.remote_branches = lambda root, offline: {'job/J60'}
@@ -602,7 +605,7 @@ class MainHealth(unittest.TestCase):
                 self.assertLess(text.index('Main CI is red'), text.index('PR #1 job/J9'), action)
         finally:
             (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.remote_heads,
-             jv.fetch_main, jv.claim) = saved
+             jv.fetch_main, jv.claim, jv.print_claims, jv.take_claim) = saved
 
 
 class BranchChecks(unittest.TestCase):
@@ -671,8 +674,11 @@ class BranchChecks(unittest.TestCase):
         from warscape.repo import DEFAULTS
         from warscape.verbs import jobs as jverb
         ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': DEFAULTS['ci']})
-        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.print_claims,
+                 jv.take_claim)
         try:
+            jv.print_claims = lambda *a, **k: None   # W27: no claim on the real origin from a test
+            jv.take_claim = lambda *a: (True, None)
             jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
             jv.print_red_prs = lambda root, offline: []
             jv.print_main_health = lambda cfg, root, offline: None
@@ -689,7 +695,8 @@ class BranchChecks(unittest.TestCase):
                 self.assertIn('viewer failed (failure): https://x/v', text, action)
                 self.assertLess(text.index('viewer failed'), text.index(f'J60: {action}'), action)
         finally:
-            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.print_claims,
+             jv.take_claim) = saved
 
 
 def rnd(n, v, jid='J60'):
@@ -1402,6 +1409,167 @@ class AutopilotGates(unittest.TestCase):
         srv.auto_tick()
         self.assertEqual(calls, [])
         self.assertIn('would prune dead worktree registrations', self.lines)
+
+
+class Handback(unittest.TestCase):
+    """W27 (R10): a report beside jobs/<id>/handback.md says what the orchestrator added."""
+    ROW = dict(status='review', brief='jobs/J1/brief.md', report='jobs/J1/report.md')
+
+    def errs(self, report, handback):
+        read = files(jobs__J1__brief_md=BRIEF, jobs__J1__report_md=report, jobs__J1__handback_md=handback)
+        return jv.problems([row(**self.ROW)], read, ['J1'])
+
+    def test_a_handback_without_orchestrator_additions_fails(self):
+        e = self.errs(REPORT, 'The builder said this.\n')
+        self.assertIn('J1: report.md sits beside a handback: say what the orchestrator added (a "## Orchestrator additions" section)', e)
+
+    def test_with_the_section_or_without_a_handback_it_passes(self):
+        self.assertEqual(self.errs(REPORT + '\n## Orchestrator additions\nNone.\n', 'words\n'), [])
+        self.assertEqual(self.errs(REPORT, None), [])
+
+    def test_review_and_fix_steps_name_the_handback(self):
+        self.assertIn('jobs/J1/handback.md', jv.review_steps('J1', 0, handback=True))
+        self.assertNotIn('handback', jv.review_steps('J1', 0))
+        self.assertIn('jobs/J1/handback.md', jv.fix_steps('J1', 1, handback=True))
+
+
+def _g(cwd, *args, check=True, env=None):
+    import os
+    e = {**os.environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t', **(env or {})}
+    return subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', *args],
+                          cwd=cwd, env=e, check=check, capture_output=True, text=True)
+
+
+class ReviewClaim(unittest.TestCase):
+    """W27 (R7): `refs/claims/<id>/round-<n>` on origin; git refuses a second creator, so the push is the lock. Real git, a bare temp origin."""
+
+    def setUp(self):
+        from warscape import claims
+        self.claims = claims
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        t = Path(self._tmp.name).resolve()
+        self.origin = t / 'origin.git'
+        _g(t, 'init', '-q', '--bare', str(self.origin))
+        seed = t / 'seed'
+        _g(t, 'init', '-q', '-b', 'main', str(seed))
+        (seed / 'a.txt').write_text('a\n', encoding='utf-8')
+        _g(seed, 'add', '-A')
+        _g(seed, 'commit', '-q', '-m', 'seed')
+        _g(seed, 'push', '-q', str(self.origin), 'main:main', 'main:job/J1')
+        self.a, self.b = t / 'a', t / 'b'
+        for c in (self.a, self.b):
+            _g(t, 'clone', '-q', str(self.origin), str(c))
+        self.head = _g(self.a, 'rev-parse', 'origin/job/J1').stdout.strip()
+
+    def test_the_first_claimer_wins_and_the_second_is_refused_naming_the_first(self):
+        ok, c = self.claims.take(self.a, 'J1', 1, self.head, 'J1-review-A')
+        self.assertTrue(ok)
+        self.assertEqual((c.jid, c.round, c.session), ('J1', 1, 'J1-review-A'))
+        ok2, c2 = self.claims.take(self.b, 'J1', 1, self.head, 'J1-review-B')
+        self.assertFalse(ok2)
+        self.assertEqual(c2.session, 'J1-review-A')
+        got = _g(self.a, 'ls-remote', str(self.origin), 'refs/claims/*').stdout.split()
+        self.assertEqual(got[1::2], ['refs/claims/J1/round-1'])
+        self.assertTrue(self.claims.take(self.a, 'J1', 1, self.head, 'J1-review-A')[0])   # the holder asking again keeps it
+
+    def test_a_stale_claim_is_taken_over(self):
+        old = int(time.time()) - 5 * 3600
+        self.assertTrue(self.claims.take(self.a, 'J1', 1, self.head, 'old-session', now=old)[0])
+        ok, c = self.claims.take(self.b, 'J1', 1, self.head, 'new-session', hours=4)
+        self.assertTrue(ok)
+        self.assertEqual(self.claims.read(self.a)[0].session, 'new-session')
+
+    def test_a_round_the_branch_already_has_releases_the_claim(self):
+        self.claims.take(self.a, 'J1', 1, self.head, 'S')
+        self.claims.take(self.a, 'J1', 2, self.head, 'S')
+        gone = self.claims.release(self.b, self.claims.read(self.b), {'J1': 1}, {'job/J1'})
+        self.assertEqual([(c.jid, c.round) for c in gone], [('J1', 1)])
+        self.assertEqual([(c.jid, c.round) for c in self.claims.read(self.a)], [('J1', 2)])
+
+    def test_an_unreadable_remote_refuses(self):
+        _g(self.b, 'remote', 'set-url', 'origin', str(self.origin) + '-missing')
+        with self.assertRaises(self.claims.ClaimError):
+            self.claims.take(self.b, 'J1', 1, self.head, 'S')
+        with self.assertRaises(self.claims.ClaimError):
+            self.claims.read(self.b)
+
+    def test_two_jobs_review_runs_leave_one_winner(self):
+        import contextlib
+        import io
+        import types
+        from warscape.repo import DEFAULTS
+        from warscape.verbs import jobs as jverb
+        r = row('J1', status='review', title='T', brief='jobs/J1/brief.md', report='jobs/J1/report.md')
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
+        res = []
+        try:
+            jv.main_rows = lambda ctx: [r]
+            jv.print_red_prs = lambda root, offline: None
+            jv.remote_branches = lambda root, offline: {'job/J1'}
+            jv.branch_rows = lambda *a, **k: {'J1': jv.Branch(r, 0, self.head)}
+            jv.branch_checks = lambda *a, **k: ''
+            jv.print_main_health = lambda cfg, root, offline: None
+            for clone, who in ((self.a, 'first-session'), (self.b, 'second-session')):
+                ctx = types.SimpleNamespace(root=clone, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': DEFAULTS['ci']})
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                    rc = jverb.run(types.SimpleNamespace(action='review', id='J1', offline=False, auto=False, serve=False, all=False,
+                                                         session=who), ctx)
+                res.append((rc, out.getvalue()))
+        finally:
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
+        self.assertEqual(res[0][0], 0, res[0][1])
+        self.assertIn('Claimed round 1 of J1 (refs/claims/J1/round-1) for first-session', res[0][1])
+        self.assertEqual(res[1][0], 1, res[1][1])
+        self.assertIn('round 1 of J1 is claimed by first-session', res[1][1])
+        self.assertNotIn('review branch job/J1', res[1][1])
+
+    def test_the_server_returns_409_for_a_claimed_round(self):
+        held = self.claims.Claim('J4', 1, 'f' * 40, 'J4-review-elsewhere', int(time.time()))
+        srv = jv.JobServer(lambda: (LROWS, files(), set(LBRANCHES), LON_BRANCH), lambda: [], lambda a: 'sid', which=lambda n: n,
+                           claim=lambda jid, n, head, session: (False, held))
+        self.addCleanup(srv.server_close)
+        code, msg, _ = srv.start('J4', 'review', {r['id']: r for r in LROWS}, set(LBRANCHES), LON_BRANCH)
+        self.assertEqual(code, 409, msg)
+        self.assertIn('round 1 of J4 is claimed by J4-review-elsewhere', msg)
+
+    def test_the_server_fails_closed_when_the_claim_cannot_be_read(self):
+        def boom(*a):
+            raise self.claims.ClaimError('git ls-remote origin failed')
+        srv = jv.JobServer(lambda: (LROWS, files(), set(LBRANCHES), LON_BRANCH), lambda: [], lambda a: 'sid', which=lambda n: n, claim=boom)
+        self.addCleanup(srv.server_close)
+        code, msg, _ = srv.start('J4', 'review', {r['id']: r for r in LROWS}, set(LBRANCHES), LON_BRANCH)
+        self.assertEqual(code, 503, msg)
+
+
+class NextWithReviewClaims(unittest.TestCase):
+    """W26 and W27 together: `next` lists the review claims, then claims the job; `--peek` releases no claim."""
+
+    def run_next(self, **flags):
+        import contextlib
+        import io
+        import types
+        from unittest import mock
+        from warscape.repo import DEFAULTS
+        from warscape.verbs import jobs as jverb
+        calls = []
+        ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': {}})
+        args = types.SimpleNamespace(action='next', id=None, offline=False, auto=False, serve=False, all=False, **flags)
+        with mock.patch.multiple(jv, main_rows=lambda ctx: [row('J60', status='queued', title='T')], print_red_prs=lambda *a: None,
+                                 print_main_health=lambda *a: None, remote_branches=lambda *a: {'job/J9'},
+                                 print_claims=lambda root, offline, branches, release=False: calls.append(('claims', branches, release)),
+                                 next_claim=lambda *a, **k: (calls.append(('next', k['peek'])), (0, 'steps'))[1]):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                rc = jverb.run(args, ctx)
+        self.assertEqual((rc, out.getvalue().strip()), (0, 'steps'))
+        return calls
+
+    def test_the_claims_are_listed_and_released_before_the_job_is_claimed(self):
+        self.assertEqual(self.run_next(), [('claims', {'job/J9'}, True), ('next', False)])
+
+    def test_peek_releases_nothing(self):
+        self.assertEqual(self.run_next(peek=True), [('claims', {'job/J9'}, False), ('next', True)])
 
 
 class ThisRepo(unittest.TestCase):
