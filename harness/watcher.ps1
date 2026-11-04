@@ -8,7 +8,7 @@
 param([string]$Root = '', [string]$Adapter = '', [switch]$NoRun)
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.4.0'
+$Version = '1.4.1'
 $SrcDir = $PSScriptRoot
 if (-not $Root) { $Root = Join-Path $SrcDir '..' }
 $Root = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -922,12 +922,25 @@ function Start-WinProbe($out) {
     else { $out.Add("WARNING: the window probe in $rel did not report ready within 30 s; the launch goes ahead") }
     return $dir
 }
+# W38: a refusal this launch's game wrote before it exited (the proxy writes `refused`, then exits with exit_code), read once more when the
+# game is already gone, so a fast refusal keeps its detail. Its pid must be the game's; with no pid seen, the file must be written since the launch.
+function Headless-Refused([string]$sp, [int]$gpid, [datetime]$sinceUtc) {
+    if (-not (Test-Path -LiteralPath $sp)) { return $null }
+    $st = Read-JsonRetry $sp 3
+    if (-not $st -or $st.state -ne 'refused') { return $null }
+    if ($gpid) { if ([int]$st.pid -ne $gpid) { return $null } }
+    elseif ((Get-Item -LiteralPath $sp).LastWriteTimeUtc -lt $sinceUtc.AddSeconds(-1)) { return $null }
+    return "HEADLESS FAILED: the proxy refused the launch: $($st.detail) (exit code $($st.exit_code); nothing was shown on a real monitor)"
+}
 # Waits for the proxy's status file to name this pid on_virtual (ok) or refused; anything else in time is fail closed (the game is killed).
-function Headless-Wait([int]$waitS, $out) {
+function Headless-Wait([int]$waitS, $out, [datetime]$sinceUtc) {
     $hl = $A.headless
     $sp = GamePath $hl.status_file
     $g = @(Get-GameProcs)
-    if (-not $g.Count) { return "HEADLESS FAILED: $($A.game_image) is not running after the start (exit code $($hl.exit_code) = the proxy refused; read $($hl.status_file))" }
+    if (-not $g.Count) {
+        $r = Headless-Refused $sp 0 $sinceUtc; if ($r) { return $r }
+        return "HEADLESS FAILED: $($A.game_image) is not running after the start (exit code $($hl.exit_code) = the proxy refused; read $($hl.status_file))"
+    }
     $gpid = $g[0].Id
     $deadline = (Get-Date).AddSeconds($waitS)
     $last = '(no status yet)'
@@ -947,7 +960,10 @@ function Headless-Wait([int]$waitS, $out) {
                 return "HEADLESS FAILED: the proxy refused the launch: $($st.detail) (exit code $($st.exit_code); nothing was shown on a real monitor)"
             }
         }
-        if (-not (Get-Process -Id $gpid -ErrorAction SilentlyContinue)) { return "HEADLESS FAILED: the game exited before reporting on_virtual (last status: $last)" }
+        if (-not (Get-Process -Id $gpid -ErrorAction SilentlyContinue)) {
+            $r = Headless-Refused $sp $gpid $sinceUtc; if ($r) { return $r }   # W38: it wrote `refused` after this loop's read, then exited
+            return "HEADLESS FAILED: the game exited before reporting on_virtual (last status: $last)"
+        }
         Start-Sleep -Milliseconds 250
     }
     [void](Kill-Game 'headless status timeout' $out)
@@ -973,7 +989,7 @@ function Launch-Job($hdr, $c, $o) {
     if ($g.Count) { $o.Add("running: $($A.game_image) pid $($g[0].Id)") } else { $o.Add("WARNING: $($A.game_image) not seen in the process list after the start (it may have exited at once)") }
     if ($headless) {
         $ws = 180; if ($hdr['headless_wait_s']) { $ws = [int]$hdr['headless_wait_s'] }
-        $err = Headless-Wait $ws $o
+        $err = Headless-Wait $ws $o ($LaunchAt.ToUniversalTime())   # W38: a status written since the launch is its own
         if ($err) { return $err }
     }
     if ($hdr['wait_log']) { $ws = 120; if ($hdr['wait_s']) { $ws = [int]$hdr['wait_s'] }; if (-not (Wait-LogLine $hdr['wait_log'] $ws $o)) { return "launch: the log line '$($hdr['wait_log'])' did not appear" } }

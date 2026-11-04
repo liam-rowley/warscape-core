@@ -35,7 +35,10 @@ static StressOut Stress(unsigned seed, int rounds) {
             if (stop.load()) ++idle;
             switch (CapOnPresent(c, frame, frames)) {
             case CapStep::start:   // a recording starts only with a waiter and never over another
-                if (open || waiting.load() != 1) ++errors;
+                // W38: `waiting` is read after this thread's CAS, so the ctl may have timed out twice, abandoned the capture and stored
+                // waiting = 0 in between, all legitimately. The ctl clears `waiting` only after it moved the state out of Recording (abandon)
+                // or saw Done (made by this thread, after this start), so "no waiter" is a real break only while the state is still Recording.
+                if (open || (waiting.load() != 1 && c.Load() == kCapRecording)) ++errors;
                 open = true; frame = 0; frames = ctlFrames.load(); id = ctlId.load();
                 break;
             case CapStep::next_frame: if (!open) ++errors; ++frame; break;
