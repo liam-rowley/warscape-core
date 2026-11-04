@@ -221,6 +221,19 @@ class Sources(Env):
         self.assertIn('proxy/core/stray.cpp', out)
         self.assertFalse(marker.exists(), out)
 
+    def test_failing_fixture_build_sh_takes_a_clean_list_past_the_sources_check(self):
+        # the PC's --docker route runs build.sh in Git Bash with a Windows python3, which prints CRLF: a CR left on each name made the
+        # container's compile fail (local --docker build, 2026-11-04). A clean list reaches gen_tables.py (a stub that exits 7 here).
+        bash = gitbash.bash_or_skip(self)
+        g = self.repo()
+        marker = g / 'gen_tables_ran'
+        write(g / 'proxy/tools/gen_tables.py', f'open({str(marker)!r}, "w").close()\nraise SystemExit(7)\n')
+        git('add', '-A', cwd=g); git('commit', '-q', '-m', 'stub', cwd=g)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('GIT_', 'WSP_'))}
+        r = subprocess.run([bash, 'proxy/tools/build.sh', 'dll'], cwd=g, capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        self.assertTrue(marker.exists())
+
 
 class Toolchain(unittest.TestCase):
     """W24 (C25): toolchain.py pins the image and the mingw-w64 packages; `check` reads dpkg with an injected runner."""

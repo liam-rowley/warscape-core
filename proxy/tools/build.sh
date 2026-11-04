@@ -30,9 +30,11 @@ fi
 SOURCES=""
 if [[ "$WHAT" == dll || "$WHAT" == all || "$WHAT" == repro ]]; then
   if [[ -n "${WSP_SOURCES:-}" ]]; then SOURCES="$WSP_SOURCES"
-  else SOURCES="$(python3 "$OWN/proxy/tools/build_id.py" --sources | tr '\n' ' ')" || { echo "build.sh: refused: the DLL compiles tracked sources only (above)"; exit 2; }
+  # tr -d '\r': a Windows python3 (Git Bash, the PC's --docker route) ends each line with CRLF, and `$(...)` strips only the last CR
+  else SOURCES="$(python3 "$OWN/proxy/tools/build_id.py" --sources | tr -d '\r' | tr '\n' ' ')" || { echo "build.sh: refused: the DLL compiles tracked sources only (above)"; exit 2; }
   fi
   [[ -n "${SOURCES// /}" ]] || { echo "build.sh: no tracked *.cpp in $SRC"; exit 2; }
+  re='[^A-Za-z0-9_. +-]'; [[ ! "$SOURCES" =~ $re ]] || { echo "build.sh: a source name outside [A-Za-z0-9_.+-]: $(printf '%q' "$SOURCES")"; exit 2; }
 fi
 
 if [[ $DOCKER == 1 ]]; then
