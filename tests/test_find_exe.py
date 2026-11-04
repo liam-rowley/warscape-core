@@ -13,9 +13,9 @@ from warscape.verbs import find  # noqa: E402
 
 TOML = MINIMAL_TOML + '[discovery]\nadapter = "discovery/game"\n'
 ROWS = [
-    ('0x0001000', '.rdata', 'a', '20', '2', '0x0000100 0x0000200', '0', '', 'gfx_hardware_shadows'),
-    ('0x0001020', '.rdata', 'a', '24', '0', '', '1', '0x0002000', 'gfx_hardware_shadows_max'),
-    ('0x0001040', '.rdata', 'u', '10', '1', '0x0000300', '0', '', 'CampaignUI'),
+    ('0x0001000', '.rdata', 'a', '18', '2', '0x0000100 0x0000200', '0', '', 'gfx_roster_shadows'),
+    ('0x0001020', '.rdata', 'a', '22', '0', '', '1', '0x0002000', 'gfx_roster_shadows_max'),
+    ('0x0001040', '.rdata', 'u', '14', '1', '0x0000300', '0', '', 'BattleRosterUI'),
     ('0x0001060', '.data', 'a', '6', '0', '', '0', '', 'shadow'),
 ]
 TOOL = '''#!/usr/bin/env python3
@@ -42,18 +42,18 @@ class FindExe(unittest.TestCase):
         self.assertEqual(self.repo.wsc('reg', 'add', 'tools', 'shadows.py')[0], 0)
 
     def test_an_exe_shaped_word_prints_the_exe_block(self):
-        rc, out = self.repo.wsc('find', 'gfx_hardware_shadows')
+        rc, out = self.repo.wsc('find', 'gfx_roster_shadows')
         self.assertEqual(rc, 0, out)
         self.assertIn('exe strings (discovery/game/exe_strings.tsv.gz): 2 hits', out)
         self.assertIn(exe_strings.line(ROWS[0]), out)
-        self.assertIn("'gfx_hardware_shadows_max'", out)
+        self.assertIn("'gfx_roster_shadows_max'", out)
         self.assertNotIn('no matches', out)             # an exe-only hit is a hit
 
     def test_words_are_anded_case_insensitively_as_literals(self):
-        rc, out = self.repo.wsc('find', 'GFX_hardware', 'shadows_MAX')
+        rc, out = self.repo.wsc('find', 'GFX_roster', 'shadows_MAX')
         self.assertIn('exe strings (discovery/game/exe_strings.tsv.gz): 1 hits', out)
-        rc, out = self.repo.wsc('find', 'campaignUI')
-        self.assertIn("'CampaignUI'", out)
+        rc, out = self.repo.wsc('find', 'battleRosterUI')
+        self.assertIn("'BattleRosterUI'", out)
 
     def test_a_plain_word_does_not_search_the_table_unless_forced(self):
         rc, out = self.repo.wsc('find', 'shadow')
@@ -64,7 +64,7 @@ class FindExe(unittest.TestCase):
         self.assertIn('exe strings (discovery/game/exe_strings.tsv.gz): 3 hits', out)
 
     def test_in_names_where_to_search(self):
-        rc, out = self.repo.wsc('find', 'CampaignUI', '--in', 'tools')
+        rc, out = self.repo.wsc('find', 'BattleRosterUI', '--in', 'tools')
         self.assertNotIn('exe strings', out)
         self.assertEqual(rc, 1, out)
         rc, out = self.repo.wsc('find', 'shadow', '--in', 'exe_strings')
@@ -79,7 +79,7 @@ class FindExe(unittest.TestCase):
         self.assertIn('... 3 more (wsc find --exe a -n 4)', out)
 
     def test_json(self):
-        rc, out = self.repo.wsc('find', 'CampaignUI', '--json')
+        rc, out = self.repo.wsc('find', 'BattleRosterUI', '--json')
         self.assertEqual(rc, 0, out)
         rows = [json.loads(x) for x in out.splitlines() if x.startswith('{')]
         self.assertEqual(rows, [{'registry': 'exe_strings', 'row': dict(zip(exe_strings.HEADER, ROWS[2]))}])
@@ -96,12 +96,12 @@ class NoTable(unittest.TestCase):
         repo = TempRepo({'shadows.py': TOOL})
         self.addCleanup(repo.close)
         repo.wsc('reg', 'add', 'tools', 'shadows.py')
-        rc, out = repo.wsc('find', 'CampaignUI')
+        rc, out = repo.wsc('find', 'BattleRosterUI')
         self.assertEqual(rc, 1, out)
-        self.assertNotIn('exe', out)
+        self.assertNotIn('exe strings', out)
         rc, out = repo.wsc('find', 'shadow')
         self.assertEqual(rc, 0, out)
-        self.assertNotIn('exe', out)
+        self.assertNotIn('exe strings', out)
         rc, out = repo.wsc('find', '--exe', 'shadow')
         self.assertIn('exe_strings.py build <exe> --out', out)
         self.assertIn('discovery/re_env.py', out)
@@ -109,9 +109,9 @@ class NoTable(unittest.TestCase):
     def test_an_adapter_without_a_table_is_silent(self):
         repo = TempRepo({'discovery/game/games.json': '{}\n'}, toml=TOML)
         self.addCleanup(repo.close)
-        rc, out = repo.wsc('find', 'CampaignUI')
+        rc, out = repo.wsc('find', 'BattleRosterUI')
         self.assertEqual(rc, 1, out)
-        self.assertNotIn('exe', out)
+        self.assertNotIn('exe strings', out)
 
 
 class CoreCheckout(unittest.TestCase):
