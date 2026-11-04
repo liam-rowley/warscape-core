@@ -350,28 +350,59 @@ GATES = [
 NAMES = [n for n, _ in GATES]
 
 
-def selected(ctx, fast=False, only=None):
+def skips(ctx):
+    """`{gate: decision id}` from `[gates] skip` (W28): each entry is `"<gate>:<decision id>"`, and the id is a row of the `[policy] decisions`
+    file, so a skip is never silent and always says why. A bare name, an empty id or an id the file lacks is a ValueError that names the fix."""
+    entries, out, errs = ctx.config['gates']['skip'], {}, []
+    path = ctx.config['policy']['decisions']
+    text = _read(ctx, path) if path else None
+    for e in entries:
+        gate, _, did = str(e).partition(':')
+        gate, did = gate.strip(), did.strip()
+        if not did:
+            errs.append(f'"{e}" has no decision id: write "{gate}:<decision id>", the {path or "[policy] decisions"} row that says why it is skipped')
+        elif text is None:
+            errs.append(f'"{e}": no decisions file to find {did} in (set [policy] decisions in wsc.toml)' if not path else f'"{e}": {path} is missing')
+        elif not re.search(rf'^\|\s*{re.escape(did)}\s*\|', text, re.M):
+            errs.append(f'"{e}": {did} is not a row of {path} (add the decision first, then skip under its id)')
+        else:
+            out[gate] = did
+    if errs:
+        raise ValueError('[gates] skip: ' + '; '.join(errs))
+    return out
+
+
+def selected(ctx, fast=False, only=None, skipped=None):
     """The gate names to run, core gates first, then the repo's `gates`-stage modules in load order. `--fast`: the core gates of
-    `[gates] fast` (default: all but `tests`) plus every game gate whose FAST is true or that `[gates] fast` names."""
+    `[gates] fast` (default: all but `tests`) plus every game gate whose FAST is true or that `[gates] fast` names. `[gates] skip`
+    (`skips`) drops a gate unless `--only` names it; `skipped`, a list, gets `(gate, decision id)` for each gate the skip dropped."""
     from . import gatemods
     gc = ctx.config['gates']
     mods = {m.name: m for m in gatemods.load(ctx) if 'gates' in m.stages}
     every = NAMES + list(mods)
-    unknown = [n for n in (only or []) + gc['fast'] + gc['skip'] if n not in every]
+    skip = skips(ctx)
+    unknown = [n for n in (only or []) + gc['fast'] + list(skip) if n not in every]
     if unknown:
         raise ValueError(f'unknown gate(s) {", ".join(unknown)}; gates are: {", ".join(every)}')
-    names = only or [n for n in every if n not in gc['skip']]
+    names = only or list(every)
     if fast and not only:
         core_fast = (lambda n: n in gc['fast']) if gc['fast'] else (lambda n: n != 'tests')
         names = [n for n in names if ((mods[n].fast or n in gc['fast']) if n in mods else core_fast(n))]
+    if not only:
+        if skipped is not None:
+            skipped += [(n, skip[n]) for n in names if n in skip]
+        names = [n for n in names if n not in skip]
     return names
 
 
 def run(ctx, fast=False, only=None):
     from . import gatemods
     mods = {m.name: m for m in gatemods.load(ctx)}
-    out = []
-    for name in selected(ctx, fast, only):
+    out, skipped = [], []
+    names = selected(ctx, fast, only, skipped)
+    # a skip is a warn line, never silent (W28): the gate, and the decision that skips it
+    out += [Result(n, 'warn', f'skipped {n}: {did}') for n, did in skipped]
+    for name in names:
         if name in mods:
             out.append(gatemods.call(mods[name], gatemods.StageCtx(ctx, 'gates', {})))
             continue
