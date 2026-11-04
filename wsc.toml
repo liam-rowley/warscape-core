@@ -49,7 +49,7 @@ commit = false
 [jobs]
 id_prefix = "W"
 semver_from = 40     # W29 (C27): from W40 on a row carries `semver`, its brief a `Semver:` line, and its job/ branch leaves VERSION to the release workflow
-usage_from = 41      # W31: from W41 on a report needs its `Usage:` line. No usage_cmd here (the core has no transcripts): `wsc jobs usage <id> --write --from-json <file>`
+usage_from = 42      # W31: from W42 on a report needs its `Usage:` line. No usage_cmd here (the core has no transcripts): `wsc jobs usage <id> --write --from-json <file>`
 
 [jobs.text]
 wsc = "python3 wsc.py"
