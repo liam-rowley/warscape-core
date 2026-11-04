@@ -1,3 +1,18 @@
+## Round 2 (2026-11-04, branch job/W28 at b181c20)
+
+**Verdict: merge.**
+
+All three round-1 should-fix items are answered in `## Fix round 1` of the report and hold up.
+Checked: local `python3 wsc.py gates` at b181c20: 13 ok, 3 warn (hooks path, ci_render W23 bootstrap note, 5 platform skips), 0 failed; 762 host tests passed; `doc_paths` ok over 17 living docs.
+CI on the branch head: `gates` on ubuntu and windows, `proxy` and `harness-windows` green. `origin/main` (60ba80e) is already merged in, so there is no conflict.
+- should-fix 1 (`doc_paths` is an error): fixed. `gates.py` returns `error`; 14 `path_ignore` entries, mostly prefix globs, as predicted; stale lines edited; B87 closed.
+- should-fix 2 (decision number): fixed. The row is C30, the next free number after main's C29; VERSION 0.35.0 follows main's 0.34.0.
+- should-fix 3 (ignored paths reported): fixed. `../` tokens are dropped before `git check-ignore --stdin`, and any exit code other than 0 or 1 is now a gate error. A host test covers it.
+
+### later
+- Plan PR #87 also carries a C28 and renumbers when it lands. That is its own renumber, not this job's.
+- Main's `doc_size` gate was red on `docs/CONSUMING.md`; this branch moved two sections to `CONSUMING_OPTIONS.md`. Whichever of this branch and the main fix lands second keeps only one move.
+
 ## Round 1 (2026-11-04, branch job/W28 at 3009a43)
 
 **Verdict: merge after fixes.**
