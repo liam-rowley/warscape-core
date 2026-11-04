@@ -81,7 +81,7 @@ so the orchestrator's merge of `main` sets 0.26.0.
 
 ## Version
 0.26.0, with decision C24. The builder had taken 0.25.0 after merging `main` at 0.24.0 (W12). W30 then took 0.25.0, so the orchestrator
-merged `main` again and set 0.26.0. W23 also holds 0.26.0 and C24 on its branch, and is renumbered to 0.27.0 and C25.
+merged `main` again and set 0.26.0. W23 also holds 0.26.0 and C24 on its branch; whichever of the two merges second renumbers (decision rows number from the base).
 
 ## Deviations from the brief, and why
 1. **C24, not C23.** W12 took C23.
