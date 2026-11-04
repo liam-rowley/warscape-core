@@ -43,6 +43,10 @@ BATTLE_SCENES = ('battle_deploy', 'battle', 'naval')   # the proxy's scene track
 PROBE_ONLY = ('key', 'click', 'wait')   # rule 78: never part of a scenario row, a generated file or the acceptance script
 VERBS = ('scene', 'cam', 'shot', 'order', 'pause', 'speed', 'reset', 'perf', 'state')
 POSE_FIELDS = ('x', 'y', 'z', 'yaw', 'pitch', 'fov')
+# proxy.log's first two lines (docs/PROXY_BUILD.md): the launch line names the DLL's build id; the self_hash line (W24) its own file sha256,
+# size and build, exactly as dllmain.cpp LogSelfHash writes it. A log with no self_hash line comes from a DLL older than W24.
+LAUNCH_RE = re.compile(r'd3d9\.dll build (\S+) loaded')
+SELF_HASH_RE = re.compile(r'\bself_hash: sha256 ([0-9a-f]{64}) bytes ([0-9]+) build (\S+) \(hashed in ([0-9]+) ms\)')
 
 
 def bash():
@@ -370,9 +374,11 @@ class Pc:
         ini = ini_values(self.ini_path().read_text(encoding='utf-8')) if self.ini_path().exists() else {}
         # the DLL's own build id (a hash of its inputs' content, proxy/tools/build_id.py: what rule 79 compares), from its load line; the kit id names HEAD at kit time
         log = self.ini_path().parent / ident_mod(self.a) / 'logs' / 'proxy.log'
-        m = re.search(r'd3d9\.dll build (\S+) loaded', log.read_text(encoding='utf-8', errors='replace')) if log.exists() else None
+        text = log.read_text(encoding='utf-8', errors='replace') if log.exists() else ''
+        m, h = LAUNCH_RE.search(text), SELF_HASH_RE.search(text)
+        # dll_sha256 (W24): the DLL's own file sha256 from its self_hash line; None for a DLL older than W24 or a failed hash (W9 records and compares it)
         return {'build': m.group(1) if m else rec.get('build_id'), 'kit': rec.get('kit_id'), 'backend': ini.get('proxy.backend'),
-                'size': ini.get('headless.size') if ini.get('headless.enabled') == '1' else 'windowed'}
+                'size': ini.get('headless.size') if ini.get('headless.enabled') == '1' else 'windowed', 'dll_sha256': h.group(1) if h else None}
 
     def shot(self, name, out_dir):
         """shot.sh into out_dir/<name>.jpg: (path, bytes)."""

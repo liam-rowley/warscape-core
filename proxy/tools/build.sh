@@ -235,6 +235,17 @@ if [[ "$WHAT" == smoke ]]; then
   # 1) default config: the stand-in exe is not the pinned build -> MISMATCH, pass-through, notice, system fallback (no DXVK), clean detach
   run; check "exe_guard: MISMATCH"; check "PASS-THROUGH"; check "patch_engine: not run"; check "backend: dxvk unavailable"; check "process detach"
   [[ -f "$G/$MOD/EXE_MISMATCH.txt" ]] || { echo "build.sh smoke: no notice"; exit 1; }
+  #    W24 (C24): the second log line is the DLL's own file sha256, and it is the copied d3d9.dll's: sha256, bytes and the launch line's build
+  SELF="$(sed -n 2p "$G/$MOD/logs/proxy.log" | grep -o 'self_hash: sha256 [0-9a-f]\{64\} bytes [0-9]* build [^ ]* (hashed in [0-9]* ms)' || true)"
+  [[ -n "$SELF" ]] || { echo "build.sh smoke: line 2 of the log is not a self_hash line"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  read -r _ _ SH_HEX _ SH_BYTES _ SH_BUILD _ _ SH_MS _ <<< "$SELF"
+  LAUNCH_BUILD="$(grep -o 'd3d9\.dll build [^ ]* loaded' "$G/$MOD/logs/proxy.log" | head -1 | cut -d' ' -f3)"
+  DLL_HEX="$(sha256sum "$G/d3d9.dll" | cut -c1-64)"; DLL_BYTES="$(wc -c < "$G/d3d9.dll" | tr -d ' ')"
+  if [[ "$SH_HEX" != "$DLL_HEX" || "$SH_BYTES" != "$DLL_BYTES" || "$SH_BUILD" != "$LAUNCH_BUILD" ]]; then
+    echo "build.sh smoke: self_hash differs from d3d9.dll: log sha256 $SH_HEX bytes $SH_BYTES build $SH_BUILD; file sha256 $DLL_HEX bytes $DLL_BYTES; launch build $LAUNCH_BUILD"
+    exit 1
+  fi
+  echo "build.sh smoke: self_hash matches d3d9.dll (sha256 $SH_HEX, $SH_BYTES bytes, build $SH_BUILD, hashed in $SH_MS ms under wine)"
   # 2) developer override + system backend + an unknown key: engine path on, patch engine runs and refuses every site (none of the
   #    adapter's engine_sites exist in the stand-in exe; any count, J15 added the first), notice removed, unknown key warned
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\nbogus=1\r\n' > "$G/$INI"

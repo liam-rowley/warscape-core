@@ -1,5 +1,6 @@
 // dllmain.cpp - start-up order of the proxy (game-agnostic; the game supplies Adapter()).
-//   1. folders, config file, launch id, the per-launch log (UTC) - nothing engine-side
+//   1. folders, config file, launch id, the per-launch log (UTC) - nothing engine-side; its first line is the launch line, its second the
+//      DLL's own file sha256 (self_hash, W24; docs/PROXY_BUILD.md), hashed here on every launch, second processes and proxy.enabled=0 included
 //   2. crash capture
 //   3. the exe-identity guard, ONCE, before any hook, patch or engine read -> Rt().plan (guard.h PlanEngine)
 //   4. the runtime patch engine, only when Rt().plan.patches
@@ -7,6 +8,7 @@
 //   6. headless runs (headless.cpp), only when headless.enabled; refused (exit) when the plan forbids hooks or the proxy is off
 // The backend d3d9 loads later, at the first export call (backend.cpp). Loader lock: Win32 file and memory calls only.
 #include "runtime.h"
+#include "sha256.h"
 #include "ui_host.h"
 #include "gesture_host.h"
 #include <vector>
@@ -53,6 +55,19 @@ LogLevel LevelOf(const std::string& s) {
     return s == "debug" ? LogLevel::Debug : s == "warn" ? LogLevel::Warn : s == "error" ? LogLevel::Error : LogLevel::Info;
 }
 
+// The DLL's own FILE sha256 (W24, C24): what sha256sum, the kit manifest and build.sh's build line give for this d3d9.dll (the mapped image
+// is relocated and section-aligned, so only the file's hash compares). Synchronous under the loader lock, through the guard's read loop:
+// CreateFileW, ReadFile, CloseHandle and GetTickCount only; no library load, no crypto provider, no thread, no wait (test_guard lints it).
+// The line is W9's contract; its parser is harness/ctl.py SELF_HASH_RE.
+void LogSelfHash(const std::wstring& dll) {
+    Sha256 h; uint64_t bytes = 0; std::string err;
+    const DWORD t0 = GetTickCount();
+    if (ReadChunks(dll, "the DLL", [](void* c, const uint8_t* data, size_t n) { ((Sha256*)c)->Update(data, n); }, &h, bytes, err))
+        LOGI("self_hash: sha256 %s bytes %llu build %s (hashed in %lu ms)", h.HexDigest().c_str(), (unsigned long long)bytes, WSP_BUILD_ID,
+             GetTickCount() - t0);
+    else LOGW("self_hash: unavailable: %s", err.c_str());
+}
+
 void Init(HMODULE self) {
     Runtime& rt = Rt();
     const GameAdapter& ad = Adapter();
@@ -85,6 +100,7 @@ void Init(HMODULE self) {
     wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
     LOGI("launch %s: %s proxy d3d9.dll build %s loaded into %ls (pid %lu, base %p)", rt.launchId.c_str(), ad.gameName, WSP_BUILD_ID, exe,
          GetCurrentProcessId(), (void*)GetModuleHandleW(nullptr));
+    LogSelfHash(dll);                             // the second line of every log
     LOGI("dll %ls", dll.c_str());
     LOGI("config: %ls %s", rt.configPath.c_str(), haveFile ? "read" : "not found: every key at its default");
     for (size_t i = 0; i < ad.nKeys; ++i)
