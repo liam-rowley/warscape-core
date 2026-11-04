@@ -223,16 +223,17 @@ class W27ReviewerCode(unittest.TestCase):
     """Rule A: a round whose own commits change a file outside jobs/<id>/ and the job's row must say `merge after fixes`."""
 
     def test_a_reviewer_code_commit_under_merge_is_refused_naming_shas_and_paths(self):
-        e, _ = w27([BUILD, ('c2', 'R1', ['warscape/y.py', 'registries/jobs/J1.json'], rv((1, 'merge')))])
-        self.assertTrue(any('c2' in x and 'warscape/y.py' in x and 'write the verdict `merge after fixes`' in x for x in e), e)
+        e, w = w27([BUILD, ('c2', 'R1', ['warscape/y.py', 'registries/jobs/J1.json'], rv((1, 'merge')))])
+        self.assertEqual(e, [])   # a warning since the scan of the merged branches (kill criterion: more than 3 beyond the audit's)
+        self.assertTrue(any('c2' in x and 'warscape/y.py' in x and 'write the verdict `merge after fixes`' in x for x in w), w)
 
     def test_a_separate_code_commit_by_the_reviewer_is_part_of_its_round(self):
-        e, _ = w27([BUILD, ('c2', 'R1', ['docs/REVIEW.md'], None), ('c3', 'R1', [], rv((1, 'merge')))])
-        self.assertTrue(any('c2' in x and 'docs/REVIEW.md' in x for x in e), e)
+        _, w = w27([BUILD, ('c2', 'R1', ['docs/REVIEW.md'], None), ('c3', 'R1', [], rv((1, 'merge')))])
+        self.assertTrue(any('c2' in x and 'docs/REVIEW.md' in x for x in w), w)
 
     def test_the_same_change_under_merge_after_fixes_passes_rule_a(self):
-        e, _ = w27([BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes')))])
-        self.assertFalse(any('a fresh round reviews your change' in x for x in e), e)
+        e, w = w27([BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes')))])
+        self.assertFalse(any('a fresh round reviews your change' in x for x in e + w), e + w)
 
     def test_a_reviewer_commit_of_review_md_and_the_row_only_passes(self):
         e, w = w27([BUILD, ('c2', 'R1', ['registries/jobs/J1.json', 'jobs/J1/notes.md'], rv((1, 'merge')))])
@@ -241,11 +242,11 @@ class W27ReviewerCode(unittest.TestCase):
     def test_code_written_by_round_1_is_reviewed_by_round_2(self):
         steps = [BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes'))), FIX1,
                  ('c4', 'R2', ['registries/jobs/J1.json'], rv((2, 'merge'), (1, 'merge after fixes')))]
-        self.assertEqual(w27(steps)[0], [])
+        self.assertEqual(w27(steps), ([], []))
 
     def test_an_unattributed_code_commit_after_the_last_round_counts_for_it(self):
-        e, _ = w27([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'X9', ['warscape/z.py'], None)])
-        self.assertTrue(any('c3' in x and 'warscape/z.py' in x for x in e), e)
+        _, w = w27([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'X9', ['warscape/z.py'], None)])
+        self.assertTrue(any('c3' in x and 'warscape/z.py' in x for x in w), w)
 
 
 class W27FreshRounds(unittest.TestCase):
@@ -321,8 +322,9 @@ class W27Evidence(unittest.TestCase):
         self.assertEqual(w27(self.OK, report=rep), ([], []))
 
     def test_an_unmerged_job_branch_is_an_error_and_a_merged_one_passes(self):
-        e, _ = w27(self.OK, report='Built on `job/J9`.\n', refs={'job/J9': 'unmerged'})
-        self.assertTrue(any('job/J9' in x and 'evidence on an unmerged branch cannot be opened from main' in x for x in e), e)
+        e, w = w27(self.OK, report='Built on `job/J9`.\n', refs={'job/J9': 'unmerged'})
+        self.assertEqual(e, [])   # a warning since the scan of the merged branches (13 name an open branch in passing)
+        self.assertTrue(any('job/J9' in x and 'evidence on an unmerged branch cannot be opened from main' in x for x in w), w)
         self.assertEqual(w27(self.OK, report='Built on `job/J9`.\n', refs={'job/J9': 'merged'}), ([], []))
 
     def test_a_squash_merged_job_branch_passes_by_its_done_row_on_the_base(self):
@@ -334,9 +336,9 @@ class W27Evidence(unittest.TestCase):
         self.assertEqual(w27(self.OK, report='see brief/J9\n', refs={'brief/J9': 'unmerged'}, base=base)[0], [])
 
     def test_an_origin_ref_is_judged_and_origin_main_and_the_branch_itself_are_not(self):
-        e, _ = w27(self.OK, report='see origin/spike-x and origin/main and job/J1\n', refs={'origin/spike-x': 'unmerged', 'job/J1': 'unmerged'})
-        self.assertEqual(len(e), 1, e)
-        self.assertIn('origin/spike-x', e[0])
+        _, w = w27(self.OK, report='see origin/spike-x and origin/main and job/J1\n', refs={'origin/spike-x': 'unmerged', 'job/J1': 'unmerged'})
+        self.assertEqual(len(w), 1, w)
+        self.assertIn('origin/spike-x', w[0])
 
     def test_a_branch_the_clone_lacks_is_a_warning(self):
         e, w = w27(self.OK, report='napoleon job/J30\n')

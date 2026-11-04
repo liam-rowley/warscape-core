@@ -178,9 +178,12 @@ class CoreMode(Branches, unittest.TestCase):
     def w27_round(n, v, extra=''):
         return f'## Round {n} (2026-11-04, branch job/W900 at abc123{n})\n\n**Verdict: {v}.**\n{extra}\n'
 
-    def test_w27_a_reviewer_code_commit_under_merge_is_refused(self):
-        res = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n'})])
-        self.assertRefused(res, 'lib/reviewer.py', 'write the verdict `merge after fixes`; a fresh round reviews your change', JUDGED)
+    def test_w27_a_reviewer_code_commit_under_merge_warns(self):
+        rc, out, err = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n'})])
+        self.assertEqual(rc, 0, out + err)   # a warning: the scan of the merged job branches (the brief's kill criterion)
+        self.assertIn('policy: warning: round 1 of jobs/W900/review.md says merge', out)
+        self.assertIn('lib/reviewer.py', out)
+        self.assertIn('write the verdict `merge after fixes`; a fresh round reviews your change', out)
 
     def test_w27_b_round_2_by_the_round_1_session_is_refused(self):
         r1 = self.w27_round(1, 'merge after fixes')
@@ -205,7 +208,8 @@ class CoreMode(Branches, unittest.TestCase):
         git(self.d, 'update-ref', 'refs/remotes/origin/job/W901', 'job/W901')
         rep = '# W900 report: a test job\n\nEvidence: `harness/runs/20261104_gone` and job/W901.\n'
         res = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge')})], report=rep)
-        self.assertRefused(res, 'harness/runs/20261104_gone', 'exists in neither', 'job/W901', 'evidence on an unmerged branch', JUDGED)
+        self.assertRefused(res, 'harness/runs/20261104_gone', 'exists in neither', JUDGED)
+        self.assertIn('policy: warning: jobs/W900/report.md cites job/W901: evidence on an unmerged branch', res[1])
 
     def test_w27_warnings_print_before_the_verdict_and_keep_the_exit_code(self):
         rep = '# W900 report: a test job\n\nBuilt on commit `0badc0ffee1`.\n'

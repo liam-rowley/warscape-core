@@ -200,7 +200,9 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
                 errs.append(f'the review was written by a session that also wrote the report ({", ".join(both)}): '
                             f'a job is never reviewed by the chat that built it' + (f" ({T['rules_ref']})" if T.get('rules_ref') else ''))
             if reads is not None:   # rules A and B: who wrote each round, and what else its commits changed
-                errs += round_problems(jid, cfg, reads, set().union(*by['report.md']), head_file(f'{jd}/{jid}/review.md'))
+                e, w = round_problems(jid, cfg, reads, set().union(*by['report.md']), head_file(f'{jd}/{jid}/review.md'))
+                errs += e
+                warns += w
         if reads is not None:
             rev = f'{jd}/{jid}/review.md'
             errs += append_only_problems(rev, base_file(rev), reads.history(rev), head_file(rev), base_ref or 'the base branch')   # rule C
@@ -289,7 +291,8 @@ def append_only_problems(path, base_text, history, head_text, base_ref):
 
 
 def round_problems(jid, cfg, reads, builder, head_review):
-    """Rules A and B over the commits of the branch (`reads.commits()`, `reads.history(review.md)`). A review commit belongs to the newest
+    """(errors, warnings): rule B's errors and rule A's warnings (A warns: the W27 scan of the merged job branches found reviewer code
+    under `merge` on 5 core and 27 napoleon branches, past the brief's kill criterion of 3 beyond the audit's), over the commits of the branch (`reads.commits()`, `reads.history(review.md)`). A review commit belongs to the newest
     round its review.md holds; any other commit by a round's session belongs to that round; a commit by nobody known (no trailer, or a
     session that is neither the builder's nor a round's) after the first review commit belongs to the round of the next review commit, or to
     the newest round when none follows. Commits before the first review commit and the builder's own (report.md writers: the builder and
@@ -308,8 +311,9 @@ def round_problems(jid, cfg, reads, builder, head_review):
             both = sorted((by_round[n] & by_round[j]) - builder)
             if both:
                 errs.append(f'round {n} was written by a session that wrote round {j} ({", ".join(both)}): a fresh session per round{doc}')
+    warns = []
     if not by_round:
-        return errs
+        return errs, warns
     commits = reads.commits()
     first = next((i for i, c in enumerate(commits) if wrote.get(c[0])), len(commits))
     ok = lambda p: p.startswith(f'{jd}/{jid}/') or p == f"{cfg['reg_jobs']}/{jid}.json"
@@ -328,9 +332,9 @@ def round_problems(jid, cfg, reads, builder, head_review):
     for n, got in sorted(hits.items()):   # rule A
         if verdict(head_r.get(n)) == 'merge':
             shown = '; '.join(f"{s[:12]} ({', '.join(c[:6])}{' and more' if len(c) > 6 else ''})" for s, c in got[:6])
-            errs.append(f'round {n} of {rev} says merge, but its own commits change files outside {jd}/{jid}/ and its row: {shown}: '
-                        'write the verdict `merge after fixes`; a fresh round reviews your change')
-    return errs
+            warns.append(f'round {n} of {rev} says merge, but its own commits change files outside {jd}/{jid}/ and its row: {shown}: '
+                         'write the verdict `merge after fixes`; a fresh round reviews your change')
+    return errs, warns
 
 
 def evidence_problems(jid, cfg, reads, texts, base_rows, base_file, base_ref):
@@ -350,8 +354,8 @@ def evidence_problems(jid, cfg, reads, texts, base_rows, base_file, base_ref):
         st = reads.ref_state(name)
         if st == 'missing':
             warns.append(f"{path} cites {ref}, which is not in this clone (another repository's?): evidence must sit on a main branch or a pushed tag")
-        elif st != 'merged':
-            errs.append(f'{path} cites {ref}: evidence on an unmerged branch cannot be opened from main: merge it, tag it, or copy it into the repo')
+        elif st != 'merged':   # a warning: the W27 scan found 13 merged branches that name an open branch in passing
+            warns.append(f'{path} cites {ref}: evidence on an unmerged branch cannot be opened from main: merge it, tag it, or copy it into the repo')
 
     for path, text in texts:
         for m in RUN_PATH.finditer(text):
