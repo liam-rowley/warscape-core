@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -582,8 +583,11 @@ class MainHealth(unittest.TestCase):
         from warscape.verbs import jobs as jverb
         fake, _ = self.gh()
         ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': self.CFG})
-        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.print_claims,
+                 jv.take_claim)
         try:
+            jv.print_claims = lambda *a, **k: None   # W27: no claim on the real origin from a test
+            jv.take_claim = lambda *a: (True, None)
             jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
             jv.print_red_prs = lambda root, offline: print('PR #1 job/J9: gates failed')
             jv.remote_branches = lambda root, offline: {'job/J60'}
@@ -598,7 +602,8 @@ class MainHealth(unittest.TestCase):
                 self.assertEqual(rc, 0, action)
                 self.assertLess(text.index('Main CI is red'), text.index('PR #1 job/J9'), action)
         finally:
-            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.print_claims,
+             jv.take_claim) = saved
 
 
 class BranchChecks(unittest.TestCase):
@@ -667,8 +672,11 @@ class BranchChecks(unittest.TestCase):
         from warscape.repo import DEFAULTS
         from warscape.verbs import jobs as jverb
         ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': DEFAULTS['ci']})
-        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.print_claims,
+                 jv.take_claim)
         try:
+            jv.print_claims = lambda *a, **k: None   # W27: no claim on the real origin from a test
+            jv.take_claim = lambda *a: (True, None)
             jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
             jv.print_red_prs = lambda root, offline: []
             jv.print_main_health = lambda cfg, root, offline: None
@@ -685,7 +693,8 @@ class BranchChecks(unittest.TestCase):
                 self.assertIn('viewer failed (failure): https://x/v', text, action)
                 self.assertLess(text.index('viewer failed'), text.index(f'J60: {action}'), action)
         finally:
-            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health, jv.print_claims,
+             jv.take_claim) = saved
 
 
 def rnd(n, v, jid='J60'):
