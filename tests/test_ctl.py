@@ -165,6 +165,22 @@ class Poses(unittest.TestCase):
         ok, _ = ctl.pose_check(exp, {'x': 10}, {'default': 0.5})
         self.assertFalse(ok)   # a missing readback fails
 
+    def test_yaw_wrap_any_representation(self):
+        def yaw(exp, got, t=0.5):
+            return ctl.pose_check({'yaw': exp}, {'yaw': got}, {'default': t})[0]
+        self.assertTrue(yaw(270, -90.00001))
+        self.assertTrue(yaw(0, 359.9999))
+        self.assertTrue(yaw(180, -180))
+        self.assertFalse(yaw(90, -90))
+        self.assertTrue(yaw(359, 1, 3))
+        self.assertFalse(yaw(359, 1, 1))
+        self.assertAlmostEqual(ctl.angle_diff(0, 359.9999), 0.0001, places=6)
+        self.assertEqual(ctl.angle_diff(180, -180), 0)
+
+    def test_pitch_does_not_wrap(self):
+        self.assertFalse(ctl.pose_check({'pitch': 80}, {'pitch': -100}, {'default': 0.5})[0])
+        self.assertTrue(ctl.pose_check({'pitch': 80}, {'pitch': 80.2}, {'default': 0.5})[0])
+
 
 class Refusals(unittest.TestCase):
     def test_unreachable_routes_refuse_with_reason_and_fact(self):
