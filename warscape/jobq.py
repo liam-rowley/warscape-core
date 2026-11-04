@@ -1211,6 +1211,18 @@ def panel_html(r):
     return f'<p class="muted">{"<br>".join(html.escape(str(x)) for x in lines)}</p>' if lines else ''
 
 
+def card_lines(results):
+    """{job id: [HTML]}: the `cards` of `view`-stage Results, text escaped, {'html': ...} as is (W31). A malformed value is skipped: a card line never fails the page."""
+    out = {}
+    for r in results:
+        cards = getattr(r, 'cards', None)
+        for jid, v in (cards.items() if isinstance(cards, dict) else ()):
+            line = html.escape(v) if isinstance(v, str) else v.get('html') if isinstance(v, dict) else None
+            if isinstance(line, str):
+                out.setdefault(jid, []).append(line)
+    return out
+
+
 def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None, main_html=''):
     """The queue as one HTML page. `read(path)`: file text or None; `branches`: remote branch names; `generated`: timestamp text;
     `on_branch`: see branch_rows (review and fix buttons need it). Brief, report and review are embedded as escaped Markdown and rendered by
@@ -1233,8 +1245,10 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
         head = 'Nothing is ready to pick up or brief.'
     if main_html:
         head += '</p>' + main_html + '<p>'
+    lines = {}
     if ctx is not None:
-        panel = ''.join(panel_html(r) for r in gatemods.run_stage(ctx, 'view', rows=rows))   # a game's own status lines (`view`-stage gate modules)
+        results = gatemods.run_stage(ctx, 'view', rows=rows)
+        panel, lines = ''.join(panel_html(r) for r in results), card_lines(results)   # a game's own status lines (`view`-stage gate modules)
         if panel:
             head += '</p>' + panel + '<p>'
 
@@ -1248,6 +1262,8 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
                        for f in ('brief', 'report', 'review') if (t := read(f'{S.jobs_dir}/{jid}/{f}.md')) is not None)
         deps = ' '.join(dep(d) for d in r.get('depends_on', [])) or '<span class="muted">none</span>'
         tags = [f'phase {r.get("phase", "?")}', r.get('model', '?'), 'needs PC' if r.get('needs_pc') else 'no PC']
+        chip = usage_chip(r, read(f'{S.jobs_dir}/{jid}/brief.md'), read(f'{S.jobs_dir}/{jid}/report.md'))
+        extra = (f'<p class="usage{" over" if chip[1] else ""}">{e(chip[0])}</p>' if chip else '') + ''.join(f'<p class="cardline">{l}</p>' for l in lines.get(jid, []))
         acts = [a for a in PROMPTS if not_ready(a, jid, by, branches, on_branch) is None]
         buttons = (('<div class="acts">' + ''.join(
             f'<button class="launch" data-id="{e(jid)}" data-act="{a}" data-cmd="{e(command_line(launch_argv("claude", jid, a, r), root))}">'
@@ -1257,7 +1273,7 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
                 f'{e(r.get("status", ""))}</span></header>'
                 + (f'<p class="note">{e(note)}</p>' if note else '')
                 + f'<p class="desc">{e(r.get("description", ""))}</p>'
-                f'<p class="meta">{" · ".join(e(t) for t in tags)} · depends on {deps}</p>{buttons}{docs}</article>')
+                f'<p class="meta">{" · ".join(e(t) for t in tags)} · depends on {deps}</p>{extra}{buttons}{docs}</article>')
 
     counts = ''.join(f'<a class="count" href="#lane-{k}"><b>{len(placed[k])}</b> {e(h)}</a>' for k, h, _ in LANES)
     lanes = ''.join(f'<section class="lane" id="lane-{k}"><h2>{e(h)} <span class="muted">({len(placed[k])})</span></h2>'
@@ -1318,7 +1334,8 @@ input {{ width:100%; padding:8px 10px; border:1px solid var(--line); border-radi
 .status, .dep {{ font-size:12px; border-radius:10px; padding:1px 8px; border:1px solid currentColor; text-decoration:none; }}
 .s-done {{ color:var(--done); }} .s-review, .s-fix {{ color:var(--review); }} .s-queued {{ color:var(--queued); }}
 .s-needs_brief {{ color:var(--needs); }} .s-blocked, .s-unknown {{ color:var(--blocked); }}
-.note {{ color:var(--review); font-size:14px; }} .desc {{ margin:6px 0; }} .meta {{ color:var(--muted); font-size:13px; }}
+.note {{ color:var(--review); font-size:14px; }} .desc {{ margin:6px 0; }} .meta, .usage, .cardline {{ color:var(--muted); font-size:13px; }}
+.usage.over {{ color:var(--blocked); font-weight:600; }}
 .doc {{ margin-top:6px; }} .doc summary {{ cursor:pointer; color:var(--accent); }}
 .doc pre.md {{ white-space:pre-wrap; font:13px/1.45 ui-monospace, Consolas, monospace; }}
 .doc .rendered {{ border-left:3px solid var(--line); padding:0 0 0 12px; overflow-wrap:anywhere; }}
