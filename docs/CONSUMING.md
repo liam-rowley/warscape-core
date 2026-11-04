@@ -54,7 +54,7 @@ exempt = ["tests/**", "**/runs/**"]
 max_kb = 30
 
 [cli]
-verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract as warscape/verbs/)
+verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract; never a core verb's name: reg find gates jobs policy ci discovery crash agent-settings)
 ```
 
 CI in the game repo (`.github/workflows/gates.yml`):
@@ -96,7 +96,7 @@ jobs:
   check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
-  or 0.34.0 (DLL changes, C29) are in [UPGRADING.md](UPGRADING.md).
+  0.34.0 (DLL changes, C29) or 0.38.0 (crash maps, guarded verbs, C35) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
 Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
@@ -292,14 +292,13 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 ## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
 Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap).
 
-## DLL changes from W34's tag (W34, C35)
-- **`GameAdapter`:** the core asserts its size (`proxy/src/adapter.h`). A new field goes at the **end**, with a default, and a core change updates the size. Initialise it by name: `.gameName = ...`
-  compiles in the DLL's `-std=c++17` as a GNU extension, and a missing member still fails `-Wextra -Werror`. A positional list keeps compiling, but a field inserted mid-struct shifts it silently.
+## DLL changes from W34's tag (W34, C36)
+- **`GameAdapter`:** the core asserts its size (`proxy/src/adapter.h`). A new field goes at the **end**, with a default. Initialise it by name: `.gameName = ...` compiles in the
+  DLL's `-std=c++17` as a GNU extension, and a missing member still fails `-Wextra -Werror`. A positional list still compiles, but an inserted field shifts it silently.
 - **ctl `lua`:** reads only under `luaDir` and the ctl folder ([PROXY_CTL.md](PROXY_CTL.md)). Move a chunk from anywhere else into one of the two.
-- **The ctl folder is owner-only:** a driver that runs as another user than the game cannot use it; say so in the pin-bump report.
+- **The ctl folder is owner-only:** a driver running as another user cannot use it; say so in the pin-bump report.
 - **System keys** always reach the game, with RmlUi text focus too ([PROXY_UI.md](PROXY_UI.md)).
-- **`gen_tables.py --exe <staged copy>`:** add it to the exe-update checklist, after `exe_info.py` and before a PC run.
-- The generator and `proxy/src` changed, so the build id changes.
+- **`gen_tables.py --exe <staged copy>`:** add it to the exe-update checklist, after `exe_info.py`, before a PC run. The build id changes.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

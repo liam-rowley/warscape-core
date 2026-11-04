@@ -3,11 +3,12 @@
 // The script then checks the proxy's log: launch line, guard verdict, plan, backend, a clean detach.
 // Args: `crash` = an access violation after Direct3DCreate9 (the in-process dump must appear and the log name it);
 // `replace crash` = install the host's own top-level filter first, as a game may (the log must say the filter was replaced).
+// `dllfault` = call the export wsp_sentinel with a bad lua_State, so the fault is inside the DLL (W35: `wsc crash symbolise` names it).
 // `wait <file>` = after Direct3DCreate9, wait up to 60 s for <file> to exist (the control channel's answer, W17), then exit without
 // FreeLibrary (the ctl thread is still inside the DLL; the process exit ends it, as a game's exit does).
 // `open <path>` = after Direct3DCreate9, open <path> with CreateFileW through this exe's own import table (the proxy's file hooks
 // patch it, W33) and print its first bytes: "smoke: open <path>: <text>".
-// -DWSP_SMOKE_SITES (W34, C5) is the second build of this file: the real-process stand-in of launch 11. It carries the bytes of every
+// -DWSP_SMOKE_SITES (W34, C5) is the second build of this file: the real-process stand-in of launch 12. It carries the bytes of every
 // engine_sites row of the null games, because the patch engine is all-or-nothing: one refused row and nothing is written. It prints the
 // protection of the patched page before and after the DLL loads, and calls the patched code.
 #include <windows.h>
@@ -32,10 +33,10 @@ static DWORD PageProtect(const char* p) { MEMORY_BASIC_INFORMATION m{}; return V
 static LONG WINAPI HostFilter(EXCEPTION_POINTERS*) { return EXCEPTION_EXECUTE_HANDLER; }   // ends the process like a game handler
 
 int main(int argc, char** argv) {
-    bool crash = false, replace = false;
+    bool crash = false, replace = false, dllfault = false;
     const char* waitFor = nullptr; const char* openPath = nullptr;
     for (int i = 1; i < argc; ++i) {
-        crash |= !strcmp(argv[i], "crash"); replace |= !strcmp(argv[i], "replace");
+        crash |= !strcmp(argv[i], "crash"); replace |= !strcmp(argv[i], "replace"); dllfault |= !strcmp(argv[i], "dllfault");
         if (!strcmp(argv[i], "wait") && i + 1 < argc) waitFor = argv[++i];
         else if (!strcmp(argv[i], "open") && i + 1 < argc) openPath = argv[++i];
     }
@@ -59,6 +60,13 @@ int main(int argc, char** argv) {
     void* d3d = c(32);
     printf("smoke: Direct3DCreate9 -> %p\n", d3d);
     if (crash) { fflush(stdout); *(volatile int*)0x10 = 1; }   // access violation, writing
+    if (dllfault) {   // W35: an access violation INSIDE the DLL: its Lua core's lua_gettop reads through a bad lua_State
+        typedef int (*Sentinel)(void*);
+        Sentinel s = (Sentinel)(void*)GetProcAddress(h, "wsp_sentinel");
+        if (!s) { printf("smoke: missing export wsp_sentinel\n"); return 3; }
+        fflush(stdout);
+        printf("smoke: wsp_sentinel -> %d (no fault: the bridge was off)\n", s((void*)0x10));
+    }
     if (d3d) { typedef ULONG (WINAPI* Rel)(void*); ((Rel)(*(void***)d3d)[2])(d3d); }
     if (openPath) {
         wchar_t w[MAX_PATH] = {}; MultiByteToWideChar(CP_UTF8, 0, openPath, -1, w, MAX_PATH);

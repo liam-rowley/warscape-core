@@ -71,3 +71,8 @@ exit 0 all match, 1 a mismatch, 2 an unreadable file. `--allow-pin-mismatch` is 
   `../` paths are not checked. napoleon-remastered had 56 misses on 2026-11-04 (W28 report): clear them in its pin-bump branch, or skip the gate there
   under a decision id (`"doc_paths:<id>"`) while it does.
 - **`gen_tables.py`** reads `engine_sites` and `config_keys` through the registry loader, so the game's whole `wsc.toml` must load with this core.
+
+## Crash symbolisation and guarded verbs (0.38.0, core W35, C35)
+Pin bump: a new build id (`build.sh` changed: 20 passes); delete game verbs named `crash` or `agent-settings`; put `{{wsc proxy_map step=dll}}`
+after the proxy build step (give it `id: dll`) and `wsc ci render`; attach `d3d9.map` and `d3d9.map.json` to each release; set `[agent_settings] safe` (`exact_only = true`: only those rules).
+What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROXY_HARNESS.md](PROXY_HARNESS.md) "Guarded verbs".

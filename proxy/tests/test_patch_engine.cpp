@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
         CHECK(MakePatchPlan(v, 0, s.data(), s.size(), on).verdict == PlanVerdict::Refuse);
         CHECK(MakePatchPlan(v, 0, s.data(), 0, on).verdict == PlanVerdict::NothingToDo);
     }
-    {   // W34: the smoke's own row as launch 11 writes it (a game without the fixture row skips this): every generated site in place, only
+    {   // W34: the smoke's own row as launch 12 writes it (a game without the fixture row skips this): every generated site in place, only
         // null.smoke_patch on. The writer changes exactly what the pure apply does, on one page, and the page comes back
         size_t at = gen::kSiteCount;
         for (size_t i = 0; i < gen::kSiteCount; ++i) if (!strcmp(gen::kSites[i].id, "null.smoke_patch")) at = i;
