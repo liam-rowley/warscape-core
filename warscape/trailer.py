@@ -16,14 +16,60 @@ import subprocess
 
 from .repo import git_env
 
-COMMIT = re.compile(r'''(?<![\w./-])git(?:\.exe)?(?:\s+-[cC]\s+(?:"[^"]*"|'[^']*'|\S+))*\s+commit(?![\w-])''')
+# `git` where a command starts: the line's start, after a separator, after a shell's command-string flag (with or without its opening quote), behind
+# `VAR=value` words and the wrappers that run their arguments. An argument is no command, so `echo git commit` and `grep "git commit" docs` are no commits.
+GIT = re.compile(r'''(?:^|[;&|({\n`]|\$\(|(?:\s-\w*c|\s-Command|\s/c|\beval)\s+["']?)\s*'''
+                 r'''(?:(?:\w+=(?:"[^"]*"|'[^']*'|\S*)|sudo|env|command|exec|time|nohup|if|then|else|elif|do|while|until|!)\s+)*'''
+                 r'''(?:[^\s;&|"'`]*\\)?git(?:\.exe)?(?=[ \t])''')
+# One shell word: quoted and bare pieces, `$(...)` and backticks whole. A separator, a newline or an unmatched quote ends it.
+WORD = re.compile(r'''[ \t]+((?:"[^"]*"|'[^']*'|\$\([^()]*\)|`[^`]*`|[^\s"'`;&|()<>])+)''')
+FLAGS = {'-p', '-P', '--paginate', '--no-pager', '--no-replace-objects', '--bare', '--literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs',
+         '--icase-pathspecs', '--no-optional-locks', '--exec-path'}
+TAKES_NEXT = {'-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env'}   # the option's value is the next word
+TAKES_EQUALS = ('--git-dir=', '--work-tree=', '--namespace=', '--exec-path=', '--super-prefix=', '--config-env=')
+
+
+def _unquote(word):
+    return re.sub(r'''"([^"]*)"|'([^']*)\'''', lambda m: m.group(1) or m.group(2) or '', word)
+
+
+def _runs_commit(text, at, aliases):
+    """True when the git arguments in `text` from `at` on name `commit`: past the global options, the subcommand is `commit` or an alias of it.
+    `aliases`: {lower-case name: value}, what `-c alias.<name>=<value>` set so far (an alias used is removed, so a loop ends)."""
+    while m := WORD.match(text, at):
+        word, at = _unquote(m.group(1)), m.end()
+        if word in FLAGS or word.startswith(TAKES_EQUALS):
+            continue
+        if word not in TAKES_NEXT:
+            if word == 'commit':
+                return True
+            value = aliases.pop(word.lower(), None)
+            if value is None:
+                return False
+            return _has_commit(value[1:], aliases) if value.startswith('!') else _runs_commit(f' {value}', 0, aliases)
+        m = WORD.match(text, at)
+        if not m:
+            return False
+        at = m.end()
+        key, eq, value = _unquote(m.group(1)).partition('=')
+        if word == '-c' and eq and key.lower().startswith('alias.'):
+            aliases[key[6:].lower()] = value
+    return False
+
+
+def _has_commit(cmd, aliases=None):
+    """True when the shell line `cmd` runs git's `commit`. A later `git` starts with the aliases of its own `-c` options only, as git does."""
+    return any(_runs_commit(cmd, m.end(), dict(aliases or {})) for m in GIT.finditer(cmd))
 
 
 def commit_lacks_trailer(cmd, session_id, trailer='Claude-Session'):
     """True when `cmd` runs `git commit` without `--trailer "<trailer>: <session_id>"`. False when it is no commit, when the hook was given no
-    session id, or when the repo switched the rule off (empty trailer name)."""
+    session id, or when the repo switched the rule off (empty trailer name). A hook passes the command as typed (W36): git's global options may
+    stand before the subcommand, and an alias defined in the command (`git -c alias.ci="commit -q" ci`) is followed, through other aliases and
+    `!` shell aliases. An alias from the user's gitconfig cannot be known from the command string and stays unseen (fails open: the commit-msg hook
+    and `policy` still read the commit), as does a path-qualified `/usr/bin/git`."""
     sid = str(session_id or '').strip()
-    if not trailer or not sid or not COMMIT.search(cmd):
+    if not trailer or not sid or not _has_commit(cmd):
         return False
     return not re.search(r'--trailer[\s=]+["\']?' + re.escape(trailer) + r':\s*' + re.escape(sid) + r'(?![\w-])', cmd)
 
