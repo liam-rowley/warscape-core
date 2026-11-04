@@ -211,6 +211,15 @@ class CoreMode(Branches, unittest.TestCase):
         self.assertRefused(res, 'it also changes: warscape/wide.py')
         self.assertIn('this branch changes warscape/wide.py, wsc.toml:', self.note(res[1]))
 
+    def test_a_rename_counts_as_a_delete_and_an_add(self):
+        """Found while building W23: `git diff --name-only` names only the new path of a rename (diff.renames, on by default), so a plan/ branch
+        could move code into docs/ and pass. The judge diffs with --no-renames -z: the same shas give the same paths whatever the git config."""
+        git(self.d, 'checkout', '-q', '-f', '-B', 'plan/move', 'main')
+        git(self.d, 'mv', 'warscape/jobq.py', 'docs/jobq.py')
+        git(self.d, 'commit', '-q', '-m', 'move')
+        self.back()
+        self.assertRefused(self.local('plan/move'), 'it also changes: warscape/jobq.py', JUDGED)
+
     def test_the_head_checkout_and_the_base_checkout_with_head_print_the_same(self):
         self.branch('plan/same', {'docs/same.md': 's\n', 'lib/same.py': 'x = 1\n'})
         a = self.local('plan/same')

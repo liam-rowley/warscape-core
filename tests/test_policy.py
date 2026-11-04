@@ -110,7 +110,9 @@ class Policy(unittest.TestCase):
         self.assertTrue(self.run_check('plan/x', ['tools/a.py']))
         self.assertTrue(self.run_check('plan/x', ['registries/tools/wsc.jobs.json']))
         self.assertEqual(self.run_check('meta/x', ['.github/workflows/gates.yml', 'tests/t.py',
-                                                   'registries/tools/wsc.jobs.json', 'registries/hotkeys.jsonl', 'docs/DECISIONS.md']), [])
+                                                   'registries/hotkeys.jsonl', 'docs/DECISIONS.md']), [])
+        # W23 (decision 11): globs match by segment, so `registries/*` no longer reaches a per-row registry file
+        self.assertTrue(self.run_check('meta/x', ['registries/tools/wsc.jobs.json']))
         errs = self.run_check('meta/x', ['proxy/core/guard.cpp'])
         self.assertTrue(errs and 'game code goes through a job' in errs[0])
 
@@ -250,7 +252,8 @@ class PolicyOnGit(unittest.TestCase):
         self.git('init', '-q', '-b', 'main')
         self.git('config', 'user.email', 't@example.invalid')
         self.git('config', 'user.name', 'test')
-        self.commit('wsc.toml', '[policy]\ndecisions = "docs/DECISIONS.md"\n')
+        # [ci] core = "": a repo with no core of its own (no gitlink, no warscape/policy.py) is judged as before W23, with a note
+        self.commit('wsc.toml', '[policy]\ndecisions = "docs/DECISIONS.md"\n[ci]\ncore = ""\n')
         self.commit('jobs/J1/brief.md', 'brief')
         self.write_rows([ROW, OTHER], layout)
 
