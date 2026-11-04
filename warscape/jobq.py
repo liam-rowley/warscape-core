@@ -12,6 +12,8 @@ verdict each; the reviewer sets the row (merge -> done, otherwise fix, or blocke
 `claude agents --json` (Claude Code 2.1.316, read on the PC 2026-10-31, napoleon J52): lists background sessions with `state` "working", "blocked"
 (waiting for input) or "done" (finished sessions stay listed until removed); interactive sessions carry no state. Live = working or blocked.
 """
+import base64
+import hashlib
 import html
 import json
 import os
@@ -771,12 +773,34 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
     if auto:
         refresh += (f' <b>Autopilot on</b>{" (dry run)" if auto.get("dry_run") else ""}: starts ready reviews and fixes every '
                     f'{int(auto["interval"])} s; last ran {e(auto.get("last") or "not yet")} (log: <code>_scratch/jobs_auto.log</code>).')
-    return VIEW_PAGE.format(reg_jobs=e(S.reg_dir + '/jobs/'), jobs_dir=e(S.jobs_dir), generated=e(generated), head=head, counts=counts, lanes=lanes, total=len(rows), refresh=refresh,
-                            serve=json.dumps({'token': token} if token else None))
+    page = VIEW_PAGE.format(reg_jobs=e(S.reg_dir + '/jobs/'), jobs_dir=e(S.jobs_dir), generated=e(generated), head=head, counts=counts, lanes=lanes, total=len(rows), refresh=refresh,
+                            serve=json.dumps({'token': token} if token else None), marked_url=MARKED_URL, marked_sri=MARKED_SRI, csp=CSP_SLOT)
+    return page.replace(CSP_SLOT, e(view_csp(page)))
+
+
+# marked 12.0.2, pinned by Subresource Integrity (W28): a changed file at the URL is refused by the browser and the docs stay plain text.
+# Made once (2026-11-04) with: curl -sL <MARKED_URL> | openssl dgst -sha384 -binary | openssl base64 -A
+# (cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js gives the same hash). A new marked version needs a new URL, hash and test.
+MARKED_URL = 'https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js'
+MARKED_SRI = 'sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi'
+CSP_SLOT = 'CSP-SLOT-W28'
+INLINE = re.compile(r'<(script|style)>(.*?)</\1>', re.S)
+
+
+def view_csp(page):
+    """The view page's Content-Security-Policy (W28): nothing by default; scripts from the one pinned marked URL and the page's own inline
+    script, styles from its own inline style, both by sha256 of their exact text (the script holds the serve token, so the hash is per page);
+    fetch only to the serving origin (/launch)."""
+    h = {'script': [], 'style': []}
+    for tag, body in INLINE.findall(page):
+        h[tag].append("'sha256-" + base64.b64encode(hashlib.sha256(body.encode('utf-8')).digest()).decode() + "'")
+    return (f"default-src 'none'; script-src {MARKED_URL} {' '.join(h['script'])}; style-src {' '.join(h['style'])}; "
+            "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
 
 
 VIEW_PAGE = '''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{csp}">
 <title>Job Queue</title>
 <style>
 :root {{ --bg:#f7f6f3; --card:#fff; --ink:#1f1f1f; --muted:#6b6b6b; --line:#e2e0da; --accent:#2f5d8a;
@@ -821,8 +845,11 @@ input {{ width:100%; padding:8px 10px; border:1px solid var(--line); border-radi
 <input id="q" type="search" placeholder="Filter by id, title or description">
 {lanes}
 </main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="{marked_url}" integrity="{marked_sri}" crossorigin="anonymous"></script>
 <script>
+// raw HTML in a brief, report or review is shown as text, never run (W28): marked's html renderer returns it escaped
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+if (window.marked) marked.use({{ renderer: {{ html(t) {{ return esc(typeof t === 'string' ? t : t.text); }} }} }});
 document.getElementById('q').addEventListener('input', ev => {{
   const q = ev.target.value.toLowerCase();
   document.querySelectorAll('.card').forEach(c => c.hidden = q && !c.dataset.text.includes(q));

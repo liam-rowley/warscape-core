@@ -228,6 +228,29 @@ class View(unittest.TestCase):
         self.assertIn('&lt;/script&gt;', page)               # a doc cannot break out of the page
         self.assertNotIn('id="lane-review"', page)            # empty lanes are left out
 
+    def test_serve_page_pins_marked_escapes_raw_html_and_sets_a_csp(self):
+        """W28: marked loads only with its SRI hash; raw HTML in a doc reaches the page as escaped text and marked's html renderer escapes it
+        again; a CSP allows the one script URL and the page's own inline script and style by hash; the token sits only in the SERVE JSON."""
+        import base64
+        import hashlib
+        evil = BRIEF + '\n<img src=x onerror=alert(1)>\n<script>alert(2)</script>\n'
+        page = jv.render_view([row('J1', status='queued', brief='jobs/J1/brief.md')], files(jobs__J1__brief_md=evil), set(), 'now', token='tok123')
+        self.assertIn(f'<script src="{jv.MARKED_URL}" integrity="{jv.MARKED_SRI}" crossorigin="anonymous"></script>', page)
+        self.assertRegex(jv.MARKED_SRI, r'^sha384-[A-Za-z0-9+/]{64}$')
+        self.assertIn('&lt;img src=x onerror=alert(1)&gt;', page)
+        self.assertNotIn('<img', page)
+        self.assertEqual(page.count('<script>'), 1)            # the page's own inline script only; the doc's is text
+        self.assertIn("marked.use({ renderer: { html(t) { return esc(typeof t === 'string' ? t : t.text); } } });", page)
+        self.assertEqual(page.count('tok123'), 1)
+        self.assertIn('const SERVE = {"token": "tok123"};', page)
+        csp = html.unescape(re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]*)">', page).group(1))
+        sha = lambda t: "'sha256-" + base64.b64encode(hashlib.sha256(t.encode('utf-8')).digest()).decode() + "'"
+        script = re.search(r'<script>(.*?)</script>', page, re.S).group(1)
+        style = re.search(r'<style>(.*?)</style>', page, re.S).group(1)
+        self.assertEqual(csp, f"default-src 'none'; script-src {jv.MARKED_URL} {sha(script)}; style-src {sha(style)}; "
+                              "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
+        self.assertNotEqual(jv.render_view([], files(), set(), 'now', token='other'), page)   # the script hash follows the token
+
 
 # The launch fixture: one launchable job per action, and one that is not.
 LROWS = [row('J1', status='done'), row('J2', status='queued', depends_on=['J1']), row('J3', model='sonnet'),
