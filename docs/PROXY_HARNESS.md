@@ -57,11 +57,17 @@ The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request wr
 ## Guarded verbs (W35, C30)
 Two permissions sessions kept asking for are verbs whose guard holds the judgement; an agent runs them without a one-off ask.
 - **`wsc agent-settings allow|remove "<rule>" [...] [--file .claude/settings.json]`** adds a rule to `permissions.allow` only when a
-  `[agent_settings] safe = [...]` pattern in `wsc.toml` covers it (`"Bash(git status:*)"` covers itself, `Bash(git status --short:*)` and
-  `Bash(git status)`), no `deny` rule overlaps it, and it has no wildcard but a trailing `:*` and no shell operator (`Bash(*)`, `Bash(git:*)`,
-  `PowerShell(*)` refuse). Key order and indentation are kept; the write is atomic (a temporary file in the folder, then a replace) and the
-  old file is kept as `settings.json.bak` once per run. It never edits a hook or a `deny` entry, writes only a `.json` directly in a
-  `.claude` folder (no hook line needed: `.claude/` is not a protected folder) and refuses without `[agent_settings]`. Exit 0, 1 write failed, 2 refused.
+  `[agent_settings] safe = [...]` pattern in `wsc.toml` covers it: the pattern itself, or the pattern extended by whole words
+  (`"Bash(git status:*)"` covers `Bash(git status --short:*)` and `Bash(git status)`, never `Bash(git statusx:*)`) with no write- or
+  run-capable flag among the added words (`--output`, `--ext-diff`, `--textconv`, `-c`, `--exec` ...: `WRITE_FLAGS` in the verb);
+  `exact_only = true` allows only the patterns themselves. No `deny` rule may overlap it (a deny with a `*` inside, `Bash(git * --force)`,
+  is read broadly: it blocks every rule its text before the `*` starts), and it has no wildcard but a trailing `:*` and no shell operator
+  (`Bash(*)`, `Bash(git:*)`, `PowerShell(*)` refuse). Key order, indentation and line ends are kept; the write is atomic (a temporary file in
+  the folder, then a replace) and `settings.json.bak` is replaced the same way with the file as it was before the run (each writing run
+  replaces it: two runs keep only the second original). It never edits a hook or a `deny` entry and writes only a `.json` directly in the
+  repo's own `<root>/.claude` once links are resolved: `.claude` a symlink or junction, a `--file` in another `.claude` folder, the file or
+  its `.bak` a link, or a hard-linked file refuses (no hook line needed: `.claude/` is not a protected folder). It refuses without
+  `[agent_settings]`. Exit 0, 1 write failed, 2 refused.
 - **`job.sh vdisplay-aside <owner|-> <session> <why>`** moves `vdisplay_restore.json` to `_to_delete\vdisplay_restore_<utc>[_n].json.aside` (a unique
   name, `mv -n`, checked), appends the record to `watcher.log` and prints the saved mode, only when the file exists, the lock is free or
   `<owner>`'s, the watcher runs (`watcher.alive` under 15 s) and `watcher.status` lists no game process, and either the last `vdisplay: `

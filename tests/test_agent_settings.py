@@ -5,6 +5,7 @@ folders only: no test reads or writes a real settings file."""
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -154,6 +155,118 @@ class AgentSettings(unittest.TestCase):
         rc, _, err = self.wsc('allow', 'Bash(git status:*)')
         self.assertEqual(rc, 2)
         self.assertIn('not valid JSON', err)
+
+    # Review round 1 (W35): each refusal the review reproduced, proved before the fix.
+    def assertRefused(self, *args, contains=''):
+        before = self.f.read_bytes() if self.f.exists() else None
+        rc, out, err = self.wsc(*args)
+        self.assertEqual(rc, 2, f'{args}: {out}{err}')
+        self.assertIn('Liam decides', err)
+        self.assertIn(contains, err, args)
+        if before is not None:
+            self.assertEqual(self.f.read_bytes(), before, args)
+        return err
+
+    def test_a_prefix_covers_whole_words_only(self):
+        for rule in ('Bash(git diffx:*)', 'Bash(git diffx)', 'Bash(git statusfoo)', 'Bash(python3 wsc.py findx:*)'):
+            self.assertRefused('allow', rule, contains='whole words')
+        self.assertEqual(self.wsc('allow', 'Bash(git diff --cached:*)')[0], 0)
+
+    def test_a_write_or_run_flag_in_the_added_words_refuses(self):
+        for rule in ('Bash(git diff --output=C:/x/y:*)', 'Bash(git diff --output /tmp/y)', 'Bash(git diff --ext-diff:*)',
+                     'Bash(git diff --textconv:*)', 'Bash(git diff -c core.pager=x:*)', 'Bash(git diff -ccore.pager=x)',
+                     'Bash(git diff --stat -o out.txt)', 'PowerShell(git log --output=x:*)', 'Bash(git diff --config-env=a=b:*)'):
+            self.assertRefused('allow', rule, contains='writes a file or runs a program')
+        self.assertFalse((self.t / '.claude' / 'settings.json.bak').exists())
+
+    def test_exact_only_allows_only_the_patterns_themselves(self):
+        (self.t / 'wsc.toml').write_text(TOML + 'exact_only = true\n')
+        self.assertRefused('allow', 'Bash(git status --short:*)', contains='exact_only')
+        self.assertEqual(self.wsc('allow', 'Bash(git status:*)')[0], 0)
+        (self.t / 'wsc.toml').write_text(TOML + 'exact_only = "yes"\n')
+        self.assertRefused('allow', 'Bash(git diff:*)', contains='true or false')
+
+    def test_a_deny_with_a_wildcard_inside_is_read_broadly(self):
+        d = json.loads(json.dumps(SETTINGS))
+        d['permissions']['deny'].append('Bash(git * --force)')
+        self.write(d)
+        self.assertRefused('allow', 'Bash(git status:*)', contains='wildcard inside a deny')
+        self.assertRefused('allow', 'Bash(git diff HEAD)', contains='Bash(git * --force)')
+        self.assertEqual(self.wsc('allow', 'Bash(python3 wsc.py find:*)')[0], 0)   # another command: the deny does not reach it
+
+    def test_a_dot_claude_outside_the_root_refuses(self):
+        other = self.t / 'elsewhere' / '.claude'
+        other.mkdir(parents=True)
+        (other / 'settings.json').write_text(json.dumps(SETTINGS))
+        before = (other / 'settings.json').read_bytes()
+        self.assertRefused('allow', 'Bash(git status:*)', '--file', str(other / 'settings.json'), contains="repo's own .claude")
+        self.assertRefused('allow', 'Bash(git status:*)', '--file', 'elsewhere/.claude/settings.json', contains="repo's own .claude")
+        self.assertEqual((other / 'settings.json').read_bytes(), before)
+        self.assertFalse((other / 'settings.json.bak').exists())
+
+    def _dir_link(self, target, link):
+        """A junction on Windows (no privilege needed, so this test always runs there), a symlink elsewhere."""
+        if sys.platform == 'win32':
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            os.symlink(target, link, target_is_directory=True)
+        self.addCleanup(lambda: os.path.lexists(link) and (os.rmdir(link) if sys.platform == 'win32' else os.unlink(link)))
+
+    def test_a_dot_claude_junction_or_symlink_refuses(self):
+        out = self.t / 'out'
+        out.mkdir()
+        (out / 'settings.json').write_text(json.dumps(SETTINGS))
+        before = (out / 'settings.json').read_bytes()
+        for p in (self.t / '.claude').iterdir():
+            p.unlink()
+        (self.t / '.claude').rmdir()
+        self._dir_link(out, self.t / '.claude')
+        self.assertRefused('allow', 'Bash(git status:*)', contains='a link')
+        self.assertEqual((out / 'settings.json').read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in out.iterdir()), ['settings.json'])
+
+    def _symlink(self, target, link):
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError) as e:
+            self.skipTest(f'no symlinks here ({e}); the junction and hard-link tests cover the realpath check')
+
+    def test_a_symlinked_settings_file_refuses(self):
+        out = self.t / 'out.json'
+        out.write_text(json.dumps(SETTINGS))
+        before = out.read_bytes()
+        self.f.unlink()
+        self._symlink(out, self.f)
+        self.assertRefused('allow', 'Bash(git status:*)', contains='is a link')
+        self.assertEqual(out.read_bytes(), before)
+
+    def test_a_link_at_bak_refuses(self):
+        out = self.t / 'victim.txt'
+        out.write_text('keep me')
+        self._symlink(out, self.t / '.claude' / 'settings.json.bak')
+        self.assertRefused('allow', 'Bash(git status:*)', contains='settings.json.bak is a link')
+        self.assertEqual(out.read_text(), 'keep me')
+
+    def test_hard_links_refuse(self):
+        out = self.t / 'twin.json'
+        os.link(self.f, out)
+        self.assertRefused('allow', 'Bash(git status:*)', contains='hard links')
+        out.unlink()
+        victim = self.t / 'victim.txt'
+        victim.write_text('keep me')
+        os.link(victim, self.t / '.claude' / 'settings.json.bak')
+        self.assertRefused('allow', 'Bash(git status:*)', contains='settings.json.bak has 2 hard links')
+        self.assertEqual(victim.read_text(), 'keep me')
+
+    def test_crlf_is_kept_and_bak_holds_the_bytes(self):
+        raw = (json.dumps(SETTINGS, indent=2) + '\n').replace('\n', '\r\n').encode()
+        self.f.write_bytes(raw)
+        self.assertEqual(self.wsc('allow', 'Bash(git status:*)')[0], 0)
+        new = self.f.read_bytes()
+        self.assertIn(b'\r\n', new)
+        self.assertNotIn(b'\n', new.replace(b'\r\n', b''))
+        self.assertEqual((self.t / '.claude' / 'settings.json.bak').read_bytes(), raw)
 
     def test_a_missing_file_is_created_with_the_rule(self):
         self.f.unlink()
