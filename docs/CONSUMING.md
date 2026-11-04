@@ -96,7 +96,7 @@ jobs:
       - run: python core/wsc.py gates
 ```
 
-## Game proxy tests and the pin file schema (0.31.0, W16; [PROXY_HARNESS.md](PROXY_HARNESS.md))
+## Game proxy tests and the pin file schema (0.32.0, W16; [PROXY_HARNESS.md](PROXY_HARNESS.md))
 - **Move the checks the core dropped:** `test_console.cpp` and `test_camera.cpp` no longer check a game's console and camera numbers. Add them to the
   game's own `proxy/tests/` (the text is in core `jobs/W16/report.md`, "Consumer test files"); `core/proxy/tools/build.sh tests` lists them as game tests.
 - **Pin file:** `python3 core/proxy/tools/fetch_ui.py --check` must pass (add `stb_image_write` if missing; extra pins such as `emsdk_image` stay).
