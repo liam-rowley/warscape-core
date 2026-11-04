@@ -10,7 +10,7 @@ Run 2026-11-04 with W27's method: every merged `job/` pull request judged at its
 | core | 31 | 6 (W4, W6, W19, W24, W29, W37) | 4 (W28, W29, W26, W15) | 1 (W29) |
 | napoleon | 64 | 28 | 0 | 0 |
 
-- **Core, the one hit:** W29, a reviewer's `merge` over code (commit `86b4fd66a4e6`, `warscape/release.py` and its test, session bf405dba, attributed to round 1). That review was committed at 18:54 UTC and W27 merged at 20:22, so the reviewer could not have seen the rule. It counts under the brief's definition (merged after 95f0269), but it is not a reviewer ignoring it.
+- **Core, the one hit:** W29, a reviewer's `merge` over code (`warscape/release.py` and its test, session bf405dba, attributed to round 1; `wsc policy --scan --rule A` prints the sha). That review was committed at 18:54 UTC and W27 merged at 20:22, so the reviewer could not have seen the rule. It counts under the brief's definition (merged after 95f0269), but it is not a reviewer ignoring it.
 - **Do reviewers now write `merge after fixes`? The scan cannot say yet.** Passing the criterion is not evidence of a change in behaviour. W27 merged at 20:22 UTC and this scan ran the same evening, so almost no round was written with rule A on `main`: W15 (18:24), W26 (19:05), W29 (18:54), W28's round 1 (18:40) and open W35's rounds (19:06, 20:19) all came first. Only W28's round 2 (20:23, 20:25) came after, and it wrote no code. Liam's condition was "after reviewers have used `merge after fixes` for a while"; that has not happened yet. See open question 1.
 - **Napoleon's 0 says nothing.** Its pin is core 0.10.0 (`c242f2f`), so no pin bump to 0.35.0 or later exists and rule A has never run there. No napoleon `job/` branch merged after core W27 by time either (`--since 8e6eb72`, its main at that moment). Its total is 28 against W27's 27.
 - **Napoleon's 28 overstates it:** 11 of them (J1, J13, J18, J19, J20, J22, J40, J45, J52, J54, J56) changed only `registries/jobs.jsonl` and `registries/jobs.md`, the job's own row before rows moved to one file each (J55). They cannot recur.
@@ -27,8 +27,8 @@ Run 2026-11-04 with W27's method: every merged `job/` pull request judged at its
 
 ## Evidence
 - **Red, then green:** `tests/test_policy.py` and `tests/test_policy_base.py`, on Windows with the local Python 3.15.2 (CI is the run on the project's version). Red committed first: 106 tests, 13 failures and 11 errors. Green after the build: `Ran 106 tests ... OK`.
-- **Full gates:** `python3 wsc.py gates`, 2026-11-04 on Windows: 15 ok, 1 warn, 0 failed; 939 host tests passed, 5 skipped (the warn is the skips: no POSIX sh for one hook test, no capstone for four).
-- **Branch CI:** `gates` run 41930930530 on `d119bf7`, 2026-11-04: success (`gates` on windows-latest and ubuntu-latest, `harness-windows`, `proxy`). That head holds all the code; the commits after it add this report, the row, C36 and a merge of W35. The `policy` check skips drafts, so it runs when the reviewer marks the pull request ready; the local run is below.
+- **Full gates:** `python3 wsc.py gates`, 2026-11-04 on Windows, after merging W35: 15 ok, 1 warn, 0 failed; 1001 host tests passed, 5 skipped (the warn is the skips: no POSIX sh for one hook test, no capstone for four).
+- **Branch CI:** `gates` run 41930930530 on `d119bf7`, 2026-11-04: success (`gates` on windows-latest and ubuntu-latest, `harness-windows`, `proxy`). That head holds all the code; the commits after it add this report, the row, C36 and a merge of W35. The `policy` check skips drafts, so it runs when the reviewer marks the pull request ready; locally `python3 wsc.py policy --branch job/W40 --base origin/main` is refused only for the missing `review.md` and the row not being `done`, as the brief expects of a job in progress.
 - **The repro, real `wsc policy` verb on a temporary repository** (round 1's reviewer commit changes `docs/REVIEW.md` and writes `merge`):
 
 ```
@@ -43,7 +43,7 @@ policy: warning: round 1 of jobs/W900/review.md says merge, but its own commits 
 policy: job/W900: ok (5 files changed)
 ```
 
-(Shas shortened to 7; the temporary repositories are gone.) A head that flips the key is still judged with the base's value, in both directions: `test_w40_a_head_that_flips_the_key_is_judged_with_the_bases_value`, `test_w40_a_warn_base_stays_a_warning_when_the_head_says_error`.
+(Shas shortened to 7; the temporary repositories are gone. `policy` warns that this report cites `job/W900`: that is the fixture's name in the pasted output, not evidence.) A head that flips the key is still judged with the base's value, in both directions: `test_w40_a_head_that_flips_the_key_is_judged_with_the_bases_value`, `test_w40_a_warn_base_stays_a_warning_when_the_head_says_error`.
 
 ## In-flight branches (decision 3)
 None is touched today. W35, the only in-flight branch with a review, printed no rule A line against `origin/main` at 209ca5a and has since merged. W31, W34, W36 and W39 held only a brief when checked. For a branch that does trip the error later, the cost depends on who is left: the round's own session changes its verdict to `merge after fixes`, or a fresh session writes a new round on top. Decision 3's "new round with the verdict changed" only works because of deviation 1.
@@ -61,7 +61,7 @@ None is touched today. W35, the only in-flight branch with a review, printed no 
 ## Open questions
 1. **Is it too early to merge this? Liam's call.** The brief's number passes, so I built it, but the condition behind that number (reviewers using `merge after fixes` for a while) has had about two hours and one review round to show up. Recommended: merge anyway. Being early costs little, since only the core's own reviewers are affected, the fix is a verdict change or a fresh round, and `wsc policy --scan --since 95f0269 --rule A` can re-measure at any time. If Liam would rather wait, setting the core's `reviewer_code` back to `"warn"` is a one-line change and keeps everything else.
 2. **A gap in rule A that predates this job, not fixed here.** A round-1 session that wrote `merge after fixes` can push code after round 2's `merge`, and rule A says nothing, even at `error`: the commit is attributed to round 1, whose verdict is not `merge`. Confirmed with the steps R1 `merge after fixes`, R2 `merge`, R1 code, which gave `([], [])`. Deviation 1 does not widen it, because it only removes hits. Recommended: a small later job that judges such a commit against the newest round. I left it out because it changes what rule A attributes, which the brief did not ask for.
-3. **Should rule D's branch cites follow?** The brief recommends no, and I agree. Since W27, 1 branch of 4 cites a branch (W26, `job/W9`, reported as not in this clone); the same timing caveat applies.
+3. **Should rule D's branch cites follow?** The brief recommends no, and I agree. Since W27, 1 branch of 4 cites a branch (W26, whose cite the scan reports as not in this clone); the same timing caveat applies.
 
 ## What napoleon must do after the tag
 Nothing is forced. Its pin is at 0.10.0, so it meets rule A for the first time at its next bump, as a warning. It may set `[policy] reviewer_code = "error"` in a pin-bump commit, once its open `merge` rounds are done; until then rule A stays a warning there. `python3 core/wsc.py policy --scan --rule A` gives it the count first.
