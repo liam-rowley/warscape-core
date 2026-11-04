@@ -11,6 +11,7 @@
 #include "gesture_feed.h"
 #include "gesture_plan.h"
 #include "gesture_group.h"
+#include "gesture_host.h"
 #include <cmath>
 #include <sstream>
 
@@ -372,6 +373,37 @@ static void FeedCases() {
         f = F(m, kWmLButtonUp, 0, 200, 100, 0); Check(f.action == kPass, "feed: the release after focus loss passes"); }
     {   Machine m; F(m, kWmLButtonDown, kMkLButton, 100, 100, A); FeedOut f = F(m, kWmActivateApp, 1, 0, 0, 0);
         Check(!f.fed && m.phase == kPending, "feed: activation (not loss) is no cancel"); }
+    {   // B58 b (W20): WM_CAPTURECHANGED is focus loss unless the window gaining the capture is the subclassed window itself
+        const uintptr_t self = 0x1234, other = 0x5678;
+        Check(kWmCaptureChanged == 0x0215, "capture: the message number is Win32's");
+        Check(Classify(kWmCaptureChanged, 0, 0, self) == kClsFocus, "capture: gaining window null = focus loss");
+        Check(Classify(kWmCaptureChanged, 0, (intptr_t)other, self) == kClsFocus, "capture: another window gaining = focus loss");
+        Check(Classify(kWmCaptureChanged, 0, (intptr_t)self, self) == kClsOther, "capture: our own window gaining = not focus loss");
+        Check(Classify(kWmCaptureChanged, 0, 0) == kClsFocus, "capture: no window handle given = focus loss");
+        struct Gain { const char* name; intptr_t lp; bool cancels; } gains[] = { { "null", 0, true }, { "other", (intptr_t)other, true }, { "ours", (intptr_t)self, false } };
+        for (const Gain& g : gains) {
+            for (int phase = 0; phase < 4; ++phase) {   // 0 idle, 1 pending, 2 active, 3 drain
+                Machine m;
+                if (phase >= 1) F(m, kWmLButtonDown, kMkLButton, 100, 100, A);
+                if (phase == 2) F(m, kWmMouseMove, kMkLButton, 200, 100, A);
+                if (phase == 3) { F(m, kWmMouseMove, kMkLButton, 200, 100, A); F(m, kWmRButtonDown, kMkLButton | kMkRButton, 200, 100, A); }
+                const Phase before = m.phase;
+                FeedOut f = Feed(m, kWmCaptureChanged, 0, 0, 0, 0, true, true, false, kNone, g.lp, self);
+                const std::string what = std::string("capture ") + g.name + " in phase " + std::to_string(phase);
+                Check(f.action == kPass, what + ": the message always passes");
+                if (g.cancels && (phase == 1 || phase == 2)) Check(f.sm.cancel && m.phase == kIdle, what + ": a gesture cancels");
+                else if (g.cancels && phase == 0) Check(m.phase == kIdle && !f.sm.cancel, what + ": idle stays idle");
+                else if (g.cancels && phase == 3) Check(m.phase == kIdle || m.phase == kDrain, what + ": drain is not made worse");
+                else Check(!f.fed && m.phase == before, what + ": our own capture leaves every phase alone");
+            }
+        }
+    }
+    {   // B58 a (W20): the re-entry owner check is pure
+        Check(ReenteredBy(77, 77), "reenter: the owning thread is re-entering");
+        Check(!ReenteredBy(77, 78), "reenter: another thread is not");
+        Check(!ReenteredBy(0, 0), "reenter: owner 0 = no owner, never a match");
+        Check(!ReenteredBy(0, 5), "reenter: nobody holds the lock");
+    }
     {   Machine m; F(m, kWmLButtonDown, kMkLButton, 100, 100, A); F(m, kWmMouseMove, kMkLButton, 200, 100, A);
         FeedOut f = F(m, kWmMouseMove, 0, 210, 100, A); Check(f.sm.cancel && m.phase == kIdle && f.action == kPass, "feed: a move without the button cancels and passes"); }
     {   Machine m; F(m, kWmLButtonDown, kMkLButton, 100, 100, A); F(m, kWmMouseMove, kMkLButton, 200, 100, A);
@@ -510,6 +542,21 @@ int main(int argc, char** argv) {
         Check(pr != std::string::npos && gp != std::string::npos && fr != std::string::npos && gp < fr, "order: Present draws the gesture preview before the RmlUi panels");
         const size_t init = host.find("void UiInit() {");
         Check(init != std::string::npos && host.find("if (!K.enabled) return;", init) != std::string::npos, "order: W2's ui.enabled=0 early return is untouched");
+    }
+    {   // W20 source lints: B53 (the owner word), B58 a (the re-entry guard), c (held only after the stage took the press)
+        const std::string drv = tk::ReadFile("core/gesture.cpp");
+        const size_t own = drv.find("bool GestureOwnsMouse() {"), ownEnd = drv.find('}', own);
+        Check(own != std::string::npos && drv.substr(own, ownEnd - own).find("s_ownsMouse") != std::string::npos && drv.substr(own, ownEnd - own).find("s_m.") == std::string::npos,
+              "B53: GestureOwnsMouse reads s_ownsMouse only, not the machine's fields");
+        Check(drv.find("InterlockedExchange(&s_ownsMouse") != std::string::npos, "B53: GestureMessage publishes s_ownsMouse");
+        const size_t gm = drv.find("GestureMessage(void* hwnd, uint32_t msg, uint32_t wp, intptr_t lp, bool mouseToEngine) {");
+        const size_t chk = drv.find("ReenteredBy(s_lockOwner", gm), lk = drv.find("Lock l;", gm);
+        Check(gm != std::string::npos && chk != std::string::npos && lk != std::string::npos && chk < lk, "B58 a: GestureMessage tests s_lockOwner before taking s_lock");
+        const size_t sw = drv.find("void GestureSetWindow(void* hwnd) {");
+        Check(sw != std::string::npos && drv.find("ReenteredBy(s_lockOwner", sw) < drv.find("Lock l;", sw), "B58 a: GestureSetWindow tests s_lockOwner before taking s_lock");
+        Check(drv.find("s_lockOwner = GetCurrentThreadId();") != std::string::npos && drv.find("s_lockOwner = 0;") != std::string::npos, "B58 a: the Lock struct records and clears its owner");
+        Check(drv.find("InterlockedIncrement(&s_reentered)") != std::string::npos && drv.find("\"reentered\"") != std::string::npos, "B58 a: re-entry is counted and reported in gesture info");
+        Check(drv.find("s_ctlHeld = true;") == std::string::npos && drv.find("\"held\"") != std::string::npos, "B58 c: s_ctlHeld is never set unconditionally; the result reports held");
     }
     // the headers carry no Windows types (they build here, on the host, without windows.h) and no game names
     for (const char* h : { "core/gesture_math.h", "core/gesture_sm.h", "core/gesture_feed.h", "core/gesture_plan.h", "core/gesture_group.h" }) {
