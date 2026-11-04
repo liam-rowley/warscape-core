@@ -3,10 +3,11 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) C3, C4, the root cause of G2. WritePlanAtomic restores protections in forward order (patch_engine.h:182-186), so the second site on a page restores the RWX it recorded and code pages stay RWX (six page groups in napoleon's table, two on in release); the mock asserts old == 0x20 per site and models no pages. Restore once per page (or in reverse), give the mock page semantics, and add a two-sites-one-page test. dev.cpp:668,673 start StateThread and CtlThread from DevInit inside DllMain (dllmain.cpp:105,118), Empire's no-threads-from-DllMain trap; napoleon's player ini sets dev.file_rules (its D46 exception), so the thread starts in the shipped DLL (open fact napoleon.proxy.init_heap_corruption; the causal link is unverified). Start them at the first Direct3DCreate9, as headless.cpp already does, and only when a dev feature needs them; add a player key for the UI-scale file rules outside dev.*, so a release can ship them with every dev key off. Opus: DLL. After W24 (DLL inputs, so a consumer takes both in one acceptance run).",
   "title": "Patch engine page protections and dev threads off DllMain",
   "phase": 1,
-  "status": "needs_brief",
+  "status": "queued",
   "model": "opus",
   "needs_pc": false,
   "depends_on": [
     "W24"
-  ]
+  ],
+  "brief": "jobs/W33/brief.md"
 }
