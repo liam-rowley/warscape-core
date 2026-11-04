@@ -5,7 +5,7 @@ usage: wsc policy --branch <head branch> [--base origin/main] [--head <rev>, def
 when: automatic in CI (the `policy` job) and, with `[policy] commit_msg_hook = true`, in .githooks/commit-msg; locally (after `git fetch`) before opening a pull request to see what CI will say; the job steps (`wsc jobs next|review|fix`) name it
 verb: policy
 
-The judge (core W23, C24): `wsc policy` writes the base's rule inputs into a temporary folder and runs the base's own `wsc policy --judge` there,
+The judge (core W23, C25): `wsc policy` writes the base's rule inputs into a temporary folder and runs the base's own `wsc policy --judge` there,
 so a local run and CI print the same lines for the same two shas (CI is the authority: its parent is the base's code, a local parent is your
 checkout's). Internal flags of that child, hidden from --help: `--judge` (judge in this process: `--root` is the base tree, the rules are
 its config and gate modules), `--repo <clone>` (where git reads the head; shas only), `--base-ref <name>` (the base's name in messages).

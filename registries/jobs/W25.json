@@ -3,10 +3,11 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) H7, H8, H12 (rest), H1 (watcher.ini), G5 (pc_deploy half). proxy/tools/pc_deploy.py: install, uninstall, set and sync-lua take the game lock; set refuses while the game runs and writes the ini through a temp file and os.replace; --assume-closed needs the lock (pc_deploy.py:525-531, 604-616, 718-738). status checks owned paths when nothing is installed, so a stray ini is reported (the project PC has one now), and install refuses to snapshot a file that is ours as vanilla (153-179, 593-600, 643-647); owned is the union of every installed set, not only the new one (598). The watcher refuses to reload a watcher.ini that weakens exe_check (exe_check=warn switches off the D2 launch gate on the next pass). verify_kit refuses backslash path traversal (309-312); the exe sha cache is keyed on more than size and mtime; stage_save.py refuses & in save names (line 60, an Empire learning); load_save.sh quotes $JOB; one ESF index convention in esf_edit.py (241, 420). Host tests and Windows integration cases first. After W10 (the same files).",
   "title": "pc_deploy and harness hardening: locks, atomic ini, stray files, small guards",
   "phase": 1,
-  "status": "needs_brief",
+  "status": "queued",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [
     "W10"
-  ]
+  ],
+  "brief": "jobs/W25/brief.md"
 }

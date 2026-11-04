@@ -2,7 +2,7 @@
 #          judged with the base's rules; a failure comments on the pull request.
 # usage: runs on GitHub Actions; locally (after git fetch): python3 wsc.py policy --branch <branch> --base origin/main [--head <rev>]
 # when: automatic on pull requests; require the "policy" check in branch protection for main.
-# pull_request_target (W23, C24): GitHub runs this file as it is on main, never a pull request's copy, so a branch cannot edit its own check, and
+# pull_request_target (W23, C25): GitHub runs this file as it is on main, never a pull request's copy, so a branch cannot edit its own check, and
 # `wsc policy` judges the head's commits with main's code and configuration. The job has the base's privileges: no step checks out, builds,
 # caches or runs the pull request's files (the policy block fetches the head as git objects; `wsc ci render` refuses a template without it).
 # Draft pull requests skip it: a job's builder opens its pull request as a draft when the job reaches review, so the review sees the branch's CI

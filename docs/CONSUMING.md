@@ -164,6 +164,7 @@ dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
 models = ["sonnet", "opus"]        # the Model line of a brief; models after the first need a stated reason
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
+failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
@@ -181,7 +182,7 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
-- **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
+- **A pull request is judged with its base's rules (0.27.0, W23, C25).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
   `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
   commit's tree; in a game, the core commit the base's `core` gitlink pins (read from the submodule's object store: `git submodule update --init`),
   plus the base's `wsc.toml`, `[gates] dirs` and `[jobs] legacy` file. The head reaches it only as git objects: its diff, the blobs the rules read,
@@ -258,7 +259,7 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
 
-## Moving to base-judged policy (0.26.0, core W23, C24)
+## Moving to base-judged policy (0.27.0, core W23, C25)
 In the pin-bump commit itself, because the render guard and the new facts fail otherwise (napoleon: J78):
 1. **`ci/policy.yml.in`:** `on: pull_request_target` with the same types. For the bump's own pull request add a second trigger, `pull_request` with
    the same types and `paths: ['jobs/<bump id>/report.md']` (main's copy has no `pull_request_target` yet, so without it nothing would run `policy`

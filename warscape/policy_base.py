@@ -1,4 +1,4 @@
-"""The parent of `wsc policy` (core W23, C24): the base's rule inputs into a temporary folder, the base's code in a child process.
+"""The parent of `wsc policy` (core W23, C25): the base's rule inputs into a temporary folder, the base's code in a child process.
 
 Split from warscape/policy.py (the rules and the in-process judge `run_check`) when that file passed the 350 lines W23's brief allowed it.
 `judge` resolves the base and the head, reads the base's wsc.toml from git, finds the core commit that judges (inside the core the base commit

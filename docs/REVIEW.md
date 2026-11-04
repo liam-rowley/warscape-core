@@ -25,7 +25,7 @@ in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/b
 ## Steps
 1. **Run the machines first.** `wsc gates` and `wsc policy --branch job/<id> --base origin/main` (CI's `policy` check, run locally), plus any build or host
    tests the branch adds. Note failures, and any red check `wsc jobs review` lists for the pull request. Do not spend calls re-checking anything a gate covers.
-   `policy` judges with the base's rules, never the branch's (C24): `git fetch` first; a branch that changes the rules gets a note, and its new rule is
+   `policy` judges with the base's rules, never the branch's (C25): `git fetch` first; a branch that changes the rules gets a note, and its new rule is
    proven by its host tests, not by its own `policy` run.
 2. **Claims against evidence.** Every claim in the report needs evidence you can open: a run report, a log, test output, a registry row with a date and run
    id. A claim with no evidence is a finding, however plausible.
