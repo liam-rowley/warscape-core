@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Where the game repo and its adapters are, for every proxy and harness tool (J12): one answer before and after the move to warscape-core.
 
-purpose: print (or return) the game repo root, the core's own root, the proxy core sources, the RmlUi pin file, and the game's proxy, harness and discovery adapters
-usage: python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|discovery-adapter|ui-pins|all]   (default all: one `name<TAB>path` line each)
+purpose: print (or return) the game repo root, the core's own root, the proxy core sources, the RmlUi pin file, the game's own proxy host tests, and the game's proxy, harness and discovery adapters
+usage: python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|discovery-adapter|ui-pins|proxy-tests|all]   (default all: one `name<TAB>path` line each; proxy-tests prints an empty line when the game has none)
 when: every core tool that needs a game path imports it (python) or runs it (bash: build.sh, job.sh, shot.sh); run it by hand to see what a tool will use
 not-a-verb: a path resolver shared by the proxy and harness tools (bash and python), not a registry operation
 
@@ -15,7 +15,10 @@ A tool never finds the game by its own location or a game name. The rules, in or
 - adapters: the game root's wsc.toml `[proxy] adapter` / `[harness] adapter` / `[discovery] adapter` (repo-relative) when it names one, else the one
   proxy/*/adapter.cpp folder / the one harness/*/adapter.json / the one discovery/*/games.json folder under the game root; none or several is an
   error that names them.
-$WSP_PROXY_ADAPTER, $HARNESS_ADAPTER and $WSP_DISCOVERY_ADAPTER override the adapters (tests, the kit). Read-only: nothing here writes.
+- the game's proxy host tests (W16): `[proxy] tests` (repo-relative folder) when set, else <game root>/proxy/tests when it holds a
+  test_*.cpp, else none. Never inside the adapter folder (a build-id input: a test edit would be a new DLL) and never the core's own proxy/tests.
+$WSP_PROXY_ADAPTER, $HARNESS_ADAPTER, $WSP_DISCOVERY_ADAPTER and $WSP_PROXY_TESTS override them (tests, the kit, the build container).
+Read-only: nothing here writes.
 """
 import os
 import subprocess
@@ -121,9 +124,44 @@ def ui_pins(game=None):
     return game / 'viewer' / 'pins.json'
 
 
+def proxy_tests(game=None):
+    """The game's own C++ host tests folder, which build.sh tests compiles after the core's (W16), or None when the game has none."""
+    game = game or game_root()
+    env = os.environ.get('WSP_PROXY_TESTS')
+    if env:
+        d, why = Path(env).resolve(), '$WSP_PROXY_TESTS'
+    else:
+        d, why = None, None
+        f = game / 'wsc.toml'
+        if f.is_file():
+            import tomllib
+            with open(f, 'rb') as fh:
+                v = tomllib.load(fh).get('proxy', {}).get('tests')
+            if v:
+                d, why = game / v, 'wsc.toml [proxy] tests'
+                if not d.is_dir():
+                    raise LayoutError(f'layout: {why} = {d.as_posix()} is not a folder')
+        if d is None:
+            d, why = game / 'proxy' / 'tests', 'the default proxy/tests'
+            if not d.is_dir() or not any(d.glob('test_*.cpp')):
+                return None
+    r = d.resolve()
+    if r == (own_root() / 'proxy' / 'tests').resolve():
+        raise LayoutError(f"layout: {why} ({d.as_posix()}) is the core's own host tests folder, which build.sh tests compiles already: the game root "
+                          f'is the core itself ({game.as_posix()}); set WSP_GAME_ROOT to a game (the null game: proxy/tests/null_game)')
+    try:
+        adapter = proxy_adapter(game).resolve()
+    except LayoutError:
+        adapter = None
+    if adapter and (r == adapter or adapter in r.parents):
+        raise LayoutError(f'layout: {why} ({d.as_posix()}) is inside the proxy adapter folder {adapter.as_posix()}, which the build id hashes whole: '
+                          f'a test edit would make a new DLL. Keep the game tests beside it (proxy/tests) and name them in wsc.toml [proxy] tests')
+    return d
+
+
 NAMES = {'own-root': lambda: own_root(), 'game-root': lambda: game_root(), 'proxy-src': lambda: proxy_src(),
          'proxy-adapter': lambda: proxy_adapter(), 'harness-adapter': lambda: harness_adapter(),
-         'discovery-adapter': lambda: discovery_adapter(), 'ui-pins': lambda: ui_pins()}
+         'discovery-adapter': lambda: discovery_adapter(), 'ui-pins': lambda: ui_pins(), 'proxy-tests': lambda: proxy_tests()}
 
 
 def main(argv=None):
@@ -136,11 +174,13 @@ def main(argv=None):
         if what == 'all':
             for n, f in NAMES.items():
                 try:
-                    print(f'{n}\t{f().as_posix()}')
+                    v = f()
+                    print(f'{n}\t{v.as_posix() if v else "- (none)"}')
                 except LayoutError as e:
                     print(f'{n}\t- ({e})')
         else:
-            print(NAMES[what]().as_posix())
+            v = NAMES[what]()
+            print(v.as_posix() if v else '')
     except LayoutError as e:
         print(e, file=sys.stderr)
         return 2

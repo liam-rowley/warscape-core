@@ -20,7 +20,7 @@ engine_facts = "core:engine_facts"
 include = [".githooks/*"]                                   # extensionless git hooks are tools too
 library = ["warscape/*.py", "warscape/verbs/__init__.py"]   # importable library modules: docstrings, no registry row
 exempt = ["tests/**", "discovery/tests/**"]                                       # host tests run through the `tests` gate
-retire_after_days = 0     # stays off in the core (C28): its tools are used through the games' jobs, whose reports it cannot read
+retire_after_days = 0     # stays off in the core (C31): its tools are used through the games' jobs, whose reports it cannot read
 
 [docs]
 max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the file name, or under records/ reports/ runs/) are exempt
@@ -53,6 +53,7 @@ ref_brief_merge = "C18"
 
 [policy]
 commit_msg_hook = true     # .githooks/commit-msg refuses a commit without a Claude-Session trailer (C23)
+decisions_cite_job = true  # a C row added on job/<id> names <id> (W27 rule F)
 decisions = "docs/DECISIONS.md"
 decision_prefix = "C"
 plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md", "CLAUDE.md"]

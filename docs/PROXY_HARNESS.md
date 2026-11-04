@@ -21,9 +21,25 @@ instead of keeping its own, and a host test that runs a shell script takes its b
 `$WSC_REQUIRE_BASH`).
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
 (watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+A headless launch whose game writes `refused` and exits before the watcher looks now fails with the proxy's own detail, not "not running after
+the start" (watcher 1.4.1, 0.30.1, W38); update the PC's watcher with `update kit=`.
 
 **The UI pin file** (`[proxy] ui_pins`, else `viewer/pins.json`; the `ui_pins` input) needs `rmlui`, `freetype`, `lua`, `stb_image` and
 `stb_image_write` (the PNG dump, since 0.10.0); copy a missing entry from the null game's `proxy/tests/null_game/viewer/pins.json`.
+From 0.34.0 (W16) it has a schema, `schemas/ui_pins.schema.json`: each git pin a `version`, an https `repo` and a 40-hex lower-case `commit`
+(optional `tag`, `licence`, `why`); `lua` and the stb files a `version`, an https `url` and a 64-hex lower-case `sha256` (`lua` also a `licence`;
+the stb files an optional `commit`); `_doc` a string; any other key an object (a game's own pins, such as a viewer's image). `fetch_ui.py`
+validates before it fetches and names every problem; `fetch_ui.py --check [--pins FILE]` validates only, with no network (a game's test can call it).
+
+**A game's own proxy host tests** (0.34.0, W16): `build.sh tests` compiles and runs the core's `proxy/tests/test_*.cpp`, then the game's, sorted,
+with the same flags plus `-I<game tests>`, and prints `core test <name>` / `game test <name>`; a failing game test fails the target. The folder is
+`wsc.toml` `[proxy] tests` (repo-relative), else `<game>/proxy/tests` when it holds a `test_*.cpp`, else none (`$WSP_PROXY_TESTS` overrides;
+`layout.py proxy-tests` prints it). It must sit outside the adapter folder (a build-id input: a test edit would be a new DLL). A game's console and
+camera numbers (opcodes and offsets in its sites' stock bytes, its command tables) live there: `#include "adapter_checks.h"` and `"adapter.cpp"`, run
+`adck::ConsoleAdapterProblems` / `adck::CameraAdapterProblems` with `adck::TableLookup(a.sites, a.nSites)` (the contract the core's reads need),
+then the literal checks. The null game's `proxy/tests/test_null_adapter.cpp` is the smallest example.
+`build.sh --docker` mounts the outer of the game root and the core (the game repo holding the core, or the core holding its null game) and refuses
+two separate trees; `build_id.py` reads a game root nested in its repository under its prefix, so the null game's id in place is a real one.
 
 Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
 ([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer

@@ -175,6 +175,243 @@ class Policy(unittest.TestCase):
             self.assertTrue(any('no `Claude-Session:` trailer' in x for x in e), e)
 
 
+# ---------------------------------------------------------------- W27: review integrity (rules A-F), pure check() with fake git reads
+DONE = dict(ROW, status='done', report='jobs/J1/report.md', review='jobs/J1/review.md')
+REV = 'jobs/J1/review.md'
+
+
+def rnd(n, v, extra=''):
+    """One review round section."""
+    return f'## Round {n} (2026-11-04, branch job/J1 at abc123{n})\n\n**Verdict: {v}.**\n{extra}\n'
+
+
+def rv(*rounds):
+    """A review.md of rounds given newest first as (n, verdict[, extra])."""
+    return '# Review of J1\n\n' + ''.join(rnd(*r) for r in rounds)
+
+
+def fake_reads(commits=(), history=(), numstat=(), exists=(), refs=None, shas=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(commits=lambda: list(commits), history=lambda p: list(history) if p == REV else [],
+                           numstat=lambda: list(numstat), exists=lambda p: p in exists,
+                           ref_state=lambda r: (refs or {}).get(r, 'missing'), sha_state=lambda s: (shas or {}).get(s, 'missing'))
+
+
+def w27(steps, report='# J1 report\n', base=None, cfg=CFG, base_rows=None, changed=('x.py',), branch='job/J1', **kw):
+    """check() of job/J1 whose commits are `steps`: (sha, session or None, paths, review.md text after it or None). The builder's first step
+    writes report.md. Returns (errors, warnings)."""
+    commits, hist, review = [], [], None
+    for sha, who, paths, text in steps:
+        t = {who} if who else set()
+        commits.append((sha, t, list(paths) + ([REV] if text is not None else [])))
+        if text is not None:
+            hist.append((sha, t, text))
+            review = text
+    sess = lambda p: [c[1] for c in commits if p in c[2]]
+    warns = []
+    errs = check(branch, list(changed), base_rows or {'J1': ROW, 'J2': OTHER}, {**(base_rows or {'J2': OTHER}), 'J1': DONE},
+                 base or files(**{'jobs/J1/brief.md': 'b'}), files(**{'jobs/J1/report.md': report, REV: review}), sess, cfg=cfg,
+                 reads=fake_reads(commits, hist, **kw), warnings=warns)
+    return errs, warns
+
+
+BUILD = ('c1', 'S1', ['warscape/x.py', 'jobs/J1/report.md'], None)
+FIX1 = ('c3', 'F1', ['warscape/x.py', 'jobs/J1/report.md'], None)
+
+
+class W27ReviewerCode(unittest.TestCase):
+    """Rule A: a round whose own commits change a file outside jobs/<id>/ and the job's row must say `merge after fixes`."""
+
+    def test_a_reviewer_code_commit_under_merge_is_refused_naming_shas_and_paths(self):
+        e, w = w27([BUILD, ('c2', 'R1', ['warscape/y.py', 'registries/jobs/J1.json'], rv((1, 'merge')))])
+        self.assertEqual(e, [])   # a warning since the scan of the merged branches (kill criterion: more than 3 beyond the audit's)
+        self.assertTrue(any('c2' in x and 'warscape/y.py' in x and 'write the verdict `merge after fixes`' in x for x in w), w)
+
+    def test_a_separate_code_commit_by_the_reviewer_is_part_of_its_round(self):
+        _, w = w27([BUILD, ('c2', 'R1', ['docs/REVIEW.md'], None), ('c3', 'R1', [], rv((1, 'merge')))])
+        self.assertTrue(any('c2' in x and 'docs/REVIEW.md' in x for x in w), w)
+
+    def test_the_same_change_under_merge_after_fixes_passes_rule_a(self):
+        e, w = w27([BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes')))])
+        self.assertFalse(any('a fresh round reviews your change' in x for x in e + w), e + w)
+
+    def test_a_reviewer_commit_of_review_md_and_the_row_only_passes(self):
+        e, w = w27([BUILD, ('c2', 'R1', ['registries/jobs/J1.json', 'jobs/J1/notes.md'], rv((1, 'merge')))])
+        self.assertEqual((e, w), ([], []))
+
+    def test_code_written_by_round_1_is_reviewed_by_round_2(self):
+        steps = [BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes'))), FIX1,
+                 ('c4', 'R2', ['registries/jobs/J1.json'], rv((2, 'merge'), (1, 'merge after fixes')))]
+        self.assertEqual(w27(steps), ([], []))
+
+    def test_an_unattributed_code_commit_after_the_last_round_counts_for_it(self):
+        _, w = w27([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'X9', ['warscape/z.py'], None)])
+        self.assertTrue(any('c3' in x and 'warscape/z.py' in x for x in w), w)
+
+
+class W27FreshRounds(unittest.TestCase):
+    """Rule B: every round's sessions are disjoint from the builder's and from every earlier round's."""
+
+    def test_round_2_by_the_round_1_session_is_refused(self):
+        steps = [BUILD, ('c2', 'R1', [], rv((1, 'merge after fixes'))), FIX1, ('c4', 'R1', [], rv((2, 'merge'), (1, 'merge after fixes')))]
+        e, _ = w27(steps)
+        self.assertTrue(any('round 2 was written by a session that wrote round 1 (R1): a fresh session per round' in x for x in e), e)
+
+    def test_the_builder_in_a_round_is_refused(self):
+        e, _ = w27([BUILD, ('c2', 'S1', [], rv((1, 'merge')))])
+        self.assertTrue(any('session that also wrote the report (S1)' in x for x in e), e)
+
+    def test_a_fix_session_reviewing_a_later_round_is_refused(self):
+        steps = [BUILD, ('c2', 'R1', [], rv((1, 'merge after fixes'))), FIX1, ('c4', 'F1', [], rv((2, 'merge'), (1, 'merge after fixes')))]
+        e, _ = w27(steps)
+        self.assertTrue(any('session that also wrote the report (F1)' in x for x in e), e)
+
+    def test_a_round_commit_without_a_trailer_is_refused(self):
+        e, _ = w27([BUILD, ('c2', None, [], rv((1, 'merge')))])
+        self.assertTrue(any('no `Claude-Session:` trailer' in x for x in e), e)
+
+
+class W27AppendOnly(unittest.TestCase):
+    """Rule C: an earlier round stays byte-identical once a newer one exists, checked commit by commit and at the head against the base."""
+    R1 = rv((1, 'merge after fixes'))
+
+    def test_round_2_on_top_passes(self):
+        steps = [BUILD, ('c2', 'R1', [], self.R1), FIX1, ('c4', 'R2', [], rv((2, 'merge'), (1, 'merge after fixes')))]
+        self.assertEqual(w27(steps)[0], [])
+
+    def test_an_edit_inside_round_1_after_round_2_exists_is_refused(self):
+        steps = [BUILD, ('c2', 'R1', [], self.R1), FIX1, ('c4', 'R2', [], rv((2, 'merge'), (1, 'merge after fixes'))),
+                 ('c5', 'R2', [], rv((2, 'merge'), (1, 'merge after fixes', 'Edited later.')))]
+        e, _ = w27(steps)
+        self.assertTrue(any('round 1' in x and 'c5' in x and 'append only' in x for x in e), e)
+
+    def test_a_rewrite_then_restore_across_two_commits_is_refused(self):
+        steps = [BUILD, ('c2', 'R1', [], self.R1), FIX1, ('c4', 'R2', [], rv((2, 'merge'), (1, 'merge'))),
+                 ('c5', 'R2', [], rv((2, 'merge'), (1, 'merge after fixes')))]
+        e, _ = w27(steps)
+        self.assertTrue(any('round 1' in x and 'c4' in x and 'append only' in x for x in e), e)
+
+    def test_the_newest_rounds_own_author_may_edit_it_before_another_round(self):
+        steps = [BUILD, ('c2', 'R1', [], rv((1, 'do not merge'))), ('c3', 'R1', [], rv((1, 'merge', 'Rechecked.')))]
+        self.assertEqual(w27(steps)[0], [])
+
+    def test_another_session_editing_the_newest_round_is_refused(self):
+        steps = [BUILD, ('c2', 'R1', [], rv((1, 'do not merge'))), ('c3', 'R7', [], rv((1, 'merge')))]
+        e, _ = w27(steps)
+        self.assertTrue(any('round 1' in x and 'c3' in x and 'did not write it' in x for x in e), e)
+
+    def test_the_head_keeps_the_bases_rounds(self):
+        base = files(**{'jobs/J1/brief.md': 'b', REV: self.R1})
+        e, _ = w27([BUILD, ('c4', 'R2', [], rv((2, 'merge'), (1, 'merge', 'changed')))], base=base)
+        self.assertTrue(any('round 1' in x and 'the base' in x for x in e), e)
+
+
+class W27Evidence(unittest.TestCase):
+    """Rule D: cited run folders, branches and commits resolve on a main branch or a pushed tag (errors for what the clone proves)."""
+    OK = [BUILD, ('c2', 'R1', [], rv((1, 'merge')))]
+
+    def test_a_run_folder_that_exists_nowhere_is_an_error(self):
+        e, _ = w27(self.OK, report='Evidence: `harness/runs/20261104_x/result.json`.\n')
+        self.assertTrue(any('harness/runs/20261104_x' in x and 'exists in neither' in x for x in e), e)
+
+    def test_a_run_folder_in_the_head_or_the_base_passes(self):
+        self.assertEqual(w27(self.OK, report='See harness/runs/20261104_x.\n', exists={'harness/runs/20261104_x'})[0], [])
+
+    def test_an_absolute_or_url_run_path_is_not_a_repo_cite(self):
+        rep = 'C:/pc/runs/20261104_x and https://github.com/o/r/actions/runs/41871905211 and <state>/runs/a1 and ~/runs/b2\n'
+        self.assertEqual(w27(self.OK, report=rep), ([], []))
+
+    def test_an_unmerged_job_branch_is_an_error_and_a_merged_one_passes(self):
+        e, w = w27(self.OK, report='Built on `job/J9`.\n', refs={'job/J9': 'unmerged'})
+        self.assertEqual(e, [])   # a warning since the scan of the merged branches (13 name an open branch in passing)
+        self.assertTrue(any('job/J9' in x and 'evidence on an unmerged branch cannot be opened from main' in x for x in w), w)
+        self.assertEqual(w27(self.OK, report='Built on `job/J9`.\n', refs={'job/J9': 'merged'}), ([], []))
+
+    def test_a_squash_merged_job_branch_passes_by_its_done_row_on_the_base(self):
+        rows = {'J1': ROW, 'J2': OTHER, 'J9': {'id': 'J9', 'status': 'done'}}
+        self.assertEqual(w27(self.OK, report='see job/J9\n', refs={'job/J9': 'unmerged'}, base_rows=rows)[0], [])
+
+    def test_a_brief_branch_merged_by_its_brief_on_the_base_passes(self):
+        base = files(**{'jobs/J1/brief.md': 'b', 'jobs/J9/brief.md': 'b'})
+        self.assertEqual(w27(self.OK, report='see brief/J9\n', refs={'brief/J9': 'unmerged'}, base=base)[0], [])
+
+    def test_an_origin_ref_is_judged_and_origin_main_and_the_branch_itself_are_not(self):
+        _, w = w27(self.OK, report='see origin/spike-x and origin/main and job/J1\n', refs={'origin/spike-x': 'unmerged', 'job/J1': 'unmerged'})
+        self.assertEqual(len(w), 1, w)
+        self.assertIn('origin/spike-x', w[0])
+
+    def test_a_branch_the_clone_lacks_is_a_warning(self):
+        e, w = w27(self.OK, report='napoleon job/J30\n')
+        self.assertEqual(e, [])
+        self.assertTrue(any('job/J30' in x and 'not in this clone' in x for x in w), w)
+
+    def test_cited_commits_each_pattern(self):
+        rep = 'commit `abc1234`, sha: `def5678`, commits `aaa1111`, `bbb2222` and core@ccc3333.\n'
+        e, w = w27(self.OK, report=rep, shas={'abc1234': 'ok'})
+        self.assertEqual(e, [])
+        for s in ('def5678', 'aaa1111', 'bbb2222', 'ccc3333'):
+            self.assertTrue(any(s in x and 'a commit that is not pushed cannot be opened' in x for x in w), (s, w))
+        self.assertFalse(any('abc1234' in x for x in w), w)
+
+    def test_hex_without_a_keyword_is_not_a_cite(self):
+        self.assertEqual(w27(self.OK, report='the value `abc1234` and 41871905211\n'), ([], []))
+
+
+class W27ThinMerge(unittest.TestCase):
+    """Rule E: a `merge` on a large diff whose newest round cites no evidence warns."""
+
+    def thin(self, w):
+        return any('merge verdict on a large diff cites no evidence (J62, J57)' in x for x in w)
+
+    def test_a_600_line_merge_with_no_evidence_warns(self):
+        e, w = w27([BUILD, ('c2', 'R1', [], rv((1, 'merge')))], numstat=[(600, 'warscape/a.py')])
+        self.assertEqual(e, [])
+        self.assertTrue(self.thin(w), w)
+
+    def test_evidence_in_the_newest_round_silences_it(self):
+        for extra in ('CI run 41871905211 green.', 'Ran tests/test_policy.py.', 'test_round_2_on_top_passes is green.',
+                      'See harness/runs/20261104_x.', 'https://github.com/o/r/actions/runs/1234', 'run 20261104_a passed.'):
+            e, w = w27([BUILD, ('c2', 'R1', [], rv((1, 'merge', extra)))], numstat=[(600, 'warscape/a.py')], exists={'harness/runs/20261104_x'})
+            self.assertFalse(self.thin(w), (extra, w))
+
+    def test_a_small_diff_or_one_inside_jobs_and_registries_does_not_warn(self):
+        for ns in ([(400, 'warscape/a.py')], [(900, 'jobs/J1/report.md'), (900, 'registries/tools.jsonl')]):
+            self.assertFalse(self.thin(w27([BUILD, ('c2', 'R1', [], rv((1, 'merge')))], numstat=ns)[1]), ns)
+
+    def test_many_files_warn_and_the_thresholds_are_settings(self):
+        ns = [(1, f'src/f{i}.py') for i in range(21)]
+        self.assertTrue(self.thin(w27([BUILD, ('c2', 'R1', [], rv((1, 'merge')))], numstat=ns)[1]))
+        cfg = {**CFG, 'thin_files': 50}
+        self.assertFalse(self.thin(w27([BUILD, ('c2', 'R1', [], rv((1, 'merge')))], numstat=ns, cfg=cfg)[1]))
+
+
+class W27DecisionsCiteJob(unittest.TestCase):
+    """Rule F: with `[policy] decisions_cite_job`, a decision row added on job/<id> names <id>."""
+    BASE = '| D1 | 2026-10-28 | Liam | A. | yes |\n'
+
+    def run_f(self, row, branch='job/J1', on=True):
+        cfg = {**CFG, 'decisions_cite_job': on}
+        head = files(**{'docs/DECISIONS.md': self.BASE + row, 'jobs/J1/report.md': 'r', REV: rv((1, 'merge'))})
+        base = files(**{'docs/DECISIONS.md': self.BASE, 'jobs/J1/brief.md': 'b'})
+        seen = []
+        e = check(branch, ['docs/DECISIONS.md'], {'J1': ROW, 'J2': OTHER}, {'J1': DONE if branch.startswith('job/') else ROW, 'J2': OTHER},
+                  base, head, cfg=cfg, hook=lambda f: seen.append(f) or [])
+        return e, seen[0]
+
+    def test_a_row_without_the_job_id_is_refused(self):
+        e, _ = self.run_f('| D2 | 2026-11-04 | Claude | B. | yes |\n')
+        self.assertIn('decision row D2 on job/J1 must name the brief that required it (add `J1` to the row, or move it to a plan/ branch)', e)
+
+    def test_a_row_naming_the_job_passes_and_the_facts_carry_it(self):
+        e, facts = self.run_f('| D2 | 2026-11-04 | proposed (Claude, J1) | B. | yes |\n')
+        self.assertEqual(e, [])
+        self.assertEqual(facts['added_decision_rows'], [{'id': 'D2', 'text': '| D2 | 2026-11-04 | proposed (Claude, J1) | B. | yes |'}])
+
+    def test_off_by_default_and_plan_branches_are_unchanged(self):
+        self.assertEqual(self.run_f('| D2 | 2026-11-04 | Claude | B. | yes |\n', on=False)[0], [])
+        self.assertEqual(self.run_f('| D2 | 2026-11-04 | Claude | B. | yes |\n', branch='plan/x')[0], [])
+
+
 class CoreOwnConfig(unittest.TestCase):
     """The core's real wsc.toml (C19): no registry view is committed, so a `brief/W<n>` branch (its brief and its row, nothing else) can pass `policy`
     and the `registries` gate together; before C19 the committed registries/jobs.md made that impossible."""

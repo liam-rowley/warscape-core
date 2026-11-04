@@ -21,11 +21,6 @@ static B F32(double v) { B b(4); EncodeF32(v, b.data()); return b; }
 static B I32(int32_t v) { B b(4); EncodeI32(v, b.data()); return b; }
 static B Bytes(const uint8_t* p) { return B(p, p + 4); }
 
-struct FakeMem : MemOps {
-    int calls = 0, writable = 0;
-    bool Unprotect(uint8_t*, size_t, uint32_t& old) override { ++calls; old = 0x20; ++writable; return true; }
-    bool Reprotect(uint8_t*, size_t, uint32_t) override { --writable; return true; }
-};
 
 // A game-like image: two float distances on one key (one followed at a ratio, one floored at stock), an int count, the B41 shape
 // (mov dword [abs32], 0.25f with a relocation on the address) and a fixed row in .data.
@@ -104,9 +99,10 @@ int main(int argc, char** argv) {
             if (pl.verdict != PlanVerdict::Apply) printf("    at 0x%08x: %s\n", (unsigned)base, pl.reason.c_str());
             CHECK(pl.verdict == PlanVerdict::Apply); CHECK_EQ(pl.nWrite, 5);
             std::vector<uint8_t> pure = m; ApplyPlanToBuffer(pure.data(), pl, e.sites.data());
-            std::vector<uint8_t> mm = m; FakeMem f;
+            std::vector<uint8_t> mm = m; tk::PageMem f(im, mm.data());
             const WriteResult w = WritePlanAtomic(mm.data(), pl, e.sites.data(), f);
-            CHECK(w.ok); CHECK_EQ(w.written, 5); CHECK(mm == pure); CHECK_EQ(f.writable, 0);
+            CHECK(w.ok); CHECK_EQ(w.written, 5); CHECK(mm == pure);
+            CHECK(f.Restored()); CHECK(f.NoneTwice());   // W33 (C3): four of the five sites share page 0x1000
             for (size_t i = 0; i < m.size(); ++i) {   // every changed byte is inside a site's 4 value bytes
                 if (mm[i] == m[i]) continue;
                 bool in = false; for (auto& c : pl.sites) in |= i >= c.valueRva && i < c.valueRva + 4u;
@@ -142,7 +138,8 @@ int main(int argc, char** argv) {
         std::vector<uint8_t> m = im.Mapped(0x7ff00000); PeInfo pe; ImageView v = tk::MappedView(m, pe);
         const PatchPlan pl = MakePatchPlan(v, 0x7ff00000 - 0x400000, e.sites.data(), e.sites.size(), e.enabled.get());
         CHECK(pl.verdict == PlanVerdict::Apply); CHECK_EQ(pl.nWrite, 4); CHECK(!pl.sites[2].write); CHECK(pl.sites[2].state == SiteState::Stock);
-        std::vector<uint8_t> mm = m; FakeMem f; CHECK(WritePlanAtomic(mm.data(), pl, e.sites.data(), f).ok);
+        std::vector<uint8_t> mm = m; tk::PageMem f(im, mm.data()); CHECK(WritePlanAtomic(mm.data(), pl, e.sites.data(), f).ok);
+        CHECK(f.Restored()); CHECK(f.NoneTwice());
         CHECK(Bytes(&mm[0x1201]) == I32(5)); CHECK(Bytes(&mm[0x1103]) == F32(600));
     }
     {   // a bad anchor on any row (a value row or the fixed row) still refuses everything
@@ -152,7 +149,8 @@ int main(int argc, char** argv) {
             std::vector<uint8_t> m = b.Mapped(0x01230000); PeInfo pe; ImageView v = tk::MappedView(m, pe);
             const PatchPlan pl = MakePatchPlan(v, 0x01230000 - 0x400000, e.sites.data(), e.sites.size(), e.enabled.get());
             CHECK(pl.verdict == PlanVerdict::Refuse); CHECK_EQ(pl.nWrite, 0);
-            std::vector<uint8_t> mm = m; FakeMem f; CHECK(!WritePlanAtomic(mm.data(), pl, e.sites.data(), f).ok); CHECK(mm == m); CHECK_EQ(f.calls, 0);
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data()); CHECK(!WritePlanAtomic(mm.data(), pl, e.sites.data(), f).ok); CHECK(mm == m);
+            CHECK_EQ(f.unprotectCalls, 0);
         }
     }
     {   // a value row whose current bytes already hold the resolved value counts as done; one holding neither stock nor it refuses

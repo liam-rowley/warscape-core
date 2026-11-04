@@ -54,6 +54,8 @@ A repo declares its registries in `wsc.toml`; the core ships these schemas (`sch
 | `hotkeys` | binding, action, context, source, how a bare key fires (`fires_with`); clashes fail the gate |
 | `engine_facts` | claim, state (`verified`, `open`, `refuted`), evidence run, date |
 
+`schemas/ui_pins.schema.json` is not a registry: it is the UI pin file's schema (`proxy/tools/fetch_ui.py --check`, [docs/PROXY_HARNESS.md](docs/PROXY_HARNESS.md)).
+
 The schema subset and the registry extensions (`x-view`, `x-unique`, `x-wildcard`, `x-chord`, `x-ref`, `x-source`, `x-extends`) are
 documented in the docstrings of `warscape/schema.py` and `warscape/registry.py`; the tool header format in `warscape/tools.py`.
 Two of them in a sentence each: `x-chord` makes the `x-unique` check read a field as `Ctrl+Alt+Shift+Key` chords, so a bare key flagged
@@ -79,6 +81,7 @@ after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs vi
 | `CLAUDE.md` | rules for every chat and agent working here |
 | `docs/DECISIONS.md` | core decisions, dated, append only |
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
+| `docs/UPGRADING.md` | what a game changes when its core pin crosses 0.24.0, 0.26.0, 0.27.0 or 0.34.0 |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
 | `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |

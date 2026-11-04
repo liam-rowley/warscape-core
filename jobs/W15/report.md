@@ -2,7 +2,7 @@
 
 W15 makes three changes to the registry CLI, all stdlib with host tests. `wsc reg remove <reg> <id>...` refuses while anything points at
 the row (B28). A tool's last use is derived from the done job reports that cite it, so a repo with a job queue can turn retirement
-warnings on (B6, C28). `wsc find` sends exe-shaped words to the game's `exe_strings.tsv.gz` (B43). Branch `job/W15`, VERSION 0.31.0,
+warnings on (B6, C31). `wsc find` sends exe-shaped words to the game's `exe_strings.tsv.gz` (B43). Branch `job/W15`, VERSION 0.36.0,
 built by session ed0f955b (a subagent; the orchestrating session of the same id wrote this file from the builder's hand-back, because the
 builder's own write of it was refused).
 
@@ -34,7 +34,7 @@ builder's own write of it was refused).
 - **`reg add tools --missing` paths.** The verb now resolves the paths against the repo root, not the shell folder. Run from the core
   checkout, a repo-relative `harness/job.sh` had resolved to the core's own file; the tests gate found this.
 - **Docs and rows.** `README.md`: a `reg remove` line. `docs/CONSUMING.md`: a "Removing a row" note, a "Tool retirement" section and a
-  `find` line under Discovery. `docs/DECISIONS.md`: C28. `docs/BACKLOG.md`: B6, B28 and B43 removed. Tool rows `wsc.reg`, `wsc.find` and
+  `find` line under Discovery. `docs/DECISIONS.md`: C31. `docs/BACKLOG.md`: B6, B28 and B43 removed. Tool rows `wsc.reg`, `wsc.find` and
   `discovery.core.exe_strings` refreshed, ids kept.
 
 ## Evidence
@@ -61,10 +61,10 @@ builder's own write of it was refused).
 
 ## Open questions
 1. The `warscape/repo.py` `DEFAULTS` comment still says retirement is off "until the job queue stamps". The brief said leave `DEFAULTS`
-   alone; C28 now owns the reason.
+   alone; C31 now owns the reason.
 2. The rendered `last_used` column shows the row's date, not the derived one (brief open question 1).
 3. A per-game `find` source would be a `find` stage of W13's gate modules. Nothing was built for it.
-4. VERSION 0.31.0 is the next free number after `origin/main`'s 0.30.0. If another job merges first with it, the second takes the next number.
+4. VERSION 0.36.0 is the next free number after `origin/main`'s 0.35.0. If another job merges first with it, the second takes the next number.
 
 ## What napoleon must do after the tag
 - **No acceptance passes:** nothing under `proxy/` or `harness/` changed.
