@@ -74,6 +74,11 @@ class FailedResults(unittest.TestCase):
     def test_named_only_elsewhere_fails(self):
         self.assertEqual(len(self.probs(self.rep('none', other='bad.json'))), 1)
 
+    def test_citation_followed_by_punctuation(self):
+        for cite in ('see runs/r1.', 'see (runs/r1)', 'runs/r1, and more', 'runs/r1.
+', 'runs/r1:'):
+            self.assertEqual(len(self.probs(self.rep('none', cite=cite))), 1, cite)
+
     def test_no_citation_or_rule_off(self):
         self.assertEqual(self.probs(self.rep('none', cite='no folder')), [])
         self.assertEqual(self.probs(self.rep('none'), glob=''), [])
@@ -90,7 +95,6 @@ class FailedResults(unittest.TestCase):
         e = jv.problems(rows, read, ['J1'])
         self.assertEqual(len(e), 1, e)
         self.assertTrue(e[0].startswith('J1: report: failed ctl result'), e)
-
 
 
 class Check(unittest.TestCase):

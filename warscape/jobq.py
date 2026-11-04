@@ -141,7 +141,7 @@ def report_problems(jid, text):
     return errs
 
 
-RUN_CITE = re.compile(r'(?:[\w.-]+/)*runs/[\w.-]+')
+RUN_CITE = re.compile(r'(?:[\w.-]+/)*runs/[\w.-]*\w')  # ends on a word char: a sentence's '.' or '-' is not part of the path
 
 
 def failed_results_problems(jid, text, root, glob):
