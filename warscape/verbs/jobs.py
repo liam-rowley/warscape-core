@@ -1,8 +1,8 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
 purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
-usage: wsc jobs check | jobs next [--id <id>] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]]
-when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button.
+usage: wsc jobs check | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune]
+when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo.
 verb: jobs
 
 The rules are code in warscape/jobq.py (moved from napoleon-remastered `tools/verbs/jobs.py` in napoleon J62; the story of each rule is in that
@@ -19,7 +19,12 @@ type, readiness against fresh branches and no live session of the same name (`cl
 `claude --bg` itself; no permission flag is ever passed. `review` (and the server, for a review) first claims the round: the remote ref
 refs/claims/<id>/round-<n> (warscape/claims.py, core W27); a round claimed by another session within `[jobs] claim_hours` is refused naming
 it, and an unreadable origin refuses (`--offline` claims nothing). `next`, `review` and `view` print the live claims; `next` and `review`
-release the claims of finished rounds. The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
+release the claims of finished rounds.
+W26: `next` claims before it prints: a create-only `git push` of origin/main to `job/<id>` (`brief/<id>` for a brief); a claim another session
+won moves on to the next ready job (at most 5 tries); `--peek` and `--offline` claim and release nothing. It orders by (phase, number) and, with `[jobs] pc_state`
+or `WSC_PC_STATE`, skips a needs_pc build where that folder is absent. `--auto` starts a review only on a green head, a fix once CI has finished,
+one needs_pc row at a time, and prunes dead worktree registrations each tick. `worktrees` prints the stale-worktree warnings (warscape/worktrees.py).
+The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
 """
 import sys
 import threading
@@ -27,13 +32,14 @@ import webbrowser
 from datetime import datetime, timezone
 
 from .. import jobq as J
+from .. import worktrees as W
 
 NAME = 'jobs'
-HELP = 'the job queue: check it, pick the next job to build (next), to review (review) or to fix (fix), view it'
+HELP = 'the job queue: check it, claim the next job to build (next), to review (review) or to fix (fix), view it, its stale worktrees (worktrees)'
 
 
 def add_arguments(p):
-    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view'])
+    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees'])
     p.add_argument('--offline', action='store_true', help='use local remote-tracking refs instead of asking origin (a single-branch or shallow clone sees only the branches it fetched)')
     p.add_argument('--id', help='next, review, fix: this job only (J<n>): its steps when it is ready, else exit 1 with the reason')
     p.add_argument('--all', action='store_true', help='review, fix, view: also read the job branches of jobs done on main (skipped by default)')
@@ -43,6 +49,8 @@ def add_arguments(p):
     p.add_argument('--port', type=int, default=0, help='view --serve: the port (default 0: the OS picks one)')
     p.add_argument('--dry-run', action='store_true', help='view --serve: make every check, but answer with the command instead of running it (with --auto: log what it would start)')
     p.add_argument('--auto', action='store_true', help='view --serve: also start every ready review and fix by itself, each --interval (never a brief or a build)')
+    p.add_argument('--peek', action='store_true', help='next: print what would be picked and the push that would claim it; claim nothing')
+    p.add_argument('--prune', action='store_true', help='worktrees: run git worktree prune (registrations whose folder is gone) and say how many it removed')
     p.add_argument('--interval', type=int, default=300, help='view --serve --auto: seconds between autopilot ticks (default %(default)s)')
     p.add_argument('--session', help='review: the name the round is claimed for (default $WSC_SESSION_ID, $CLAUDE_CODE_SESSION_ID, then user@host)')
 
@@ -79,6 +87,21 @@ def run(args, ctx):
         print(f'jobs check: {len(rows)} rows, {"%d problems" % len(errs) if errs else "ok"}{extra}')
         return 1 if errs else 0
 
+    if args.action == 'worktrees':   # W26: what a game's setup verb prints (warscape.worktrees.report); --prune removes dead registrations only
+        if getattr(args, 'prune', False):
+            removed, err = W.prune(ctx.root)
+            if err:
+                return refuse(f'git worktree prune failed: {err}')
+            print(f'worktrees: pruned {removed} worktree registration{"" if removed == 1 else "s"} whose folder was gone')
+            return 0
+        try:
+            branches = J.remote_branches(ctx.root, args.offline)
+        except ValueError as x:
+            return refuse(str(x))
+        lines = W.report(ctx.root, rows, branches)
+        print('\n'.join(f'worktrees: warning: {l}' for l in lines) if lines else 'worktrees: nothing stale')
+        return 0
+
     if args.auto and not (args.action == 'view' and args.serve):
         return refuse('--auto runs inside jobs view --serve')
     if args.auto and args.interval < 30:
@@ -92,6 +115,7 @@ def run(args, ctx):
         srv = J.JobServer(snapshot, J.list_agents, lambda argv: J.start_session(argv, ctx.root), port=args.port, dry_run=args.dry_run,
                           root=ctx.root, log_path=ctx.root / '_scratch' / 'jobs_auto.log', ctx=ctx,
                           main_line=lambda: J.main_html(J.main_state(ctx.config['ci'], ctx.root, args.offline)),
+                          ci=lambda sha: J.branch_ci(ctx.root, sha, args.offline), prune=lambda: W.prune(ctx.root),
                           claim=None if args.offline else lambda jid, n, head, who: J.take_claim(ctx.root, jid, n, head, who, hours))
         print(f'jobs view: serving {srv.url}{" (dry run: nothing is started)" if args.dry_run else ""}; Ctrl+C stops it', flush=True)
         stop = threading.Event()
@@ -111,27 +135,13 @@ def run(args, ctx):
     mstate = J.print_main_health(ctx.config['ci'], ctx.root, args.offline)   # W22: a red main first, then the pull requests
     J.print_red_prs(ctx.root, args.offline)
     branches = J.remote_branches(ctx.root, args.offline)
-    if args.action == 'next':   # live review claims; release those whose job branch is gone (W27)
-        J.print_claims(ctx.root, args.offline, branches, release=True)
-    if args.action == 'next' and args.id:
-        r = by.get(args.id)
-        action = {'needs_brief': 'brief', 'queued': 'build'}.get((r or {}).get('status'))
-        if r and not action:
-            return refuse(f'{args.id} is {r.get("status")}, not queued or needs_brief: nothing to pick up')
-        why = J.not_ready(action or 'build', args.id, by, branches)
-        if why:
-            return refuse(why)
-        print(J.build_steps(r) if action == 'build' else J.brief_steps(r, ctx.root, 'needs a brief'))
-        return 0
-
-    if args.action == 'next':
-        kind, r, waiting = J.pick_next(rows, branches)
-        if kind == 'job':
-            print(J.build_steps(r))
-        elif kind == 'brief':
-            print(J.brief_steps(r, ctx.root))
-        else:
-            print('Nothing is ready. Waiting:\n  ' + '\n  '.join(waiting or ['(the queue is empty)']))
+    if args.action == 'next':   # W27: live review claims, releasing those whose job branch is gone (never on --peek); W26: claim, then print
+        peek = getattr(args, 'peek', False)
+        J.print_claims(ctx.root, args.offline, branches, release=not peek)
+        rc, text = J.next_claim(ctx.root, rows, lambda: J.remote_heads(ctx.root, args.offline), jid=args.id, peek=peek, offline=args.offline)
+        if rc:
+            return refuse(text)
+        print(text)
         return 0
 
     if args.action == 'view':
