@@ -101,7 +101,7 @@ C36 (`docs/DECISIONS.md`), proposed. W35 merged C35 first, so this job took the 
 - **Junctions under a root** are not covered: a link there is the folder owner's to make. Rotation is run once, at ctl start; the every-500 path is a lint, not a run.
 
 ## What napoleon must do (the pin-bump job after J78)
-- **`lua` chunks (action needed).** Harness routes are fine: every `adapter.json` chunk is `napoleon_remastered/lua/ctl/...`, under its `luaDir`. But recorded PC probes used `lua C:/napoleon_remastered_pc/_scratch/j40/*.lua` (`proxy/runs/20261031_j40pc/raw`), outside both folders, and will now be refused. Put such chunks in `C:\napoleon_remastered_pc\ctl\`. I searched its working copy, not `origin/main`: this session's isolation refuses `git -C` on another repo, so re-check there.
+- **`lua` chunks (action needed).** Harness routes are fine: every `adapter.json` chunk is `napoleon_remastered/lua/ctl/...`, under its `luaDir`. But recorded PC probes used `lua C:/napoleon_remastered_pc/_scratch/j40/*.lua` (napoleon-remastered's run 20261031_j40pc), outside both folders, and will now be refused. Put such chunks in `C:\napoleon_remastered_pc\ctl\`. I searched its working copy, not `origin/main`: this session's isolation refuses `git -C` on another repo, so re-check there.
 - **Build id:** `gen_tables.py`, `build.sh`, `proxy/src` changed; rule 79's 20 passes. Its smoke stays at 11 launches (no `null.smoke_patch` row) and now runs non-root under `--docker`.
 - **`GameAdapter`:** its positional list keeps compiling (no field added); J64 switches it. The tag brings the size assert.
 - **Checklist:** add `python3 core/proxy/tools/gen_tables.py --exe <staged copy>` after `exe_info.py`, before a PC run.
