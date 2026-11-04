@@ -36,9 +36,10 @@ DEFAULTS = {
         'living': ['**/*.md'],
         'records': ['**/records/**', '**/reports/**', '**/runs/**'],   # plus any file whose name carries a YYYY-MM-DD date
         'exempt': [],
+        'path_ignore': [],                 # doc_paths gate (W28): backticked tokens (exact, or globs) that look like a path but are not one of this repo's
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
-    'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`
+    'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`; skip: "<gate>:<decision id>" (a [policy] decisions row; W28)
               'dirs': [],                  # repo-relative folders of game gate modules (warscape/gatemods.py)
               'run_refs_since': ''},       # YYYY-MM-DD: the `run_refs` gate skips run folders dated before it ('' = checks every run README; C23)
     'cli': {'verb_dirs': []},              # repo-relative folders of extra verb modules

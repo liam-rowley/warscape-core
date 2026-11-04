@@ -70,6 +70,16 @@ class Rows(RegistryCase):
         p.write_text('{"id": "a", "claim": "c", "state": "open", "n": NaN}\n', encoding='utf-8')
         self.assertIn('not strict JSON', '\n'.join(self.errors('engine_facts')))
 
+    def test_a_duplicate_key_fails_load_naming_the_file(self):
+        """W28: a key twice in a row is refused in both storages, with the file (and the line, for JSON Lines)."""
+        p = self.repo.root / 'registries/engine_facts.jsonl'
+        p.write_text('{"id": "a", "claim": "c", "state": "open", "state": "closed"}\n', encoding='utf-8')
+        self.assertIn("registries/engine_facts.jsonl:1: not strict JSON: duplicate key 'state'", '\n'.join(self.errors('engine_facts')))
+        p.unlink()
+        self.repo.write('wsc.toml', self.repo.read('wsc.toml') + '\n[storage]\ndir = ["engine_facts"]\n')
+        self.repo.write('registries/engine_facts/a.json', '{"id": "a", "id": "a", "claim": "c", "state": "open"}\n')
+        self.assertIn("registries/engine_facts/a.json: not strict JSON: duplicate key 'id'", '\n'.join(self.errors('engine_facts')))
+
     def test_render_fixes_order_and_view(self):
         p = self.repo.root / 'registries/engine_facts.jsonl'
         p.write_text('{"state": "open", "id": "b", "claim": "c"}\n{"id": "a", "claim": "c", "state": "open"}\n', encoding='utf-8')
