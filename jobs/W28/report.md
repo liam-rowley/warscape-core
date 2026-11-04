@@ -64,3 +64,37 @@ decision id; (d) `gen_tables.py` now loads the game's whole `wsc.toml`, so that 
 1. **`doc_paths` as an error** (B87): recommended, a per-line `(game)` / `(empire)` marker or a `[docs] path_repos` table, then error. Alternative: keep the warning.
 2. **Skip syntax**: built as recommended, `"gate:decision-id"` strings.
 3. **CSP**: built as recommended (hashes computed per page); no fallback was needed.
+
+## Fix round 1
+Review round 1 (`jobs/W28/review.md`, verdict "merge after fixes"), fixed on 2026-11-04 by session f50072b0.
+
+- **should-fix 3, ignored paths reported** (a567652): the cause was not Windows or the worktree. One `../` token in the batch makes
+  `git check-ignore --stdin` exit 128 for every name, and the gate read any code but 0 or 1 as "nothing is ignored". `../` tokens (and a bare `../`)
+  are now dropped before the call, and a failed or unrunnable call is a gate error naming the exit code and stderr. The loud error caught one more
+  case during this round (a bare `../` in new CONSUMING text) before it was handled. Host test: `test_gatemods.DocPathsGate`, failed on the old code
+  (the `_scratch/registries/tools.md` line was reported).
+- **should-fix 1, `doc_paths` is an error** (94cf63d): the gate returns `error`. The 67 misses left after the fix above, cleared:
+  14 new `[docs] path_ignore` entries in the core's `wsc.toml` (10 prefix globs or folders: `discovery/core/**`, `tools/**`, `docs/plans/**`,
+  `harness/runs/**`, `viewer/**`, `upscale/**`, `shaders/`, `rml_mod/**`, `perf_mod/**`, `docs/learnings/**`; exact files: `harness/README.md`,
+  `proxy/README.md`, `docs/CI_FAILURES.md`; and `ctx.root/core/`, a Python expression), commented by owner; stale lines fixed (CONSUMING.md's
+  `registries/jobs.md` is now "a committed jobs view", PROXY_HARNESS.md names `proxy/tests/null_game/proxy/tests/test_null_adapter.cpp`, BACKLOG.md
+  names empire's real `docs/learnings/LEARNINGS_HARNESS.md`, checked in the empire-remastered checkout read-only); a game's seven test files
+  (`test_repo_rules.py` and the like) are named bare where the line already says whose they are, instead of seven exact entries; and job folders are
+  records at any depth, so the fixture game's `jobs/F1/brief.md` and `F2` (which name the report their job will write) are not checked. No line
+  marker was added: the ignore list stayed short. Host test: `test_gatemods.DocPathsGate.test_a_missing_path_is_an_error_and_a_nested_jobs_folder_is_a_record`.
+  The gate docstring, README "Gates", CONSUMING's "Gate changes in 0.35.0" and C30 say error; B87 is removed (built). This supersedes the
+  "ships as a warning" deviation above.
+- **should-fix 2, decision number** (a3791ea, the merge of `main` at 60ba80e): main now has C28 (W25) and C29 (W33), so this job's row is **C30**;
+  plan PR #87 also carries a C28 and renumbers when it lands. VERSION **0.35.0**: main is at 0.34.0 (W33 and W16), and W29 (C27, job branches
+  stop editing VERSION) has not merged.
+- **later, napoleon's 56 misses**: added to CONSUMING's pin-bump steps (94cf63d): clear them in the pin-bump branch, or skip the gate there under a
+  decision id while it does.
+- **Found while merging:** the line merge of `registries/tools.jsonl` kept two rows for `proxy.tools.fetch_ui`, `gen_tables` and `layout`; rows
+  merged by id against the merge base 79ebbb4 (f6d87d2). `docs/CONSUMING.md` was 31,527 bytes on `main` (W16 and W33; main's `doc_size` gate and
+  its `test_cli` copy are what is red there, issues #95 and #96): the 0.24.0 hooks section and the 0.26.0 base-judged policy steps moved to
+  `CONSUMING_OPTIONS.md` with a one-line link each (94cf63d), 29,967 bytes now. Whoever fixes main's copy first, the other merge keeps one move.
+
+Evidence (local Windows, 2026-11-04, this worktree at 94cf63d): `python3 wsc.py gates` (full): 14 ok, 1 warn (ci_render's W23 bootstrap note), 1 failed:
+650 host tests, 649 passed, 1 skipped; the one failure was `test_jobs.ThisRepo.test_the_queue_passes_jobs_check` asking for this row to be `review` once
+this section existed, and it passes after `wsc reg set jobs W28 status=review`. `gates --fast` then: 14 ok, 1 warn, 0 failed; `doc_paths` ok over 17 living
+docs, `doc_size` ok over 111. CI: the draft pull request's run.
