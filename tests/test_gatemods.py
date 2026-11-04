@@ -289,7 +289,7 @@ class DocPathsGate(unittest.TestCase):
     `git check-ignore --stdin` exit 128 for the whole batch, read as "nothing is ignored")."""
 
     def setUp(self):
-        self.repo = TempRepo({'.gitignore': '_scratch/\n', 'README.md': '# r\n`_scratch/registries/tools.md` and `../other/x.md`\n'},
+        self.repo = TempRepo({'.gitignore': '_scratch/\n', 'README.md': '# r\n`_scratch/registries/tools.md`, `../` and `../other/x.md`\n'},
                              toml=TOML.replace('dirs = ["checks"]', 'dirs = []'))
         self.addCleanup(self.repo.close)
         subprocess.run(['git', 'add', '-A'], cwd=self.repo.root, check=True, capture_output=True)
@@ -298,6 +298,17 @@ class DocPathsGate(unittest.TestCase):
         rc, out = self.repo.wsc('gates', '--only', 'doc_paths')
         self.assertEqual(rc, 0, out)
         self.assertIn('every backticked path exists', out)
+
+    def test_a_missing_path_is_an_error_and_a_nested_jobs_folder_is_a_record(self):
+        self.repo.write('README.md', '# r\n`_scratch/a.md`, `../other/x.md` and `docs/gone.md`\n')
+        self.repo.write('game/jobs/F1/brief.md', 'Write `jobs/F1/report.md`.\n')   # a fixture game's brief names the report its job will write
+        subprocess.run(['git', 'add', '-A'], cwd=self.repo.root, check=True, capture_output=True)
+        rc, out = self.repo.wsc('gates', '--only', 'doc_paths')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('FAIL doc_paths', out)
+        self.assertIn('README.md:2: path not found: docs/gone.md', out)
+        for gone in ('_scratch/a.md', '../other', 'F1/report.md'):
+            self.assertNotIn(gone, out)
 
 
 VIEW_MOD = '''

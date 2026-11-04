@@ -68,8 +68,8 @@ merged at load; canonical key order is then the core's fields first, then the ga
 (strict JSON and JSONL: no NaN or Infinity, no key twice in one object; the registry loader, `jobq` and `gen_tables.py` read repo data the same way, W28),
 `windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
 `verified_dates` (a "verified" with no date or run id: only an ISO date, a compact `20YYMMDD` run id or a `reports/`, `runs/` or `records/` path dates it, W28),
-`doc_paths` (warning: a backticked repo path in a living doc that is not a tracked file or folder, from the root, the doc's folder or across `core/`; job folders,
-the decisions file, fenced blocks, `(was <path>)` and `(moved)` lines and `[docs] path_ignore` are not checked), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
+`doc_paths` (a backticked repo path in a living doc that is not a tracked file or folder, from the root, the doc's folder or across `core/`; job folders,
+the decisions file, fenced blocks, `(was <path>)` and `(moved)` lines, `../` paths and `[docs] path_ignore` are not checked), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
 unmodified, its `VERSION` is the pinned `vX.Y.Z`, and HEAD is that tag whenever the tag is in the checkout; a shallow checkout without
 it is compared by `VERSION` only, C21; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone), `jobs`, `ci_render`, `run_refs` (every repo path a run README names exists; `[gates] run_refs_since` grandfathers old runs) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.

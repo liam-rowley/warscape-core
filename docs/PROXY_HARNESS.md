@@ -37,7 +37,7 @@ with the same flags plus `-I<game tests>`, and prints `core test <name>` / `game
 `layout.py proxy-tests` prints it). It must sit outside the adapter folder (a build-id input: a test edit would be a new DLL). A game's console and
 camera numbers (opcodes and offsets in its sites' stock bytes, its command tables) live there: `#include "adapter_checks.h"` and `"adapter.cpp"`, run
 `adck::ConsoleAdapterProblems` / `adck::CameraAdapterProblems` with `adck::TableLookup(a.sites, a.nSites)` (the contract the core's reads need),
-then the literal checks. The null game's `proxy/tests/test_null_adapter.cpp` is the smallest example.
+then the literal checks. The null game's `proxy/tests/null_game/proxy/tests/test_null_adapter.cpp` is the smallest example.
 `build.sh --docker` mounts the outer of the game root and the core (the game repo holding the core, or the core holding its null game) and refuses
 two separate trees; `build_id.py` reads a game root nested in its repository under its prefix, so the null game's id in place is a real one.
 
