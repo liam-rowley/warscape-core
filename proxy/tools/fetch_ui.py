@@ -2,8 +2,8 @@
 """Fetch the RmlUi host's pinned sources (RmlUi and FreeType by commit; Lua 5.1.1, stb_image and stb_image_write by sha256), Lua patched to float numbers.
 
 purpose: fetch RmlUi, FreeType, Lua and the stb headers at the commits and sha256 of the game's UI pin file into <game>/build/ui/src, check each, patch luaconf.h to float
-usage: python3 proxy/tools/fetch_ui.py [--pins FILE] [--out DIR]   (defaults: proxy/tools/layout.py ui-pins, <game root>/build/ui/src)
-when: build.sh runs it before compiling the DLL or the UI host tests; the review viewer's build runs it too (one fetcher, one pin file); never commit the output
+usage: python3 proxy/tools/fetch_ui.py [--pins FILE] [--out DIR] [--check]   (defaults: proxy/tools/layout.py ui-pins, <game root>/build/ui/src; --check: validate the pin file against schemas/ui_pins.schema.json only, no network)
+when: build.sh runs it before compiling the DLL or the UI host tests; the review viewer's build runs it too (one fetcher, one pin file); --check in a game's tests or by hand after editing the pin file; never commit the output
 not-a-verb: needs network and writes build output, not a registry operation; build.sh calls it
 
 Promoted from the first consumer's viewer/core/fetch_sources.py (J31, J30): the review viewer and the in-game RmlUi host must
@@ -11,8 +11,9 @@ build from the same sources (the consumer's decision D37), so both read one pin 
 fetcher. The Lua copy is the viewer's: float lua_Number (the engine's number type) and nothing else; the proxy's engine-patched core
 (fetch_lua.py: the engine's dummynode, no GC step) is a different copy for the engine's own lua_State. The host links this one with
 its symbols made local (build.sh), so the two never meet.
-Needs git (RmlUi, FreeType) and network; downloads are cached under the output folder. Each download and git fetch is retried on a
-network flake (netfetch.retry, W24, B62; one stderr line per retry), never a sha mismatch or a failed patch. A checkout is trusted only
+The pin file is validated against schemas/ui_pins.schema.json (warscape/schema.py) before anything is fetched, and every problem is
+named (W16, B52): a bad commit or sha256 shape is found here, not by the network. Needs git (RmlUi, FreeType) and network;
+downloads are cached under the output folder. Each download and git fetch is retried on a network flake (netfetch.retry, W24, B62; one stderr line per retry), never a sha mismatch or a failed patch. A checkout is trusted only
 when HEAD is the pinned commit and the working tree equals HEAD; anything else (a fetch that failed after `git init`, a cache restored in
 part, another pin) is removed and fetched again.
 """
@@ -31,6 +32,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402
 import netfetch  # noqa: E402  (not a DLL input: it changes whether a download succeeds, never a byte)
+
+CORE = Path(__file__).resolve().parents[2]   # the core's root (proxy/tools/ -> the repo that holds them), found from this file as layout.py is
+if str(CORE) not in sys.path:
+    sys.path.append(str(CORE))
+from warscape.schema import validate  # noqa: E402  (the subset validator, standard library only)
+
+SCHEMA = CORE / 'schemas' / 'ui_pins.schema.json'
 
 LUACONF = [
     ('#define LUA_NUMBER_DOUBLE\n#define LUA_NUMBER\tdouble', '#define LUA_NUMBER\tfloat   /* Warscape engine build */'),
@@ -127,14 +135,17 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--pins', default=None, help='pin file (default: layout.py ui-pins)')
     ap.add_argument('--out', default=None, help='output folder (default: <game root>/build/ui/src)')
+    ap.add_argument('--check', action='store_true', help='validate the pin file only (no network, nothing written)')
     a = ap.parse_args(argv)
     pins_path = Path(a.pins) if a.pins else layout.ui_pins()
     if not pins_path.is_file():
         sys.exit(f'fetch_ui: no pin file {pin_hint(pins_path)}')
-    pins = json.loads(pins_path.read_text(encoding='utf-8'))
-    for k in KEYS:
-        if k not in pins:
-            sys.exit(missing_pin(pins_path, k))
+    pins, problems = check(pins_path)
+    if problems:
+        sys.exit('\n'.join(problems))
+    if a.check:
+        print(f'fetch_ui: {pins_path.as_posix()}: the pin file is valid ({", ".join(KEYS)}; {SCHEMA.name})')
+        return 0
     out = Path(a.out) if a.out else layout.game_root() / 'build' / 'ui' / 'src'
     out.mkdir(parents=True, exist_ok=True)
     fetch_git('rmlui', pins['rmlui'], out)
@@ -154,6 +165,19 @@ KEYS = {'rmlui': 'RmlUi, the UI library', 'freetype': "RmlUi's font engine", 'lu
         'stb_image': 'image loading', 'stb_image_write': "the in-game host's PNG dump, required since 0.10.0"}
 # the reference pin file to copy an entry from: the null game's, beside these tools in the core
 REFERENCE = Path(__file__).resolve().parents[1] / 'tests' / 'null_game' / 'viewer' / 'pins.json'
+
+
+def check(pins_path):
+    """(pins, problems): the pin file read and validated against schemas/ui_pins.schema.json; every problem names the file and its key
+    (a missing required pin gets the missing_pin text, which says where to copy the entry from). Empty problems: valid."""
+    try:
+        pins = json.loads(pins_path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        return None, [f'fetch_ui: {pins_path}: not readable JSON: {e}']
+    errs = validate(pins, json.loads(SCHEMA.read_text(encoding='utf-8')))
+    problems = [missing_pin(pins_path, k) for k in KEYS if isinstance(pins, dict) and k not in pins]
+    problems += [f'fetch_ui: {pins_path}: {e} ({SCHEMA.name})' for e in errs if not e.startswith('/: missing required field')]
+    return pins, problems
 
 
 def missing_pin(pins_path, key):

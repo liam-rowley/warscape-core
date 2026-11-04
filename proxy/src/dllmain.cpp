@@ -4,9 +4,10 @@
 //   2. crash capture
 //   3. the exe-identity guard, ONCE, before any hook, patch or engine read -> Rt().plan (guard.h PlanEngine)
 //   4. the runtime patch engine, only when Rt().plan.patches
-//   5. the dev side (dev.cpp), only when a dev key is on and the plan allows hooks
+//   5. the dev side (dev.cpp), only when a dev key is on and the plan allows hooks, and the release file rules (proxy.file_rules)
 //   6. headless runs (headless.cpp), only when headless.enabled; refused (exit) when the plan forbids hooks or the proxy is off
-// The backend d3d9 loads later, at the first export call (backend.cpp). Loader lock: Win32 file and memory calls only.
+// The backend d3d9 loads later, at the first export call (backend.cpp). Loader lock: Win32 file and memory calls only, and no thread
+// starts (StartThread refuses while Rt().inDllMain; W33, C29).
 #include "runtime.h"
 #include "sha256.h"
 #include "ui_host.h"
@@ -21,6 +22,17 @@
 namespace wsp {
 
 Runtime& Rt() { static Runtime r; return r; }
+
+bool StartThread(LPTHREAD_START_ROUTINE fn, const char* name) {
+    if (Rt().inDllMain) { LOGE("thread: %s refused: no proxy thread starts inside DllMain (start it at the first export call)", name); return false; }
+    DWORD tid = 0;   // created suspended, so the "started" line comes before anything the thread logs
+    HANDLE h = CreateThread(nullptr, 0, fn, nullptr, CREATE_SUSPENDED, &tid);
+    if (!h) { LOGE("thread: %s did not start (CreateThread error %lu)", name, GetLastError()); return false; }
+    LOGI("thread: %s started (tid %lu)", name, tid);
+    ResumeThread(h);
+    CloseHandle(h);
+    return true;
+}
 
 namespace {
 
@@ -131,12 +143,16 @@ void Init(HMODULE self) {
 extern "C" BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
+        wsp::Rt().inDllMain = true;
         wsp::Init(inst);
+        wsp::Rt().inDllMain = false;
     } else if (reason == DLL_PROCESS_DETACH) {
+        wsp::Rt().inDllMain = true;
         if (wsp::Rt().enabled) wsp::CrashCheckFilter("process detach");
         wsp::DevOnDetach();
         wsp::HeadlessOnDetach();
         LOGI("process detach (%s)", reserved ? "process exit" : "FreeLibrary");
+        wsp::Rt().inDllMain = false;
     }
     return TRUE;
 }

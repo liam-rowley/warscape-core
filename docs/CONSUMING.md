@@ -34,6 +34,17 @@ The options weighed against it (subtree, a vendored copy, `pip install`) and the
 - **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
 - `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
 
+## DLL changes in 0.34.0 (W33, C29)
+- **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
+  row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
+  tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".
+- **Migration:** a release that set `dev.file_rules` for shipped data rules moves them to `proxy.file_rules`; the player ini then sets no
+  dev key. A dev launch's `dev.file_rules` stays and wins on the same path.
+- **New log lines:** `patch_engine: protections restored on <n> page(s): ...` (and `... left changed` per bad page), `thread: <name> started
+  (tid N)`, the `dev:` line's `threads at the first Direct3DCreate9: state=<0|1> ctl=<0|1>`, `redirect: <n> rules from <path> (proxy.file_rules)`.
+- **Behaviour:** the dev threads start at the first `Direct3DCreate9`, not in DllMain, and only for `state_json`/`timeline` (state) and
+  `ctl`/`autostart` (ctl). A new DLL input: the build id changes.
+
 ## Wiring a game repo (the steps, once approved)
 
 ```sh
@@ -95,6 +106,13 @@ jobs:
           python-version: '3.12'
       - run: python core/wsc.py gates
 ```
+
+## Game proxy tests and the pin file schema (0.34.0, W16; [PROXY_HARNESS.md](PROXY_HARNESS.md))
+- **Move the checks the core dropped:** `test_console.cpp` and `test_camera.cpp` no longer check a game's console and camera numbers. Add them to the
+  game's own `proxy/tests/` (the text is in core `jobs/W16/report.md`, "Consumer test files"); `core/proxy/tools/build.sh tests` lists them as game tests.
+- **Pin file:** `python3 core/proxy/tools/fetch_ui.py --check` must pass (add `stb_image_write` if missing; extra pins such as `emsdk_image` stay).
+- **Rule 79:** `build_sh`, `build_id` and `fetch_ui` changed, so the build id changes with no `proxy/src` change: 20 passes on the new id.
+  Optional: exempt `proxy/tests/` from the game's rule-79 path (not a DLL input). `--docker` from the game repo works as before.
 
 ## Upgrading and releasing
 
