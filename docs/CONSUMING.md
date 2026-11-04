@@ -17,9 +17,6 @@ tags but not the pinned one fails and names the fix, `git -C core fetch --tags` 
 
 The options weighed against it (subtree, a vendored copy, `pip install`) and the costs of the recommendation: [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md).
 
-## Hooks and gate keys added in 0.24.0 (C23)
-Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Hooks and gate keys added in 0.24.0 (C23)" on 2026-11-04 (the 30 KB cap): `.githooks/commit-msg` and `[policy] commit_msg_hook`, the `run_refs` gate and `[gates] run_refs_since`.
-
 ## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
 - **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
 - **CI:** install `$(python3 core/proxy/tools/toolchain.py apt)` with `--no-install-recommends` instead of `g++-mingw-w64-i686` (else `build.sh`
@@ -113,6 +110,8 @@ jobs:
 - **Game upgrade:** `git -C core fetch --tags && git -C core checkout vX.Y.Z`, set `[core] version` to the same tag, run
   `python3 core/wsc.py gates`, commit `core` and `wsc.toml` together on a branch.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
+- **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate) or 0.26.0 (base-judged policy, C24) are in
+  [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
 Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`.
@@ -150,12 +149,15 @@ models = ["sonnet", "opus"]        # the Model line of a brief; models after the
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
 failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
+claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
 decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
-session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
+session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
+decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
+thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
 plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
@@ -237,7 +239,7 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   `wsc jobs check`, with `ctx.rows`, `ctx.read(path)` and `ctx.briefs()` (`(jid, row, text)` per brief, minus the legacy file's `brief_hooks` ids); an `error`
   Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, run from the
   **base tree** (W23): `ctx.root` and `ctx.config` are the base's rule inputs in a temporary folder, not a repository; `ctx.facts` has branch, kind, jid,
-  changed, merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
+  changed, `added_decision_rows` ([{id, text}], W27), merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
   `show(sha, path, cwd=repo)`; never `'HEAD'`, never git in `ctx.root`, never run the head's files. An `error` Result's details are policy errors. `view`: `wsc jobs view`,
   with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
 - A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
@@ -261,19 +263,13 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
 
-## Moving to base-judged policy (0.26.0, core W23, C24)
-Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Moving to base-judged policy (0.26.0, core W23, C24)" on 2026-11-04 (the 30 KB cap): the pin-bump steps for `pull_request_target`, `[ci] policy_extra_steps` and the `policy`-stage module.
+## Review integrity (0.35.0, core W27, C30)
+`wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
+lines and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
+`## Orchestrator additions`. A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
 
-## Gate changes in 0.35.0 (W28, C30): the steps at the pin bump
-- **`[gates] skip`** takes `"<gate>:<decision id>"` only; a bare name is a config error. Add a decisions row first, then skip under its id. Each skip prints a warning line.
-- **`verified_dates`** no longer takes `3-10`, "session", `.md)` or `v2` as a date: fix each flagged line with its true date or run id (`git log`, the report).
-- **`json`** refuses a key twice in one object, in every `.json`/`.jsonl` and in every registry row: fix the data, never relax the check.
-- **`doc_paths`** (an error) fails on backticked paths in living docs that are not in the repo: point a renamed one at its new path, drop a gone one,
-  mark a historical one `(was <path>)`, and list tokens that are not this repo's paths (branch prefixes such as `plan/`, another repo's folders as a
-  prefix glob such as `rml_mod/**`) in `[docs] path_ignore`; the core's own `wsc.toml` is the example. Job folders at any depth, the decisions file and
-  `../` paths are not checked. napoleon-remastered had 56 misses on 2026-11-04 (W28 report): clear them in its pin-bump branch, or skip the gate there
-  under a decision id (`"doc_paths:<id>"`) while it does.
-- **`gen_tables.py`** reads `engine_sites` and `config_keys` through the registry loader, so the game's whole `wsc.toml` must load with this core.
+## Gate changes in 0.36.0 (W28, C31)
+Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap): `[gates] skip` ids, `verified_dates`, strict `json`, `doc_paths`, `gen_tables.py`.
 
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher

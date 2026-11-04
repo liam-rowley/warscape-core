@@ -85,6 +85,7 @@ after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs vi
 | `CLAUDE.md` | rules for every chat and agent working here |
 | `docs/DECISIONS.md` | core decisions, dated, append only |
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
+| `docs/UPGRADING.md` | what a game changes when its core pin crosses 0.24.0 or 0.26.0 |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
 | `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |
