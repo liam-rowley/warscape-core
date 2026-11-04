@@ -3,9 +3,10 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) P2, P3 (core half). run_check takes settings(ctx.config) from the head wsc.toml (policy.py:198) and loads the head's policy-stage gate modules (policy.py:209); policy.yml checks out the pull request and runs that tree's wsc.py. Reproduced four ways in a scratch clone: [policy] bootstrap = [\"foo\"] passes code on a foo branch; session_trailer = \"\" passes a self-reviewed job; a policy gate module that returns [] passes anything; decisions = \"\" ends append-only. In a game, a job/ branch can also repoint the core gitlink, and CI then runs that commit's policy. Judge the head's diff with the base's warscape/ (in a game, the base's pinned core), [policy], [jobs], the [jobs] legacy file and the gate modules (napoleon's rule 79 already reads the base's code: tools/jobs_hooks.py:263-276); a branch that changes those inputs gets a note that the change applies after its merge. Glob matching in policy.allowed becomes segment-aware (fnmatch * crosses /, so napoleon's meta globs match 533 of 5,723 tracked files). Regression tests for the four bypasses and for a repointed gitlink. Opus: enforcement code, where a mistake is a bypass.",
   "title": "Policy judged with the base's rules",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "opus",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W23/brief.md"
+  "brief": "jobs/W23/brief.md",
+  "report": "jobs/W23/report.md"
 }
