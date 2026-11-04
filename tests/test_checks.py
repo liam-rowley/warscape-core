@@ -2,7 +2,7 @@ import unittest
 
 from _util import CORE
 from warscape import checks
-from warscape.repo import DEFAULTS, glob_to_re, matches
+from warscape.repo import DEFAULTS, glob_to_re, load_config, matches
 
 
 class Globs(unittest.TestCase):
@@ -238,6 +238,13 @@ class DocPaths(unittest.TestCase):
                     'warscape/gates.py#L3', './warscape/gates.py'):
             self.assertEqual(self.stale(f'`{tok}`'), [], tok)
         self.assertEqual(self.stale('`core/wsc.py` and `warscape/gates.py`', doc='README.md'), [])
+
+    def test_the_release_branch_pattern_is_not_a_path_in_the_core(self):
+        """W28 + W29 turned main red: `.Z` makes the branch pattern look like a file. The core ignores that exact token, not `release/` paths."""
+        ignore = load_config(CORE)['docs']['path_ignore']
+        self.assertEqual(self.stale('`release/vX.Y.Z`'), ['docs/GUIDE.md:1: path not found: release/vX.Y.Z'])
+        self.assertEqual(self.stale('`release/vX.Y.Z`', ignore=ignore), [])
+        self.assertEqual(self.stale('`release/notes.md`', ignore=ignore), ['docs/GUIDE.md:1: path not found: release/notes.md'])
 
     def test_placeholders_commands_ignored_tokens_and_records_are_not_flagged(self):
         for tok in ('jobs/<id>/brief.md', 'docs/*.md', '{a,b}/x.py', '$HOME/x.py', '~/x.py', 'https://x.org/a.py', 'C:/x/y.py',
