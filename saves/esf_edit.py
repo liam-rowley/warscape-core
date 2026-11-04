@@ -9,7 +9,7 @@ not-a-verb: a game-agnostic ESF codec run on the PC against saves outside the re
 Ported from empire-remastered rml_mod/tools/db/esf_edit.py (J14). Added: unknown packed-array element types are collected
 (kept raw, and `roundtrip` fails on them), a failed round trip names the first differing offset with its tag and record path,
 and `-o` may not name the input. `set ... @N` and `dump` count N over all children (records too), the same @N esf_diff and
-esf_dump print (the earlier remaster's `set` counted values only). Cost: about 15x the file size in RAM while a tree is held; one save per process.
+esf_dump print (the earlier remaster's `set` counted values only); `set_value` takes the same @N (W25). Cost: about 15x the file size in RAM while a tree is held; one save per process.
 """
 import argparse
 import copy
@@ -238,7 +238,13 @@ class Esf:
 
     # ---- edits (counts/offsets are rebuilt by dumps())
     def set_value(self, container, index, value):
-        self.vals(container)[index].set(value)
+        """index = the child position @N among ALL of the container's nodes, as esf_dump and esf_diff print it and the CLI `set` takes it
+        (W25: one convention; it used to count Val nodes only). A record or array at @N is refused (ValueError)."""
+        n = container[index]
+        if not isinstance(n, Val):
+            raise ValueError('@%d is a %s (%s), not a value: set_value takes the child position @N among all nodes' % (
+                index, 'record' if isinstance(n, Rec) else 'record array', self.nm(n)))
+        n.set(value)
 
     def copy_item(self, arr, i, to=None):
         it = copy.deepcopy(arr.items[i])
@@ -267,7 +273,7 @@ class Esf:
 
 def load(path):
     """API: Esf = load(path); e.select('A/B[3]/C') -> containers; e.select_node(spec) -> Rec/RArr; e.vals(container) -> Val list;
-    e.set_value(container, i, v); e.copy_item(arr, i, to); e.remove_item(arr, i); e.insert_node(container, pos, node); e.save(path)"""
+    e.set_value(container, @N child position among all nodes, v); e.copy_item(arr, i, to); e.remove_item(arr, i); e.insert_node(container, pos, node); e.save(path)"""
     return Esf.load(path)
 
 

@@ -397,6 +397,86 @@ Test-Case 'exe check: the sha1 against exe_identity.json beside the adapter; a m
     Assert-True ($ExeCache.key -ne $old) 'a changed exe is hashed again (size + mtime cache)'
     Remove-Quiet $idp; Remove-Quiet $exe
 }
+Test-Case 'exe_check at start (W25, H1): Resolve-ExeCheck takes the stricter of the ini and a fresh restart.carry; a stale carry is ignored' {
+    Assert-Eq (Resolve-ExeCheck 'warn' $null) 'warn' 'ini warn at start, no carry: honoured'
+    Assert-Eq (Resolve-ExeCheck 'refuse' $null) 'refuse' 'ini refuse'
+    Assert-Eq (Resolve-ExeCheck 'warn' @{ exe_check = 'refuse'; age_s = 5 }) 'refuse' 'carry refuse beats ini warn'
+    Assert-Eq (Resolve-ExeCheck 'refuse' @{ exe_check = 'warn'; age_s = 5 }) 'refuse' 'a carry never weakens the ini either'
+    Assert-Eq (Resolve-ExeCheck 'warn' @{ exe_check = 'warn'; age_s = 5 }) 'warn' 'both warn'
+    Assert-Eq (Resolve-ExeCheck 'warn' @{ exe_check = 'refuse'; age_s = 301 }) 'warn' 'a carry older than 5 minutes is ignored'
+    $cp = RootPath 'restart.carry'
+    Write-RestartCarry 'refuse'
+    $c = Read-RestartCarry
+    Assert-Eq $c.exe_check 'refuse' 'the carry reads back'
+    Assert-True ($c.age_s -lt 60) 'fresh'
+    Assert-True (-not (Test-Path -LiteralPath $cp)) 'and is removed once read'
+    Write-RestartCarry 'refuse'
+    (Get-Item -LiteralPath $cp).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(-10)
+    $c = Read-RestartCarry
+    Assert-Eq (Resolve-ExeCheck 'warn' $c) 'warn' 'a stale carry file is ignored'
+    Assert-True ($null -eq (Read-RestartCarry)) 'no carry file: $null'
+}
+Test-Case 'exe_check reload (W25, H1): a running refuse is never weakened by watcher.ini; other keys still apply; refuse->refuse and warn->refuse go through; logged once' {
+    $ini = RootPath 'watcher.ini'
+    $had = Test-Path -LiteralPath $ini; $old = $(if ($had) { [IO.File]::ReadAllText($ini) } else { '' })
+    try {
+        $S.exe_check = 'refuse'
+        $mark = $(if (Test-Path -LiteralPath $LogPath) { ([IO.File]::ReadAllText($LogPath)).Length } else { 0 })
+        [IO.File]::WriteAllText($ini, "exe_check=warn`r`nlock_stale_min=33`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'the reload keeps refuse'
+        Assert-Eq ([string]$S.lock_stale_min) '33' 'the other key of the same edit is applied'
+        Assert-Eq $ExeCheckRefused 'warn' 'the refused value is kept for the status file'
+        [IO.File]::WriteAllText($ini, "exe_check=warn`r`nlock_stale_min=34`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'still refuse'
+        $log = ([IO.File]::ReadAllText($LogPath)).Substring($mark)
+        Assert-Eq ([regex]::Matches($log, 'asks exe_check=warn; refused, a running watcher never weakens it').Count) 1 'logged once per distinct value'
+        Write-Status
+        $st = [IO.File]::ReadAllText($StatusPath, $Utf8) | ConvertFrom-Json
+        Assert-Eq $st.exe_check_refused 'warn' 'watcher.status carries exe_check_refused'
+        Assert-Eq $st.exe_check 'refuse' 'and the value in force'
+        [IO.File]::WriteAllText($ini, "exe_check=refuse`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'refuse -> refuse'
+        Assert-True ($null -eq $ExeCheckRefused) 'nothing refused any more'
+        $S.exe_check = 'warn'   # a watcher Liam started with warn
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'warn -> refuse goes through'
+        $S.exe_check = 'warn'
+        [IO.File]::WriteAllText($ini, "exe_check=warn`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'warn' 'warn -> warn stays warn'
+        Assert-Eq (Reload-ExeCheck 'refuse' 'WARN').value 'refuse' 'the comparison is case-insensitive, as the gate is'
+        Assert-Eq (Reload-ExeCheck 'refuse' 'bogus').value 'bogus' 'a value the gate refuses anyway is not a weakening'
+    } finally {
+        if ($had) { [IO.File]::WriteAllText($ini, $old, $Utf8) } else { Remove-Quiet $ini }
+        Load-Settings
+    }
+}
+Test-Case 'exe check cache (W25, H12): the launch gate hashes every launch; the status cache keys on size, mtime and creation time' {
+    $exe = Join-Path $A.game_dir $A.game_image
+    $idp = Exe-IdentityPath
+    [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ fake vanilla exe AAAA'))
+    $good = (Get-FileHash -LiteralPath $exe -Algorithm SHA1).Hash.ToLower()
+    [IO.File]::WriteAllText($idp, "{`"sha1`": `"$good`"}", $Utf8)
+    try {
+        $o = New-Object Collections.Generic.List[string]
+        Assert-True ($null -eq (Exe-Gate $o)) 'vanilla: launch goes ahead'
+        [void](Exe-Check)
+        Assert-Match $ExeCache.key ([regex]::Escape([string](Get-Item -LiteralPath $exe).CreationTimeUtc.Ticks)) 'the status cache key has the creation time'
+        $it = Get-Item -LiteralPath $exe; $mt = $it.LastWriteTimeUtc; $ct = $it.CreationTimeUtc
+        [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ fake patched exe BBBB'))   # same size
+        $it = Get-Item -LiteralPath $exe; $it.LastWriteTimeUtc = $mt; $it.CreationTimeUtc = $ct          # timestamps put back
+        $r = Exe-Gate $o
+        Assert-Match $r '^EXE CHECK: MISMATCH' 'the gate is not fooled by a same-size replacement with its timestamps restored'
+        [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ fake vanilla exe AAAA'))
+        [void](Exe-Check); $k = $ExeCache.key
+        (Get-Item -LiteralPath $exe).CreationTimeUtc = $ct.AddDays(-3)
+        [void](Exe-Check)
+        Assert-True ($ExeCache.key -ne $k) 'a new creation time is a new cache key'
+    } finally { Remove-Quiet $idp; Remove-Quiet $exe }
+}
 Test-Case 'guards: scripts that start/kill the game or write its config need an owner; read-only ones never do' {
     Assert-True ($null -ne (Script-TouchesGame 'taskkill /f /im Game.exe')) 'taskkill'
     Assert-True ($null -ne (Script-TouchesGame 'start "" "C:\x\Game.exe"')) 'start'
@@ -735,6 +815,55 @@ Test-Case 'headless: the adapter block is read, and the launch refuses a d3d9.dl
     Assert-True ($null -eq (Get-Active)) 'and nothing was overlaid'
     Assert-True (Bytes-Contain ([byte[]]($Latin1.GetBytes('xx headless_status.json yy'))) 'headless_status.json') 'Bytes-Contain'
     Remove-Item -LiteralPath $dll -Force
+}
+# W38: the proxy writes `refused` and exits with exit_code; a watcher that looks after the exit must still report the proxy's detail.
+# Both orders are made deterministic by stubbing the process lookups (functions shadow cmdlets for the callee: PowerShell scopes dynamically).
+function Write-UnitHStatus([int]$p, [string]$detail, [int]$ageS = 0) {
+    $sp = GamePath $A.headless.status_file
+    New-Item -ItemType Directory -Path (Split-Path $sp) -Force | Out-Null
+    [IO.File]::WriteAllText($sp, "{`"pid`": $p, `"state`": `"refused`", `"detail`": `"$detail`", `"exit_code`": 2160}")
+    if ($ageS) { (Get-Item -LiteralPath $sp).LastWriteTimeUtc = [DateTime]::UtcNow.AddSeconds(-$ageS) }
+}
+Test-Case 'headless wait (W38): a game gone before the first look still reports its own refusal; an older refusal is not taken for it' {
+    function Get-GameProcs { return @() }
+    $o = New-Object Collections.Generic.List[string]
+    $since = [DateTime]::UtcNow.AddSeconds(-2)
+    Write-UnitHStatus 777 'no target: the virtual display is gone'
+    Assert-Match (Headless-Wait 5 $o $since) 'the proxy refused the launch: no target: the virtual display is gone \(exit code 2160' 'the detail, written since the launch'
+    Write-UnitHStatus 777 'an old refusal' 3600
+    $r = Headless-Wait 5 $o $since
+    Assert-Match $r 'is not running after the start \(exit code 2160 = the proxy refused' 'an hour-old refusal: the generic line'
+    Assert-NotMatch $r 'an old refusal' 'not the stale detail'
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force
+    Assert-Match (Headless-Wait 5 $o $since) 'is not running after the start' 'no status file at all: the generic line'
+}
+Test-Case 'headless wait (W38): a game that writes refused after the loop read it and then exits reports the refusal; another pid does not count' {
+    function Get-GameProcs { return @([pscustomobject]@{ Id = 4321 }) }
+    $script:W38Pid = 4321
+    # only the alive check on the game's pid is stubbed (Pump calls Get-Process too): the loop's read saw nothing; then the write and the exit
+    function Get-Process {
+        [CmdletBinding()] param([int]$Id = 0, [string]$Name = '')
+        if ($Id -eq 4321) { Write-UnitHStatus $script:W38Pid 'refused after the read'; return $null }
+        if ($Name) { return Microsoft.PowerShell.Management\Get-Process -Name $Name -ErrorAction SilentlyContinue }
+        if ($Id) { return Microsoft.PowerShell.Management\Get-Process -Id $Id -ErrorAction SilentlyContinue }
+        return Microsoft.PowerShell.Management\Get-Process
+    }
+    $o = New-Object Collections.Generic.List[string]
+    $since = [DateTime]::UtcNow.AddSeconds(-2)
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force -ErrorAction SilentlyContinue
+    Assert-Match (Headless-Wait 5 $o $since) 'the proxy refused the launch: refused after the read \(exit code 2160' 'the refusal, read again after the exit'
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force
+    $script:W38Pid = 999
+    Assert-Match (Headless-Wait 5 $o $since) 'the game exited before reporting on_virtual' 'a refusal for another pid: the generic line'
+    Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force -ErrorAction SilentlyContinue
+}
+Test-Case 'kill (W38): a game that exited just before the kill is logged as gone, not a watcher error' {
+    $gone = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'exit' -PassThru -WindowStyle Hidden; $gone.WaitForExit()
+    $script:W38Gone = $gone.Id
+    function Get-GameProcs { return @([pscustomobject]@{ Id = $script:W38Gone; ProcessName = 'Game' }) }
+    $o = New-Object Collections.Generic.List[string]
+    Assert-True (Kill-Game 'unit test' $o) 'no zombie, no throw'
+    Assert-Match ($o -join "`n") "taskkill /F /T /PID $($script:W38Gone) \(Game\)" 'the taskkill outcome is logged'
 }
 Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 exit (Finish-Tests 'unit')
