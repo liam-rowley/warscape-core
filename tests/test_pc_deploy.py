@@ -567,7 +567,16 @@ class SetWaitsForRestore(unittest.TestCase):
         self.assertEqual(self.ini.read_bytes(), self.before)
 
     def test_a_restore_that_finishes_during_the_wait_lets_set_write(self):
-        threading.Timer(1.0, lambda: self.active.unlink()).start()
+        # W38: between two polls (set polls once a second), and a delete that outlasts the reader: on Windows a delete fails while
+        # `pending_restore` has the file open, and a timer at 1.0 s met the poll at 1.0 s (main run 41857256437)
+        def finish_restore():
+            for _ in range(200):
+                try:
+                    self.active.unlink()
+                    return
+                except PermissionError:
+                    time.sleep(0.01)
+        threading.Timer(1.5, finish_restore).start()
         t0 = time.time()
         rc, out = self.set(wait_restore=20)
         self.assertEqual(rc, 0)
