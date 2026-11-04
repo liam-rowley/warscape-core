@@ -456,6 +456,151 @@ class RedPullRequests(unittest.TestCase):
         self.assertIn('python3 core/wsc.py policy --branch job/J1 --base origin/main', jv.build_steps(row(status='queued')))
 
 
+class MainHealth(unittest.TestCase):
+    """W22: `jobs next|review|fix|view` print main's CI state first (the latest completed push run of each workflow, its required jobs)."""
+    CFG = {**__import__('warscape.repo', fromlist=['DEFAULTS']).DEFAULTS['ci'], 'workflows': ['gates.yml', 'policy.yml'],
+           'required_checks': ['gates', 'proxy', 'policy']}
+    RUN = {'id': 77, 'html_url': 'https://github.com/o/r/actions/runs/77', 'head_sha': 'abcdef1234567', 'conclusion': 'failure',
+           'status': 'completed', 'updated_at': '2026-11-04T08:30:00Z'}
+
+    def gh(self, runs=None, jobs=None, rc=0, err='', raw=None, missing=False):
+        calls = []
+        runs = {'gates.yml': [self.RUN]} if runs is None else runs
+        jobs = [{'name': 'gates', 'conclusion': 'success'}, {'name': 'proxy', 'conclusion': 'failure'}] if jobs is None else jobs
+
+        def fake(argv, **k):
+            calls.append(argv)
+            if missing:
+                raise FileNotFoundError('gh')
+            if rc:
+                return subprocess.CompletedProcess(argv, rc, '', err)
+            path = argv[2]
+            if raw is not None:
+                return subprocess.CompletedProcess(argv, 0, raw, '')
+            if '/workflows/' in path:
+                name = path.split('/workflows/')[1].split('/')[0]
+                return subprocess.CompletedProcess(argv, 0, json.dumps({'workflow_runs': runs.get(name, [])}), '')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'jobs': jobs}), '')
+        return fake, calls
+
+    def test_red_required_jobs_give_one_line_each_with_run_url_and_commit(self):
+        fake, calls = self.gh(jobs=[{'name': 'gates', 'conclusion': 'failure'}, {'name': 'proxy', 'conclusion': 'timed_out'},
+                                    {'name': 'viewer', 'conclusion': 'failure'}, {'name': 'policy', 'conclusion': 'failure'}])
+        lines = jv.main_health(self.CFG, ROOT, False, run=fake)
+        self.assertEqual(len(lines), 3)
+        for l, job in zip(lines, ('gates', 'proxy', 'policy')):
+            self.assertTrue(l.startswith(f'main is RED: {job} failed in run 77 (https://github.com/o/r/actions/runs/77), commit abcdef1, '), l)
+            self.assertIn('rerun it or push to main; an issue tracks it', l)
+        self.assertIn('2026-11-04', lines[0])
+        first = calls[0][2]
+        for s in ('actions/workflows/gates.yml/runs', 'branch=main', 'event=push', 'status=completed', 'per_page=1'):
+            self.assertIn(s, first)
+        self.assertIn('repos/{owner}/{repo}/', first)
+
+    def test_green_gives_no_lines_and_a_workflow_without_a_completed_run_is_skipped(self):
+        fake, calls = self.gh(jobs=[{'name': 'gates', 'conclusion': 'success'}, {'name': 'proxy', 'conclusion': 'skipped'}])
+        self.assertEqual(jv.main_health(self.CFG, ROOT, False, run=fake), [])
+        self.assertEqual(len(calls), 3)   # gates runs, gates jobs, policy runs (none: no jobs call)
+        st = jv.main_state(self.CFG, ROOT, False, run=fake)
+        self.assertEqual((st['state'], st['runs']), ('green', [77]))
+
+    def test_offline_makes_no_call(self):
+        def boom(*a, **k):
+            raise AssertionError('gh was called')
+        self.assertEqual(jv.main_health(self.CFG, ROOT, True, run=boom), [])
+        self.assertEqual(jv.main_state(self.CFG, ROOT, True, run=boom)['state'], 'off')
+
+    def test_every_failure_to_read_is_exactly_one_unknown_line(self):
+        cases = {'no gh': dict(missing=True), 'not logged in': dict(rc=1, err='gh auth login required'), 'bad json': dict(raw='not json'),
+                 'wrong shape': dict(raw='[]')}
+        for why, kw in cases.items():
+            fake, _ = self.gh(**kw)
+            lines = jv.main_health(self.CFG, ROOT, False, run=fake)
+            self.assertEqual(len(lines), 1, why)
+            self.assertTrue(lines[0].startswith("(main's CI state is unknown: "), lines[0])
+            self.assertTrue(lines[0].endswith('--offline skips this)'), lines[0])
+            self.assertEqual(jv.main_state(self.CFG, ROOT, False, run=fake)['state'], 'unknown', why)
+
+    def test_the_latest_completed_run_counts_and_an_in_progress_run_is_not_read(self):
+        fake, calls = self.gh()
+        jv.main_health(self.CFG, ROOT, False, run=fake)
+        self.assertTrue(all('status=completed' in c[2] for c in calls if '/workflows/' in c[2]))
+        self.assertTrue(any('/actions/runs/77/jobs' in c[2] for c in calls))
+
+    def print_state(self, fake, **kw):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            st = jv.print_main_health(self.CFG, ROOT, False, run=fake)
+        return st, out.getvalue()
+
+    def test_print_red_unknown_and_green(self):
+        st, text = self.print_state(self.gh()[0])
+        self.assertTrue(text.startswith('Main CI is red (fix or rerun before a merge verdict):\n  main is RED: proxy failed'), text)
+        st, text = self.print_state(self.gh(missing=True)[0])
+        self.assertTrue(text.startswith("(main's CI state is unknown"), text)
+        st, text = self.print_state(self.gh(jobs=[{'name': 'gates', 'conclusion': 'success'}])[0])
+        self.assertEqual(text, '')
+
+    def test_the_page_line_is_red_green_or_unknown(self):
+        red = jv.main_html(jv.main_state(self.CFG, ROOT, False, run=self.gh()[0]))
+        self.assertIn('main is RED: proxy failed', red)
+        self.assertIn('warn', red)
+        green = jv.main_html(jv.main_state(self.CFG, ROOT, False, run=self.gh(jobs=[{'name': 'gates', 'conclusion': 'success'}])[0]))
+        self.assertIn('main CI: green (run 77)', green)
+        self.assertIn('unknown', jv.main_html(jv.main_state(self.CFG, ROOT, False, run=self.gh(missing=True)[0])))
+        self.assertEqual(jv.main_html(jv.main_state(self.CFG, ROOT, True)), '')
+        page = jv.render_view([row('J1', status='queued')], lambda p: None, set(), 'now', main_html=red)
+        self.assertIn('main is RED: proxy failed', page)
+
+    def test_the_server_memoises_the_answer_for_a_minute(self):
+        calls = []
+        clock = [1000.0]
+
+        def line():
+            calls.append(1)
+            return f'<p>main {len(calls)}</p>'
+        srv = jv.JobServer(lambda: ([row('J1', status='queued')], lambda p: None, set(), {}), lambda: [], lambda a: 's', main_line=line,
+                           clock=lambda: clock[0])
+        try:
+            a = srv.page()
+            clock[0] += 59
+            b = srv.page()
+            self.assertEqual(len(calls), 1)
+            self.assertIn('main 1', a + b)
+            clock[0] += 2
+            self.assertIn('main 2', srv.page())
+        finally:
+            srv.server_close()
+
+    def test_the_lines_print_before_the_pull_request_lines_in_next_and_review(self):
+        import contextlib
+        import io
+        import types
+        from warscape.repo import DEFAULTS
+        from warscape.verbs import jobs as jverb
+        fake, _ = self.gh()
+        ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': self.CFG})
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
+        try:
+            jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
+            jv.print_red_prs = lambda root, offline: print('PR #1 job/J9: gates failed')
+            jv.remote_branches = lambda root, offline: {'job/J60'}
+            jv.branch_rows = lambda *a, **k: {'J60': jv.Branch(row('J60', status='review', title='T'), 0, 'abc1234')}
+            jv.branch_checks = lambda *a, **k: 'CI line'
+            jv.print_main_health = lambda cfg, root, offline: saved[5](cfg, root, offline, run=fake)
+            for action in ('next', 'review'):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    rc = jverb.run(types.SimpleNamespace(action=action, id=None, offline=False, auto=False, serve=False, all=False), ctx)
+                text = out.getvalue()
+                self.assertEqual(rc, 0, action)
+                self.assertLess(text.index('Main CI is red'), text.index('PR #1 job/J9'), action)
+        finally:
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
+
+
 class BranchChecks(unittest.TestCase):
     """J54: `jobs review` and `jobs fix` read the branch head's check runs (one gh api call) and name the red and running ones."""
     SHA = 'abc1234def5678'
@@ -521,11 +666,12 @@ class BranchChecks(unittest.TestCase):
         fake, _ = self.gh(self.RUNS)
         from warscape.repo import DEFAULTS
         from warscape.verbs import jobs as jverb
-        ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs']})
-        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks)
+        ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': DEFAULTS['jobs'], 'ci': DEFAULTS['ci']})
+        saved = (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health)
         try:
             jv.main_rows = lambda ctx: [row('J60', status='review', title='T')]
             jv.print_red_prs = lambda root, offline: []
+            jv.print_main_health = lambda cfg, root, offline: None
             jv.remote_branches = lambda root, offline: {'job/J60'}
             for action, status, rounds in (('review', 'review', 0), ('fix', 'fix', 1)):
                 on = {'J60': jv.Branch(row('J60', status=status, title='T'), rounds, self.SHA)}
@@ -539,7 +685,7 @@ class BranchChecks(unittest.TestCase):
                 self.assertIn('viewer failed (failure): https://x/v', text, action)
                 self.assertLess(text.index('viewer failed'), text.index(f'J60: {action}'), action)
         finally:
-            jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks = saved
+            (jv.main_rows, jv.print_red_prs, jv.remote_branches, jv.branch_rows, jv.branch_checks, jv.print_main_health) = saved
 
 
 def rnd(n, v, jid='J60'):

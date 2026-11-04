@@ -8,8 +8,11 @@ verb: jobs
 The rules are code in warscape/jobq.py (moved from napoleon-remastered `tools/verbs/jobs.py` in napoleon J62; the story of each rule is in that
 repo's jobs/J52, J54, J55, J56, J57 reports). `next`, `review`, `fix` and `view` read the remote branch names (one `git ls-remote origin`);
 `review`, `fix` and `view` then read each job branch whose job is not done on main after one `git fetch` of `job/*` (`--id`: that branch only,
-done or not; `--all`: done jobs too); `--offline` uses the local remote-tracking refs instead. `next`, `review` and `view` first print every open
-pull request with a failed check (one `gh pr list` call; `--offline` skips it); `review` and `fix` then read the chosen branch's head commit's
+done or not; `--all`: done jobs too); `--offline` uses the local remote-tracking refs instead. `next`, `review`, `fix` and the static `view` first print main's CI state
+(W22: the latest completed push run of each workflow in `[ci] workflows` on main and its required jobs, two `gh api` calls per workflow; a red job is
+the first thing printed, an unreadable state is one "unknown" line, green prints nothing; the page head carries the same line, `view --serve`
+memoises it for 60 s; nothing is refused) and then every open
+pull request with a failed check (one `gh pr list` call; `--offline` skips both); `review` and `fix` then read the chosen branch's head commit's
 check runs (one `gh api` call) above the steps. `view` writes one self-contained HTML page (default `_scratch/jobs.html`) and opens it;
 `view --serve` serves it on 127.0.0.1 and the buttons post (id, action) to the server, which checks a per-run token, Origin, Host, content
 type, readiness against fresh branches and no live session of the same name (`claude agents --json`, fail closed), then runs
@@ -81,7 +84,8 @@ def run(args, ctx):
             branches = J.remote_branches(ctx.root, args.offline)
             return now, read, branches, J.branch_rows(ctx.root, branches, args.offline, reg_dir, done=done_ids(now))
         srv = J.JobServer(snapshot, J.list_agents, lambda argv: J.start_session(argv, ctx.root), port=args.port, dry_run=args.dry_run,
-                          root=ctx.root, log_path=ctx.root / '_scratch' / 'jobs_auto.log', ctx=ctx)
+                          root=ctx.root, log_path=ctx.root / '_scratch' / 'jobs_auto.log', ctx=ctx,
+                          main_line=lambda: J.main_html(J.main_state(ctx.config['ci'], ctx.root, args.offline)))
         print(f'jobs view: serving {srv.url}{" (dry run: nothing is started)" if args.dry_run else ""}; Ctrl+C stops it', flush=True)
         stop = threading.Event()
         if args.auto:
@@ -97,6 +101,7 @@ def run(args, ctx):
             srv.server_close()
         return 0
 
+    mstate = J.print_main_health(ctx.config['ci'], ctx.root, args.offline)   # W22: a red main first, then the pull requests
     J.print_red_prs(ctx.root, args.offline)
     branches = J.remote_branches(ctx.root, args.offline)
     if args.action == 'next' and args.id:
@@ -125,7 +130,7 @@ def run(args, ctx):
         out.parent.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         on_branch = J.branch_rows(ctx.root, branches, args.offline, reg_dir, done=done_ids(rows))
-        out.write_text(J.render_view(rows, read, branches, stamp, on_branch, root=ctx.root, ctx=ctx), encoding='utf-8')
+        out.write_text(J.render_view(rows, read, branches, stamp, on_branch, root=ctx.root, ctx=ctx, main_html=J.main_html(mstate)), encoding='utf-8')
         print(f'jobs view: {len(rows)} jobs -> {out}')
         if not args.no_open:
             webbrowser.open(out.resolve().as_uri())

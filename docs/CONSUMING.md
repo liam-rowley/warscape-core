@@ -192,6 +192,16 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   (0.27.0) and their sha256 checks judge every byte; a cache fault never fails the job.
   Only for jobs that run `build.sh` (the fetchers write `<game root>/build/lua` and `build/ui/src`): a job whose own fetcher writes
   elsewhere (a review viewer fetching into `build/viewer/src`) gains nothing from it.
+- **Main health (0.30.0, core W22).** A red required check on `main` is no longer permanent and silent. (1) *Rerun:* the `changes` job has no diff base on a
+  push to `main` (`base=''`, the old `$BEFORE` is gone), so every set counts as changed and only a pass marker for its input tree skips it; a failed run saves
+  no marker, so the next push reruns the set (a squash merge is a new tree and runs; a docs-only push finds its predecessor's marker and skips; an evicted
+  cache costs one extra run, never a wrong skip). Branch pushes are unchanged. (2) *Report:* `{{wsc notify gates ...}}` also renders a `main_health` job
+  (`always()` on a push to `main`, `continue-on-error`, `issues: write`, not a required check) that runs `wsc ci main-health`: one issue per red required job,
+  titled `CI is red on main: <job>`, found by a hidden mark at the start of its body (no label), one comment per run and attempt, closed with a comment once the
+  job is green; a run that is not main's tip does nothing; a problem it can explain prints and exits 0. Required jobs are `[ci] required_checks` that the run
+  produced, else every job but `changes`, `notify` and `main_health`. (3) *Read:* `wsc jobs next|review|fix|view` print `main is RED: ...` lines first (the latest
+  completed push run of each workflow), "unknown" when `gh` cannot say, nothing when green; `--offline` skips it. Consumers re-render after the pin bump
+  (`python3 core/wsc.py ci render`; no template change) and enable Issues in the repository (`wsc ci check-settings` says when they are off).
 - **The proxy job runs the smoke on your adapter** (`build.sh smoke`, 0.27.0): each step asserts what that game's build must do. A game without a
   `GestureAdapter` passes steps 6 and 7 on the inert path (the log says "no adapter"), and step 8 peeks the first engine site in the game's
   generated tables (a game with no engine sites checks the stale request only). The core proves both paths: the null game, and the fixture

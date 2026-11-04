@@ -3,9 +3,11 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) P1 (blocker), automation 6. A red proxy or harness-windows run on main is never rerun or reported: a push to main diffs against $BEFORE (gates.yml:45), so a set that failed on the previous main commit is skipped on the next one and shows green; pass markers are saved only on success (ci_render.py:84-93); notify skips main (ci_render.py:131-132); red_prs reads open pull requests only (jobq.py:365-379). Seen twice: napoleon's proxy on main has been red or skipped since J24's merge (run 41664906781) and the core's at v0.16.0 (run 41716930333), both a lua.org download timeout. On a push to main, run a set whenever no pass marker exists for its input tree in main's scope; notify on main opens or updates one issue per red required job and closes it once the job is green; jobs next, review and view print a red main first. Host tests for the render and the readiness output.",
   "title": "Main health: a red required check on main is rerun and reported",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W22/brief.md"
+  "brief": "jobs/W22/brief.md",
+  "report": "jobs/W22/report.md",
+  "review": "jobs/W22/review.md"
 }
