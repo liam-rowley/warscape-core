@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -131,11 +132,11 @@ def main(argv=None):
     if not pins_path.is_file():
         sys.exit(f'fetch_ui: no pin file {pin_hint(pins_path)}')
     pins = json.loads(pins_path.read_text(encoding='utf-8'))
+    for k in KEYS:
+        if k not in pins:
+            sys.exit(missing_pin(pins_path, k))
     out = Path(a.out) if a.out else layout.game_root() / 'build' / 'ui' / 'src'
     out.mkdir(parents=True, exist_ok=True)
-    for k in ('rmlui', 'freetype', 'lua', 'stb_image', 'stb_image_write'):
-        if k not in pins:
-            sys.exit(f'fetch_ui: {pins_path} has no "{k}" pin')
     fetch_git('rmlui', pins['rmlui'], out)
     fetch_git('freetype', pins['freetype'], out)
     fetch_lua(pins['lua'], out)
@@ -146,6 +147,25 @@ def main(argv=None):
 
 def pin_hint(p):
     return f'{p} (set wsc.toml [proxy] ui_pins, or keep viewer/pins.json in the game repo)'
+
+
+# The UI pin file's keys (docs/CONSUMING.md "The UI pin file"), each with what it is for
+KEYS = {'rmlui': 'RmlUi, the UI library', 'freetype': "RmlUi's font engine", 'lua': "the host's own Lua 5.1.1 (float numbers)",
+        'stb_image': 'image loading', 'stb_image_write': "the in-game host's PNG dump, required since 0.10.0"}
+# the reference pin file to copy an entry from: the null game's, beside these tools in the core
+REFERENCE = Path(__file__).resolve().parents[1] / 'tests' / 'null_game' / 'viewer' / 'pins.json'
+
+
+def missing_pin(pins_path, key):
+    """The refusal for a pin file without `key` (C2 of the 2026-11-03 audit): the key, the five keys, what it is for, the entry to copy."""
+    try:
+        ref = Path(os.path.relpath(REFERENCE, layout.game_root())).as_posix()
+        ref = ref if not ref.startswith('..') else REFERENCE.as_posix()
+    except (ValueError, layout.LayoutError):   # another drive (Windows), or no game root
+        ref = REFERENCE.as_posix()
+    return (f'fetch_ui: {pins_path} has no "{key}" pin ({KEYS[key]}). The UI pin file needs all five keys: {", ".join(KEYS)} '
+            f'(docs/CONSUMING.md "The UI pin file"; it is a DLL input, the ui_pins role). Copy the "{key}" entry from the reference pin file, '
+            f'the null game\'s {ref}')
 
 
 if __name__ == '__main__':
