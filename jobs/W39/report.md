@@ -24,6 +24,10 @@ Host tests ran with g++ in the pinned image on 2026-11-04 unless a line says oth
 | `build.sh --docker all`, build `5a3a2bb0f813` | DLL builds; 17 core tests and 1 game test pass |
 | `build.sh --docker smoke` | passed, 10 launches under wine, 2 dumps |
 | CI run 41925828895 on `c0ef327` | every job green, `proxy` included (host tests, repro, smoke, no-gesture build) |
+| `python3 wsc.py gates` (full), this checkout | exit 0: 15 ok, 1 warn, 0 failed; the warn is 5 skipped tests (no POSIX sh for one hook test, capstone not installed for four) |
+| `python3 wsc.py policy --branch job/W39 --base origin/main` | **exit 1, REFUSED,** for two reasons only: no `jobs/W39/review.md` verdict, and the row is not `done` |
+
+`policy` has no builder stage: it judges a branch as ready to merge, so both refusals stay until the reviewer's round. A builder may not clear either (C18). It raised nothing about the changed files, `VERSION`, other rows or trailers.
 
 **Did any re-entry path need a policy change? No.** `WndProcBook` is as ported, apart from one comment word.
 
