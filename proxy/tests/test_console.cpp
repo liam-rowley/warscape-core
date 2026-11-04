@@ -1,23 +1,21 @@
 // test_console.cpp - host tests for the campaign console (J15): line parsing, the verb's refusals (key off, file name, no-op), the
-// slot-claim rule, the forwarder's gate, the path label, Lua quoting; the adapter's offsets against the bytes of its engine_sites
-// rows; and source lints (key off = no engine read or write, the slot written only by the claim, never 0; the chunk deleted after its run;
-// the record matched to the line; no game named in core).
-// Built and run by proxy/tools/build.sh tests.
+// slot-claim rule, the forwarder's gate, the path label, Lua quoting; the adapter contract checker (adapter_checks.h, W16) on a synthetic
+// site table, one passing and one failing case per rule; and source lints (key off = no engine read or write, the slot written only by the
+// claim, never 0; the gate byte set only around one Execute; the chunk deleted after its run; the record matched to the line; no game named
+// in core). A game checks its own console numbers in its own proxy/tests (layout.py proxy-tests). Built and run by proxy/tools/build.sh tests.
 #include "testkit.h"
 #include "console.h"
+#include "adapter_checks.h"
 #include "adapter.cpp"
 #include <set>
 
 using namespace wsp;
 
-static const SiteDef* Site(const char* id) {
-    for (size_t i = 0; i < gen::kSiteCount; ++i) if (!strcmp(gen::kSites[i].id, id)) return &gen::kSites[i];
-    return nullptr;
-}
-static uint32_t StockDword(const char* id, int off) {
-    const SiteDef* s = Site(id);
-    if (!s || off + 4 > s->len) return 0xffffffffu;
-    return (uint32_t)s->stock[off] | (uint32_t)s->stock[off + 1] << 8 | (uint32_t)s->stock[off + 2] << 16 | (uint32_t)s->stock[off + 3] << 24;
+static bool Has(const std::vector<std::string>& p, const char* part) {
+    for (const std::string& s : p) if (s.find(part) != std::string::npos) return true;
+    for (const std::string& s : p) printf("    (problem: %s)\n", s.c_str());
+    printf("    no problem names '%s'\n", part);
+    return false;
 }
 
 int main(int argc, char** argv) {
@@ -25,17 +23,17 @@ int main(int argc, char** argv) {
     {   // parsing
         ConsoleLine l = ParseConsoleLine("  teleport_to 10.5  -3 ");
         CHECK(l.error.empty()); CHECK_EQ(l.name, std::string("teleport_to")); CHECK_EQ(l.args, std::string("10.5  -3")); CHECK_EQ(l.line, std::string("teleport_to 10.5  -3"));
-        CHECK(ParseConsoleLine("here_kitty_kitty").args.empty());
+        CHECK(ParseConsoleLine("bare_cmd").args.empty());
         CHECK(!ParseConsoleLine("").error.empty());
         CHECK(!ParseConsoleLine("   ").error.empty());
         CHECK(!ParseConsoleLine("teleport_to 1 2; quit").error.empty());   // a second statement behind the checks
         CHECK(!ParseConsoleLine("teleport_to 1 2 # x").error.empty());
-        CHECK(!ParseConsoleLine("create_army \"x\"").error.empty());
+        CHECK(!ParseConsoleLine("make_thing \"x\"").error.empty());
         CHECK(!ParseConsoleLine("a\\b").error.empty());
         CHECK(!ParseConsoleLine("a\tb\x01").error.empty());
         CHECK(!ParseConsoleLine("a\tb").error.empty());   // tabs are control characters too
     }
-    const char* const noops[] = { "give_trait", "all_end_turn", nullptr };
+    const char* const noops[] = { "noop_b", "noop_a", nullptr };
     {   // the verb's refusals, in order
         ConsolePre p; ConsoleLine l = ParseConsoleLine("teleport_to 1 2");
         CHECK(ConsoleRefusal(p, l, noops).find("dev.console=0") == 0);                 // key off first, whatever else
@@ -51,8 +49,8 @@ int main(int argc, char** argv) {
         p.scene = "campaign"; CHECK(ConsoleRefusal(p, l, noops).empty());
         p.fileExists = true; CHECK(ConsoleRefusal(p, l, noops).find("file named 'teleport_to'") != std::string::npos);
         p.fileExists = false;
-        CHECK(ConsoleRefusal(p, ParseConsoleLine("give_trait x y"), noops).find("no-op in retail") != std::string::npos);
-        CHECK(ConsoleRefusal(p, ParseConsoleLine("give_trait_x"), noops).empty());   // whole-name match only
+        CHECK(ConsoleRefusal(p, ParseConsoleLine("noop_b x y"), noops).find("no-op in retail") != std::string::npos);
+        CHECK(ConsoleRefusal(p, ParseConsoleLine("noop_b_x"), noops).empty());   // whole-name match only
     }
     {   // slot claim: only an empty slot is taken; ours stays ours; anything else is never touched
         CHECK(DecideSlotClaim(0, 0x1000) == SlotClaim::Claim);
@@ -86,37 +84,32 @@ int main(int argc, char** argv) {
         CHECK_EQ(LuaQuote("teleport_to 1 2"), std::string("\"teleport_to 1 2\""));
         CHECK_EQ(LuaQuote("a\"b\\c\n"), std::string("\"a\\\"b\\\\c\\010\""));
     }
-    if (Adapter().console) {   // the adapter (when it has a console): every site exists, every offset is the number in its row's stock bytes
-        const ConsoleAdapter& c = *Adapter().console;
-        for (const char* id : { c.slotSite, c.slotCallSite, c.ownerSite, c.wiringSite, c.ctorSite, c.ctorTailSite, c.executeSite, c.gateSite }) {
-            const SiteDef* s = Site(id);
-            if (!s) printf("    site %s missing\n", id);
-            CHECK(s && s->kind == kHook && s->configKey && !strcmp(s->configKey, "dev.console"));
-        }
-        const uint32_t slot = StockDword(c.slotSite, c.slotOperand);
-        CHECK(Site(c.slotSite)->stock[0] == 0x83 && Site(c.slotSite)->stock[1] == 0x3d);              // cmp dword [imm32], imm8
-        CHECK(StockDword(c.slotCallSite, 2) == slot);                                                // the call reads the same slot
-        CHECK(Site(c.ownerSite)->stock[0] == 0x8b && Site(c.ownerSite)->stock[1] == 0x0d);            // mov ecx, [imm32]
-        CHECK(StockDword(c.ownerSite, 13) == (uint32_t)c.ownerCampaignOff);                          // mov ecx, [ecx + 0x9fc]
-        CHECK(StockDword(c.wiringSite, 2) == (uint32_t)c.ownerSelectionOff);                         // lea ecx, [ebx + 0xf4]
-        CHECK(Site(c.wiringSite)->stock[6] == 0xc7 && Site(c.wiringSite)->stock[7] == 0x01);          // mov [ecx], imm32
-        CHECK(StockDword(c.wiringSite, 12 + 2) == (uint32_t)c.ownerCampaignOff);                     // lea edi, [ebx + 0x9fc]
-        CHECK(Site(c.wiringSite)->stock[30] == (uint8_t)c.campaignSelectionOff);                     // mov [eax + 0x28], ecx
-        CHECK(Site(c.ctorTailSite)->stock[8] == (uint8_t)c.cliCtxOff);                               // mov [esi + 0x28], eax
-        CHECK(Site(c.ctorTailSite)->stock[11] == 0xc7 && Site(c.ctorTailSite)->stock[12] == 0x06);    // mov [esi], imm32
-        CHECK(Site(c.ctorTailSite)->stock[21] == 0xc2 && Site(c.ctorTailSite)->stock[22] == 0x04);    // ret 4: thiscall(void** ctx)
-        CHECK(c.cliCtxOff + 4 <= (int)c.cliSize);
-        CHECK(Site(c.gateSite)->stock[0] == 0x80 && Site(c.gateSite)->stock[c.gateOperand] == 0x54 && Site(c.gateSite)->stock[3] == 0x00);   // cmp byte [r + 0x54], 0
-        // the gate byte is set only around one Execute call and restored right after it
-        {
-            const std::string cc = tk::ReadFile("core/console.cpp");
-            const size_t set = cc.find("if (gate && !gateOld) *gate = 1;"), call = cc.find("((ExecFn)s_execute)(", set), back = cc.find("if (gate && !gateOld) *gate = gateOld;", call);
-            CHECK(set != std::string::npos && call != std::string::npos && back != std::string::npos && back - call < 200);
-        }
-        // the no-op table: refuses what retail compiled out, never a command that acts
-        CHECK(ConsoleInList(c.noOps, "all_end_turn") && ConsoleInList(c.noOps, "give_trait") && ConsoleInList(c.noOps, "selected_cqi"));
-        CHECK(!ConsoleInList(c.noOps, "teleport_to") && !ConsoleInList(c.noOps, "transport_to_region") && !ConsoleInList(c.noOps, "create_army"));
-        CHECK(ConsoleInList(c.systemNames, "here_kitty_kitty") && ConsoleInList(c.systemNames, "quit") && !ConsoleInList(c.systemNames, "teleport_to"));
+    {   // the contract checker on a synthetic console: eight hook rows keyed dev.console, the slot test and the slot call on one slot
+        static const char* const ids[] = { "slot", "call", "owner", "wiring", "ctor", "tail", "exec", "gate" };
+        std::vector<SiteDef> t(8);
+        for (int i = 0; i < 8; ++i) { t[i] = SiteDef{}; t[i].id = ids[i]; t[i].kind = kHook; t[i].len = 24; t[i].configKey = "dev.console"; }
+        t[0].stock[2] = 0x78; t[0].stock[3] = 0x56; t[0].stock[4] = 0x34; t[0].stock[5] = 0x12;   // slot test: the slot at +2
+        t[1].stock[2] = 0x78; t[1].stock[3] = 0x56; t[1].stock[4] = 0x34; t[1].stock[5] = 0x12;   // slot call: [slot] at +2
+        const ConsoleAdapter good = { "slot", 2, "call", "owner", 2, 0x10, "wiring", 0x20, 8, 0x28, "ctor", "tail", 13, 0x28, 0x30, "exec", 5, "gate", 2,
+                                      nullptr, nullptr };
+        CHECK(adck::ConsoleAdapterProblems(good, adck::TableLookup(t.data(), t.size())).empty());
+        auto bad = [&](ConsoleAdapter c, std::vector<SiteDef> tt, const char* part) { CHECK(Has(adck::ConsoleAdapterProblems(c, adck::TableLookup(tt.data(), tt.size())), part)); };
+        { ConsoleAdapter c = good; c.ownerSite = "nowhere"; bad(c, t, "nowhere is not in the site table"); }
+        { auto tt = t; tt[4].kind = kPatch; bad(good, tt, "ctor is not a hook row"); }
+        { auto tt = t; tt[6].configKey = "dev.other"; bad(good, tt, "exec is not keyed by dev.console"); }
+        { auto tt = t; tt[7].configKey = nullptr; bad(good, tt, "gate is not keyed by dev.console"); }
+        { ConsoleAdapter c = good; c.slotOperand = 21; bad(c, t, "slot operand at +21"); }
+        { auto tt = t; tt[1].stock[5] = 0x13; bad(good, tt, "the slot call reads"); }
+        { auto tt = t; tt[1].len = 5; bad(good, tt, "call operand at +2"); }
+        { ConsoleAdapter c = good; c.ownerOperand = -1; bad(c, t, "owner operand at +-1"); }
+        { ConsoleAdapter c = good; c.selectionVtblOperand = 24; bad(c, t, "wiring operand at +24"); }
+        { ConsoleAdapter c = good; c.cliVtblOperand = 22; bad(c, t, "tail operand at +22"); }
+        { ConsoleAdapter c = good; c.gateOperand = 24; bad(c, t, "gate operand at +24"); }
+        { ConsoleAdapter c = good; c.cliCtxOff = 0x2d; bad(c, t, "cliCtxOff + 4"); }
+        { ConsoleAdapter c = good; c.cliSize = 0x84; c.cliCtxOff = 0x28; bad(c, t, "cliSize 0x84"); }
+        { ConsoleAdapter c = good; c.executeSlot = -1; bad(c, t, "executeSlot"); }
+        { ConsoleAdapter c = good; c.ownerCampaignOff = -4; bad(c, t, "ownerCampaignOff"); }
+        { ConsoleAdapter c = good; c.slotCallSite = nullptr; bad(c, t, "slot call site is not named"); }
     }
     {   // source lints
         const std::string cc = tk::ReadFile("core/console.cpp"), ch = tk::ReadFile("core/console.h");
@@ -132,6 +125,14 @@ int main(int argc, char** argv) {
         CHECK(setSlot < claim && claim < w1 && cc.find("*(volatile uintptr_t*)s_slot = ") == w1);
         CHECK(cc.find("Foreign) {") != std::string::npos);
         CHECK(cc.find("VirtualProtect") == std::string::npos);           // the slot is in a writable section: no protection change
+        // the gate byte is set only around one Execute call and restored right after it
+        {
+            const size_t set = cc.find("if (gate && !gateOld) *gate = 1;"), call = cc.find("((ExecFn)s_execute)(", set), back = cc.find("if (gate && !gateOld) *gate = gateOld;", call);
+            CHECK(set != std::string::npos && call != std::string::npos && back != std::string::npos && back - call < 200);
+        }
+        // adapter_checks.h mirrors two numbers of console.cpp: the slot call's operand and the CLI buffer's size
+        CHECK(cc.find("Operand(s_ad->slotCallSite, 2)") != std::string::npos && adck::kConsoleSlotCallOperand == 2);
+        CHECK(cc.find("s_cliBuf[8][0x80]") != std::string::npos && adck::kConsoleCliBuf == 0x80);
         CHECK(cc.find("ConsoleSet(") != std::string::npos && cc.find("if (!s_key) { why = \"dev.console=0\"") != std::string::npos);
         // every forwarded or refused line is logged
         CHECK(cc.find("LOGI(\"console: forwarded") != std::string::npos && cc.find("LOGW(\"console: refused") != std::string::npos);

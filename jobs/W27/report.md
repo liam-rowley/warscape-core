@@ -5,7 +5,7 @@ are append only on every commit (C), that cited run folders, branches and commit
 (E) and, opt-in, that a decision row added on `job/<id>` names `<id>` (F). `wsc jobs review` and the autopilot claim the round on origin first
 (`refs/claims/<id>/round-<n>`), a report beside `jobs/<id>/handback.md` says what the orchestrator added, and W23's bootstrap `pull_request` trigger is gone. Rule
 A and rule D's branch cites are warnings, not refusals: the scan of the merged job branches passed the brief's kill criterion (below). Started from `origin/main`
-72f50d4 (VERSION 0.30.0); merged `origin/main` 6e743da; 0.34.0, C29.
+72f50d4 (VERSION 0.30.0); merged `origin/main` 6e743da, then 60ba80e; 0.35.0, C30.
 
 Written by the orchestrating session (same session id as the builder) from the builder subagent's hand-back text, unchanged in substance; the harness refused the
 builder's own write of this file (the R10 case this job's `handback.md` rule is for).
@@ -51,8 +51,8 @@ builder's own write of this file (the R10 case this job's `handback.md` rule is 
 - **CI**: the `pull_request` trigger and its comment are gone from `ci/policy.yml.in`, and `.github/workflows/policy.yml` is re-rendered. `ci_render` and `gates`
   print no bootstrap warning.
 - **Docs and rows**: `docs/REVIEW.md` (Starting, Rounds, Setup, Steps 2 and Output; small fixes now only under `merge after fixes`); `docs/CONSUMING.md` (the
-  keys, the fact and a short "Review integrity" section, under the 30 KB gate); `CLAUDE.md` Jobs; C29; the `wsc.jobs` and `wsc.policy` tools rows; `VERSION`
-  0.34.0; `tests/fixture_game/wsc.toml` spells out the thin-merge keys.
+  keys, the fact and a short "Review integrity" section, under the 30 KB gate); `CLAUDE.md` Jobs; C30; the `wsc.jobs` and `wsc.policy` tools rows; `VERSION`
+  0.35.0; `tests/fixture_game/wsc.toml` spells out the thin-merge keys.
 
 ## Evidence
 - **Red first:** 8a1df01 (tests only, on 72f50d4). 44 new cases were red in `test_policy`, `test_jobs` and `test_ci`: errors because `reads=`/`warnings=` and
@@ -96,7 +96,8 @@ builder's own write of this file (the R10 case this job's `handback.md` rule is 
   an unrelated gate.
 - **The report was not written by the builder:** the harness refused the builder subagent's Write of `report.md`, so the orchestrating session wrote it from the
   hand-back (R10).
-- **VERSION and C number:** main took 0.33.0 and C28 while this was being built (W25, W38), so this job takes 0.34.0 and C29, merged in (no rebase).
+- **VERSION and C number:** main took 0.33.0 and C28 while this was being built (W25, W38), so this job took 0.34.0 and C29, merged in (no rebase); then W33 took 0.34.0 and C29 on main,
+  so on the second merge of `origin/main` (60ba80e) this job takes 0.35.0 and C30.
 
 ## Open questions
 1. **Make rule A an error?** The scan found 32 merged branches where a reviewer's commits under `merge` changed files outside the job folder, so the rule catches
