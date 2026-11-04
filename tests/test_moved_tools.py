@@ -417,7 +417,7 @@ class LinkerMap(unittest.TestCase):
         rep = b[i:b.index('if [[ "$WHAT" == smoke ]]', i)]
         self.assertIn('cmp -s "$OUT/$ADAPTER/d3d9.map"', rep)
         self.assertIn('without the map flag', rep)
-        self.assertNotIn('--cref', b)
+        self.assertNotIn('-Wl,--cref', b)   # the size: the verb reads sections and symbols only
 
 
 if __name__ == '__main__':
