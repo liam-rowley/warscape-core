@@ -54,7 +54,7 @@ exempt = ["tests/**", "**/runs/**"]
 max_kb = 30
 
 [cli]
-verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract as warscape/verbs/)
+verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract; never a core verb's name: reg find gates jobs policy ci discovery crash agent-settings)
 ```
 
 CI in the game repo (`.github/workflows/gates.yml`):
@@ -96,7 +96,7 @@ jobs:
   check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
-  or 0.34.0 (DLL changes, C29) are in [UPGRADING.md](UPGRADING.md).
+  0.34.0 (DLL changes, C29) or 0.38.0 (crash maps, guarded verbs, C35) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
 Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
