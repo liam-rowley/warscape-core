@@ -24,6 +24,10 @@ empire-remastered `rml_mod/src/gesture_{sm,math,feed,group,v4,v5}.h` and its `te
   Only mouse messages inside a gesture are swallowed: the press, the release, and a right press that cancels with its release.
 - **DirectInput.** While a gesture holds the buttons (any phase but idle), the host's DirectInput hook blanks the mouse buttons as it does
   for RmlUi, so the engine never sees the press through that path either. A replayed click goes by window messages only.
+- **Re-entry passes, it never waits.** The adapter's callbacks run under the stage's lock (an SRW lock, not re-entrant). `s_lockOwner` holds the thread that
+  owns it; a message that reaches `GestureMessage` (or `GestureSetWindow`) from that same thread, because a callback sent one to the window, passes to the game
+  untouched (no state change; `ReenteredBy` in `gesture_host.h`), is counted and shows as `reentered` in `gesture info`, with one log warning for the first.
+  DirectInput reads `s_ownsMouse`, a word `GestureMessage` publishes under the lock after every message it feeds, not the machine's fields.
 - **Draw order in Present:** the game's frame, then the gesture preview (`GesturePresent`), then the RmlUi panels (`Frame`).
 
 ## Behaviour (`gesture_sm.h` has the transition table)
@@ -38,7 +42,8 @@ empire-remastered `rml_mod/src/gesture_{sm,math,feed,group,v4,v5}.h` and its `te
   1000 px of horizontal travel at a 3840-wide client since the rotate began (absolute, so travelling back undoes it exactly).
 - **Switch**: the modifier set changing mid-gesture (a key, or the set read on a move) switches move and rotate; the pose so far becomes the
   new base (move then rotate turns the laid-out line where it stands; rotate then move carries the turned block on by translation).
-- **Cancel**: a right press, Esc, focus loss (`WM_ACTIVATEAPP` 0, `WM_KILLFOCUS`) or a move without the button; after a right press or Esc
+- **Cancel**: a right press, Esc, focus loss (`WM_ACTIVATEAPP` 0, `WM_KILLFOCUS`, or `WM_CAPTURECHANGED` unless the window gaining the capture is the game window itself: the stage
+  calls no `SetCapture`, so a capture change is another window taking the mouse and the release may be lost) or a move without the button; after a right press or Esc
   the rest of the press is swallowed (Drain), so the engine never sees a lone release.
 - **Release**: the plan at the release point; refused units (no ground under the target, or the adapter's `placeable` says no) are drawn
   red and skipped; the rest go to the adapter's `commit` once, from the next Present tick.
@@ -50,6 +55,7 @@ height under the hit (`groundAt`). The answer is on the ray, so it projects back
 the draped point under it within 1 px on a 5 degree slope). The preview is each target's rectangle with every corner at the ground height
 under it, plus a 3 m facing tick, projected with the same matrices and drawn with `DrawPrimitiveUP` (XYZRHW + diffuse, alpha blended,
 no depth test) inside a `D3DSBT_ALL` state block with the render target and depth surface restored; nothing is drawn when no gesture is Active.
+That is one state block per drawn preview frame, as the RmlUi pass; kept blocks would have to be released before every Reset.
 
 ## The adapter (`GestureAdapter` in `proxy/src/adapter.h`; `GameAdapter::gesture`, nullptr = no gestures)
 | member | what the game gives |
@@ -71,7 +77,9 @@ proved those, and its Lua pump, are one thread. The ctl thread never calls the a
 `gesture press|move|release <x> <y> [none|alt|ctrl|shift joined by +]`, `gesture cancel [esc|right]`, `gesture plan`, `gesture info`.
 x y are client pixels. press, move, release and cancel send the same window messages real input sends (`SendMessageTimeout` to the
 subclassed window), so they take the RmlUi stage and the gesture stage like a mouse; the modifier set is injected for the stage only
-(the engine reads the real keyboard, so a replayed click is a plain one). Every result is a readback (rules 77, 78): the counters' delta
+(the engine reads the real keyboard, so a replayed click is a plain one). `press` answers `"held": true|false`: true only if the stage took the press (phase Pending or Active). A press it did not take (inert, over a panel,
+eligibility refused) went to the game as a real press; the verb leaves it there (send `release` as for any click), `last_why` says why, and a following `move`
+is a plain cursor move, not a drag. Every result is a readback (rules 77, 78): the counters' delta
 (passed, swallowed, passed without the button, presses, inert presses, begins, switches, cancels, replays, commits, orders sent and
 refused), the phase and kind after, the plan (per unit: target, width, depth, refused and why, draped corners) and, for a release that
 committed, the adapter's answer from the next Present (no Present within the timeout = failed). `gesture info` answers even when the layer
