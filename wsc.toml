@@ -71,7 +71,7 @@ required_checks = ["gates (ubuntu-latest)", "gates (windows-latest)", "policy", 
 proxy = '^\.github/workflows/|^ci/|^proxy/|^wsc\.toml$'
 harness = '^\.github/workflows/|^ci/|^harness/|^proxy/tools/|^proxy/tests/null_game/|^tests/test_moved_tools\.py$|^warscape/|^wsc\.toml$'
 
-# wsc agent-settings (W35, C29): the read-only command rules an agent may add to a .claude/settings.json without asking; a rule is
+# wsc agent-settings (W35, C30): the read-only command rules an agent may add to a .claude/settings.json without asking; a rule is
 # added only when one of these covers it (itself or a longer prefix), never under a deny rule. Liam decides this list.
 [agent_settings]
 safe = ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(python3 wsc.py find:*)",

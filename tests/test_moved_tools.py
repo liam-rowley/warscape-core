@@ -47,7 +47,7 @@ class Env(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.t = Path(self.tmp.name)
-        self.saved = {k: os.environ.pop(k) for k in ('WSP_GAME_ROOT', 'WSP_PROXY_ADAPTER', 'HARNESS_ADAPTER') if k in os.environ}
+        self.saved = {k: os.environ.pop(k) for k in ('WSP_GAME_ROOT', 'WSP_PROXY_ADAPTER', 'HARNESS_ADAPTER', 'WSP_PROXY_TESTS') if k in os.environ}
 
     def tearDown(self):
         os.environ.update(self.saved)
@@ -79,6 +79,52 @@ class Layout(Env):
         os.environ['WSP_GAME_ROOT'] = str(self.t)
         self.assertEqual(self.lay.game_root(ROOT), self.t.resolve())
         self.assertEqual(self.lay.proxy_src(ROOT), ROOT / 'proxy' / 'src')
+
+
+class ProxyTests(Env):
+    """W16 (B15): a game's own C++ host tests, which build.sh tests compiles beside the core's: wsc.toml [proxy] tests, else <game>/proxy/tests when
+    it holds a test_*.cpp, else none; $WSP_PROXY_TESTS overrides. A folder inside the adapter (a DLL input) or the core's own proxy/tests is refused."""
+    def setUp(self):
+        super().setUp()
+        self.lay = _load('layout', 'proxy/tools/layout.py')
+        self.g = self.t / 'game'
+        write(self.g / 'proxy/x/adapter.cpp', '')
+
+    def test_failing_fixture_none_then_the_default_folder_then_the_key(self):
+        self.assertIsNone(self.lay.proxy_tests(self.g))
+        write(self.g / 'proxy/tests/README.md', 'no test here\n')
+        self.assertIsNone(self.lay.proxy_tests(self.g))                       # a folder without a test_*.cpp is not a test folder
+        write(self.g / 'proxy/tests/test_a.cpp', '')
+        self.assertEqual(self.lay.proxy_tests(self.g), self.g / 'proxy/tests')
+        write(self.g / 'gt/test_b.cpp', '')
+        write(self.g / 'wsc.toml', '[proxy]\ntests = "gt"\n')
+        self.assertEqual(self.lay.proxy_tests(self.g), self.g / 'gt')
+
+    def test_failing_fixture_the_env_overrides(self):
+        write(self.g / 'proxy/tests/test_a.cpp', '')
+        os.environ['WSP_PROXY_TESTS'] = str(self.t / 'elsewhere')
+        self.assertEqual(self.lay.proxy_tests(self.g), (self.t / 'elsewhere').resolve())
+
+    def test_failing_fixture_a_folder_inside_the_adapter_is_refused(self):
+        write(self.g / 'proxy/x/tests/test_a.cpp', '')
+        write(self.g / 'wsc.toml', '[proxy]\ntests = "proxy/x/tests"\n')
+        with self.assertRaises(self.lay.LayoutError) as e:
+            self.lay.proxy_tests(self.g)
+        self.assertIn('inside the proxy adapter', str(e.exception))
+        self.assertIn('build id', str(e.exception))
+
+    def test_failing_fixture_the_cores_own_tests_are_refused(self):
+        with self.assertRaises(self.lay.LayoutError) as e:
+            self.lay.proxy_tests(ROOT)                                       # the core standalone is its own game root
+        self.assertIn("core's own host tests", str(e.exception))
+
+    def test_failing_fixture_the_null_game_has_its_folder(self):
+        ng = ROOT / 'proxy/tests/null_game'
+        self.assertEqual(self.lay.proxy_tests(ng), ng / 'proxy/tests')
+        self.assertTrue((ng / 'proxy/tests/test_null_adapter.cpp').is_file())
+        r = subprocess.run([sys.executable, str(ROOT / 'proxy/tools/layout.py'), 'proxy-tests'], capture_output=True, text=True,
+                           env=dict(os.environ, WSP_GAME_ROOT=str(ng)))
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, (ng / 'proxy/tests').resolve().as_posix()), r.stderr)
 
 
 TOOLS = ('build.sh', 'build_id.py', 'fetch_lua.py', 'fetch_ui.py', 'layout.py', 'toolchain.py')   # the files the roles name, and their imports
@@ -140,6 +186,34 @@ class BuildId(Env):
         git('commit', '-q', '-am', 'bump the pin', cwd=f)
         self.assertNotIn(bi.build_id(f), (before, before + '-dirty'))
         self.assertEqual(len(bi.build_id(f)), 12)
+
+    def test_failing_fixture_a_game_nested_in_the_core_keeps_the_flat_id(self):
+        # W16 (B16): the null game lives inside the core (proxy/tests/null_game); its adapter and pin file are looked up under the
+        # game root's prefix, the core roles at the top, so the id equals the flat layout's (and the submodule layout's)
+        bi = _load('build_id', 'proxy/tools/build_id.py')
+        f = self.flat()
+        flat_id = bi.build_id(f)
+        core = self.t / 'nested'
+        init(core)
+        write(core / 'proxy/src/a.cpp', (f / 'proxy/core/a.cpp').read_bytes())
+        for n in TOOLS:
+            write(core / 'proxy/tools' / n, (f / 'proxy/tools' / n).read_bytes())
+        write(core / 'wsc.toml', '# marker\n')
+        ng = core / 'proxy/tests/null_game'
+        write(ng / 'proxy/game/adapter.cpp', (f / 'proxy/game/adapter.cpp').read_bytes())
+        write(ng / 'viewer/pins.json', (f / 'viewer/pins.json').read_bytes())
+        git('add', '-A', cwd=core); git('commit', '-q', '-m', 'nested', cwd=core)
+        self.assertEqual(bi.build_id(ng), flat_id)
+        self.assertEqual(bi.build_id(self.moved(f)), flat_id)
+        paths = {r: p for r, p, _ in bi.object_ids(ng)}
+        self.assertEqual((paths['core'], paths['adapter'], paths['ui_pins']),
+                         ('proxy/src', 'proxy/tests/null_game/proxy/game', 'proxy/tests/null_game/viewer/pins.json'))
+        write(ng / 'proxy/game/adapter.cpp', 'int b2;\n')                   # the -dirty check reads the same nested paths
+        self.assertEqual(bi.build_id(ng), flat_id + '-dirty')
+        git('checkout', '-q', '--', '.', cwd=core)
+        self.assertEqual(bi.build_id(ng), flat_id)
+        write(core / 'proxy/src/a.cpp', 'int a2;\n')                        # and the core roles at the top
+        self.assertEqual(bi.build_id(ng), flat_id + '-dirty')
 
 
 class Sources(Env):
@@ -233,6 +307,51 @@ class Sources(Env):
         r = subprocess.run([bash, 'proxy/tools/build.sh', 'dll'], cwd=g, capture_output=True, text=True, env=env, timeout=120)
         self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
         self.assertTrue(marker.exists())
+
+
+class UiPins(unittest.TestCase):
+    """W16 (B52): the UI pin file has a schema (schemas/ui_pins.schema.json), checked before any download (`fetch_ui.py --check`, no network);
+    the null game's pin file names only core things and pins the same Lua tarball as fetch_lua.py."""
+    NULL = ROOT / 'proxy/tests/null_game/viewer/pins.json'
+
+    def check(self, pins):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / 'pins.json'
+            f.write_text(json.dumps(pins), encoding='utf-8')
+            r = subprocess.run([sys.executable, str(ROOT / 'proxy/tools/fetch_ui.py'), '--check', '--pins', str(f)], capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    def test_failing_fixture_the_null_games_pins_pass_and_extra_pins_are_allowed(self):
+        pins = json.loads(self.NULL.read_text(encoding='utf-8'))
+        rc, out = self.check(pins)
+        self.assertEqual(rc, 0, out)
+        pins['emsdk_image'] = {'image': 'x/y', 'tag': '1', 'digest': 'sha256:' + '0' * 64}   # a game pins more for its own tools
+        rc, out = self.check(pins)
+        self.assertEqual(rc, 0, out)
+
+    def test_failing_fixture_each_bad_shape_is_named_before_any_fetch(self):
+        base = json.loads(self.NULL.read_text(encoding='utf-8'))
+        cases = [('rmlui', 'commit', lambda p: p['rmlui'].update(commit=p['rmlui']['commit'][:39])),
+                 ('lua', 'sha256', lambda p: p['lua'].update(sha256=p['lua']['sha256'].upper())),
+                 ('stb_image_write', 'stb_image_write', lambda p: p.pop('stb_image_write')),
+                 ('stb_image', 'url', lambda p: p['stb_image'].update(url=p['stb_image']['url'].replace('https://', 'http://')))]
+        for key, part, bad in cases:
+            pins = json.loads(json.dumps(base)); bad(pins)
+            rc, out = self.check(pins)
+            self.assertNotEqual(rc, 0, f'{key}: {out}')
+            self.assertIn(key, out); self.assertIn(part, out)
+            self.assertNotIn('fetch_ui: rmlui', out)                          # nothing fetched
+
+    def test_failing_fixture_the_null_games_lua_pin_is_fetch_luas(self):
+        pins = json.loads(self.NULL.read_text(encoding='utf-8'))
+        fl = _load('fetch_lua', 'proxy/tools/fetch_lua.py')
+        self.assertEqual((pins['lua']['url'], pins['lua']['sha256']), (fl.PIN['url'], fl.PIN['sha256']))
+
+    def test_failing_fixture_the_null_games_pins_name_only_core_things(self):
+        text = self.NULL.read_text(encoding='utf-8')
+        self.assertNotIn('emsdk_image', json.loads(text))
+        for gone in ('viewer/core', 'fetch_sources', 'test_viewer', 'D30', 'D31', 'J31', 'CMakeLists', 'LEGAL_NOTES'):
+            self.assertNotIn(gone, text)
 
 
 class Toolchain(unittest.TestCase):

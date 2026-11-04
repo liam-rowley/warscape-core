@@ -222,7 +222,7 @@ case "$cmd" in
     if [ "$cur" != "$owner" ] && [ "$cs" != "$owner" ]; then echo "game.lock belongs to '$cur' (session '$cs'), not '$owner': not refreshed" >&2; exit 2; fi
     touch "$ROOT/game.lock" && echo "game.lock refreshed"; exit 0;;
   vdisplay-aside)
-    # W35 (C29): move a stale vdisplay_restore.json aside (the one-off ask of the first consumer's J10 and J44 reports), only when the
+    # W35 (C30): move a stale vdisplay_restore.json aside (the one-off ask of the first consumer's J10 and J44 reports), only when the
     # files say the watcher cannot restore it: it exists; the lock is free or <owner>'s (holds_check); the watcher runs and its status
     # lists no game process; and its own restore failed or dropped it (the last "vdisplay: " line of watcher.log, at or after the file's
     # time) or the file is older than the lock's stale limit. Prints the saved mode; never deletes, never writes the display mode (only

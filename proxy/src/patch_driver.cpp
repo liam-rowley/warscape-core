@@ -1,7 +1,8 @@
 // patch_driver.cpp - in-process driver of the runtime patch engine (pure core: patch_engine.h). Called from DllMain only when
 // PlanEngine(...).patches is true (exe accepted by the guard). Every site is checked and logged; writes happen only when the whole
 // plan is accepted. Value rows (W7) are resolved from their config keys into an effective copy of the table first (patch_value.h),
-// one log line each, and the plan runs on the copy. Loader lock: GetModuleHandle, VirtualQuery, VirtualProtect, FlushInstructionCache only.
+// one log line each, and the plan runs on the copy. Loader lock: GetModuleHandle, GetSystemInfo, VirtualQuery, VirtualProtect, FlushInstructionCache only. Protections are
+// changed and restored once per page, each page with its own recorded value, and read back (W33).
 #include "runtime.h"
 #include "patch_value.h"
 #include <memory>
@@ -69,18 +70,40 @@ void PatchesRun() {
             return true;
         }
         void Flush(uint8_t* p, size_t n) override { FlushInstructionCache(GetCurrentProcess(), p, n); }
+        uint32_t PageSize() const override { SYSTEM_INFO si{}; GetSystemInfo(&si); return si.dwPageSize; }
+        bool Query(uint8_t* p, uint32_t& prot) override {   // the readback (W33): VirtualQuery, safe under the loader lock
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery(p, &mbi, sizeof mbi)) return false;
+            prot = mbi.Protect; return true;
+        }
     } mem;
     const WriteResult w = WritePlanAtomic(base, pl, sites, mem);
     if (!w.ok) {
-        LOGE("patch_engine: REFUSED at write time - %s could not be made writable: nothing written (all-or-nothing)%s",
-             w.failedSite >= 0 ? sites[w.failedSite].id : "?", w.reprotectFailures ? ", a protection restore also failed" : "");
+        if (w.failedPage < 0)
+            LOGE("patch_engine: REFUSED at write time - the page size %u is not a power of two: nothing written (all-or-nothing)", (unsigned)mem.PageSize());
+        else
+            LOGE("patch_engine: REFUSED at write time - page %p (RVA 0x%08x) of %s could not be made writable: nothing written (all-or-nothing)%s",
+                 base + w.failedPage, (unsigned)w.failedPage, w.failedSite >= 0 ? sites[w.failedSite].id : "?",
+                 w.reprotectFailures ? ", a protection restore also failed" : "");
         return;
     }
     for (size_t i = 0; i < ad.nSites; ++i)
         if (pl.sites[i].write)
             LOGI("patch_engine: wrote %s at %p: [%s] -> [%s]", sites[i].id, base + pl.sites[i].valueRva, Hex(pl.sites[i].cur, sites[i].len).c_str(),
                  Hex(sites[i].patch, sites[i].len).c_str());
-    if (w.reprotectFailures) LOGW("patch_engine: %d site(s) left writable (protection restore failed)", w.reprotectFailures);
+    if (w.reprotectFailures) LOGW("patch_engine: %d page(s) left writable (protection restore failed)", w.reprotectFailures);
+    // the readback (W33, C3): every VirtualProtect returned TRUE in C3 and the end state was still wrong; only VirtualQuery shows it
+    bool known = !w.pages.empty();
+    for (const PageProt& p : w.pages) known = known && p.known;
+    if (known) {
+        std::string list; char b[40];
+        for (const PageProt& p : w.pages) { snprintf(b, sizeof b, " 0x%08x=0x%02x", (unsigned)p.rva, (unsigned)p.after); list += b; }
+        LOGI("patch_engine: protections restored on %zu page(s):%s", w.pages.size(), list.c_str());
+    } else LOGI("patch_engine: protections restored on %zu page(s) (no readback)", w.pages.size());
+    for (const PageProt& p : w.pages)
+        if (p.known && !ProtectionRestored(p.recorded, p.after))
+            LOGW("patch_engine: page %p (RVA 0x%08x) reads 0x%02x after the restore, recorded 0x%02x: left changed", base + p.rva, (unsigned)p.rva,
+                 (unsigned)p.after, (unsigned)p.recorded);
     LOGI("patch_engine: %d of %d planned sites written", w.written, pl.nWrite);
     rt.sitesAccepted = true;
 }

@@ -76,7 +76,10 @@ int main(int argc, char** argv) {
         CHECK_EQ(c.Int("proxy.exe_guard_force_mismatch"), 0L);
         // keys the core reads by name exist in the registry (a renamed key would silently read "")
         for (const char* k : { "proxy.enabled", "proxy.backend", "proxy.dxvk_path", "proxy.log_level", "proxy.minidump", "proxy.exe_guard",
-                               "proxy.exe_guard_force_mismatch", "proxy.runtime_patches" }) CHECK(c.values.count(k) == 1);
+                               "proxy.exe_guard_force_mismatch", "proxy.runtime_patches", "proxy.file_rules" }) {
+            if (c.values.count(k) != 1) printf("    the core reads %s by name: add its config_keys row (docs/CONSUMING.md)\n", k);
+            CHECK(c.values.count(k) == 1);
+        }
     }
     return tk::Done("test_config");
 }

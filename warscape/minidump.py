@@ -1,4 +1,4 @@
-"""Minidumps and GNU ld maps, standard library only (W35, C29): what `wsc crash symbolise` reads, and the map normaliser `build.sh` runs.
+"""Minidumps and GNU ld maps, standard library only (W35, C30): what `wsc crash symbolise` reads, and the map normaliser `build.sh` runs.
 
 The minidump reader takes the streams that say what happened (minidumpapiset.h layouts, little-endian, `struct` only): ExceptionStream
 (code, address, thread, the context record), ModuleListStream (name, base, size), ThreadListStream and ThreadInfoListStream (the faulting

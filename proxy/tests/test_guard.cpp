@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
             CHECK(pdd.find("WritePlanAtomic(") != std::string::npos);   // writes go through the all-or-nothing writer
             CHECK(pdd.find("memcpy(") == std::string::npos);            // ... and nowhere else
         }
-        for (const char* f : { "dllmain.cpp", "backend.cpp", "crash.cpp", "guard_driver.cpp", "patch_driver.cpp" }) {
+        for (const char* f : { "dllmain.cpp", "backend.cpp", "crash.cpp", "guard_driver.cpp", "patch_driver.cpp", "dev.cpp" }) {
             const std::string s = tk::ReadFile(std::string("core/") + f);
             for (std::sregex_iterator it(s.begin(), s.end(), re), e; it != e; ++it)
                 if (!known.count((*it)[1])) { printf("    %s reads %s, which is not in config_keys\n", f, (*it)[1].str().c_str()); CHECK(false); }
