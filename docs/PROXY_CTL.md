@@ -30,8 +30,9 @@ UNC and device paths, a reserved device name, a NUL. The answer is `refused`, th
 bridge never sees the path. Links are not followed: a junction under a root is the folder owner's to make. A driver's scratch chunk goes in the ctl folder.
 
 ## The folder (W34, C8)
-- **Owner-only.** The ctl thread gives `<dev.ctl_dir>` a protected DACL with one ACE (`D:PAI(A;OICI;FA;;;OW)`, wherever the folder is, new or existing) and logs
-  `ctl: folder <dir> is owner-only`, or `ctl: could not restrict <dir> (error N): continuing`: a failure never stops the channel (wine and FAT may refuse). Files made
+- **Owner-only.** The ctl thread gives `<dev.ctl_dir>` a protected DACL with one ACE, full control for the user the game runs as (`D:PAI(A;OICI;FA;;;<user SID>)`, wherever the folder
+  is, new or existing), and logs `ctl: folder <dir> is owner-only`, or `ctl: could not restrict <dir> (error N): continuing`: a failure never stops the channel (FAT may refuse). The ACE
+  names the user, not OWNER RIGHTS (`OW`): wine maps `OW` to mode 000 and reports success. Files made
   from then on inherit it; a file already there keeps its old ACL (`SetFileSecurityW` does not walk the folder). A driver that runs as another user than the game
   cannot use the folder: it must run as the game's user.
 - **Rotation.** At ctl start and every 500 handled requests the disk keeps the newest 200 `*.cmd.taken` files and, once `_ids.txt` holds more than 8192 ids, its last

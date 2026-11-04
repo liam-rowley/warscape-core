@@ -49,10 +49,13 @@ if [[ $DOCKER == 1 ]]; then
   IMAGE="$(python3 "$TC" image)" || exit 2
   APT="$(python3 "$TC" apt) g++ python3 ca-certificates git" || exit 2
   # smoke: the same container plus the wine packages CI's proxy job installs (J42); it runs the DLL `--docker all` left in build/proxy/
-  PRE=":"
+  PRE=":"; RUNAS=""
   if [[ "$WHAT" == smoke ]]; then
     [[ -f "$OUT/$ADAPTER/d3d9.dll" ]] || { echo "build.sh --docker smoke: no $OUT/$ADAPTER/d3d9.dll: run build.sh --docker all first"; exit 2; }
     PRE="dpkg --add-architecture i386"; APT="$APT wine wine32:i386"
+    # W34: CI's conditions: a user who is not root, on a real Linux folder. Root ignores mode bits and a Windows bind mount has none, so wine setting
+    # a folder to mode 000 passed here and failed on CI's runner.
+    RUNAS="useradd -m smoke; HOME=/home/smoke WSP_SMOKE_DIR=/home/smoke/run setpriv --reuid=smoke --regid=smoke --clear-groups"
   fi
   # W16 (B16): one mount at /src, the outer of the two roots: the game repo when it holds the core as its submodule, the core when it
   # holds the game (its null game, proxy/tests/null_game); neither inside the other is refused (no second mount). The container has no
@@ -72,7 +75,7 @@ if [[ $DOCKER == 1 ]]; then
   # MSYS_NO_PATHCONV: Git Bash would rewrite /src and the -v argument into Windows paths
   MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_SOURCES="$SOURCES" -e WSP_GAME_ROOT="/src/$(rel "$ROOT")" -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "${GTENV[@]}" "$IMAGE" bash -c \
     "set -e; $PRE; apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $APT >/dev/null
-     $(rel "$OWN")/proxy/tools/build.sh $WHAT"
+     $RUNAS $(rel "$OWN")/proxy/tools/build.sh $WHAT"
   exit $?
 fi
 
@@ -254,17 +257,17 @@ if [[ "$WHAT" == smoke ]]; then
   # the stand-in exe, the mod folder and the config file carry the names the adapter's identity.json gives them
   ident() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$ADIR/identity.json" "$1"; }
   EXE="$(ident exe_name)"; MOD="$(ident mod_dir)"; INI="$(ident config_file)"
-  G="$OUT/smoke/game"; rm -rf "$OUT/smoke"; mkdir -p "$G"
+  SM="${WSP_SMOKE_DIR:-$OUT/smoke}"; G="$SM/game"; rm -rf "$SM"; mkdir -p "$G"
   "$CXX" -O1 -static -o "$G/$EXE" "$OWN/proxy/tests/smoke_host.cpp"
   # W34 (C5): a game with the fixture row null.smoke_patch (the null games) also gets the second build of the host, which carries its sites at
   # their RVAs. gen_tables.py --exe proves that before the first launch; the host is not the pinned build, so only the bytes decide.
   STANDIN=""; LAUNCHES=10
   if grep -q '"null.smoke_patch"' "$ADIR/generated/tables.h"; then
-    STANDIN="$OUT/smoke/standin.exe"; LAUNCHES=11
+    STANDIN="$SM/standin.exe"; LAUNCHES=11
     "$CXX" -O1 -static -DWSP_SMOKE_SITES -o "$STANDIN" "$OWN/proxy/tests/smoke_host.cpp"
-    python3 "$OWN/proxy/tools/gen_tables.py" --exe "$STANDIN" --allow-pin-mismatch > "$OUT/smoke/standin_exe.txt" || { echo "build.sh smoke: the stand-in does not carry its sites"; cat "$OUT/smoke/standin_exe.txt"; exit 1; }
-    grep -q '^MATCH null.smoke_patch 0x1180' "$OUT/smoke/standin_exe.txt" || { echo "build.sh smoke: gen_tables.py --exe did not check null.smoke_patch"; cat "$OUT/smoke/standin_exe.txt"; exit 1; }
-    tr -d '\r' < "$OUT/smoke/standin_exe.txt" | grep -E '^(MATCH|gen_tables: --exe:)' | sed 's/^/build.sh smoke: /'
+    python3 "$OWN/proxy/tools/gen_tables.py" --exe "$STANDIN" --allow-pin-mismatch > "$SM/standin_exe.txt" || { echo "build.sh smoke: the stand-in does not carry its sites"; cat "$SM/standin_exe.txt"; exit 1; }
+    grep -q '^MATCH null.smoke_patch 0x1180' "$SM/standin_exe.txt" || { echo "build.sh smoke: gen_tables.py --exe did not check null.smoke_patch"; cat "$SM/standin_exe.txt"; exit 1; }
+    tr -d '\r' < "$SM/standin_exe.txt" | grep -E '^(MATCH|gen_tables: --exe:)' | sed 's/^/build.sh smoke: /'
   fi
   cp "$OUT/$ADAPTER/d3d9.dll" "$G/"
   run() { (cd "$G" && WINEDEBUG=-all WINEDLLOVERRIDES="d3d9=n,b;winedbg.exe=d" timeout 120 wine "$EXE" "$@") ; }
@@ -328,11 +331,11 @@ if [[ "$WHAT" == smoke ]]; then
   if [[ -n "$SITE" ]]; then WAITFOR='ctl\peek1.done'; else WAITFOR='ctl\old1.done'; echo "build.sh smoke: this game has no engine sites: step 8 checks the stale request only"; fi
   mkdir -p "$G/ctl"; printf 'exit\n' > "$G/ctl/old1.cmd"; touch -d '2020-01-02 03:04:05 UTC' "$G/ctl/old1.cmd"
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\nstate_json=1\r\n' > "$G/$INI"
-  run wait "$WAITFOR" > "$OUT/smoke/ctl_run.txt" 2>&1 &
+  run wait "$WAITFOR" > "$SM/ctl_run.txt" 2>&1 &
   RUN=$!
   for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
   if [[ -n "$SITE" ]]; then printf 'peek %s * 4\n' "$SITE" > "$G/ctl/peek1.tmp"; mv "$G/ctl/peek1.tmp" "$G/ctl/peek1.cmd"; fi
-  wait "$RUN" || { echo "build.sh smoke: the ctl launch failed"; cat "$OUT/smoke/ctl_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  wait "$RUN" || { echo "build.sh smoke: the ctl launch failed"; cat "$SM/ctl_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
   check "ctl: old1: refused: stale: written 2020-01-02T03:04:05.000Z, before this launch started"
   if [[ -n "$SITE" ]]; then check "ctl: peek1: refused: sites not accepted by the patch engine"; fi
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
@@ -353,11 +356,11 @@ if [[ "$WHAT" == smoke ]]; then
   printf 'vanilla\r\n' > "$G/data/smoke_in.txt"; printf 'redirected by proxy.file_rules\r\n' > "$G/$MOD/smoke_out.txt"
   printf 'redirect data\\smoke_in.txt -> %s\\smoke_out.txt\r\n' "$MOD" > "$G/rules.txt"
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
-  run open 'data\smoke_in.txt' > "$OUT/smoke/open_run.txt" 2>&1 || { echo "build.sh smoke: the proxy.file_rules launch failed"; cat "$OUT/smoke/open_run.txt"; exit 1; }
+  run open 'data\smoke_in.txt' > "$SM/open_run.txt" 2>&1 || { echo "build.sh smoke: the proxy.file_rules launch failed"; cat "$SM/open_run.txt"; exit 1; }
   check "redirect: 1 rules from"; check "(proxy.file_rules)"; check "proxy.file_rules line 1"; check "process detach"
   if grep -q "dev: timeline=" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: proxy.file_rules turned the dev side on"; exit 1; fi
   nothread "proxy.file_rules alone"
-  grep -q "smoke: open data.smoke_in.txt: redirected by proxy.file_rules" "$OUT/smoke/open_run.txt" || { echo "build.sh smoke: the redirect did not serve smoke_out.txt"; cat "$OUT/smoke/open_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  grep -q "smoke: open data.smoke_in.txt: redirected by proxy.file_rules" "$SM/open_run.txt" || { echo "build.sh smoke: the redirect did not serve smoke_out.txt"; cat "$SM/open_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
   # 10) dev keys that need no thread (a hook and a rule file): the dev side on, no thread, a clean FreeLibrary with no proxy thread in the DLL
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nskip_intro=1\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
   run; check "threads at the first Direct3DCreate9: state=0 ctl=0"; check "process detach (FreeLibrary)"
@@ -366,14 +369,17 @@ if [[ "$WHAT" == smoke ]]; then
   #     page; the protections come back, the running code is the patched code, peek reads the bytes in memory, ctl answers, a `lua` outside
   #     its folders is refused before the bridge. The host exits without FreeLibrary while the ctl thread runs, as in launch 8.
   if [[ -n "$STANDIN" ]]; then
-    rm -rf "$G/ctl"; cp "$STANDIN" "$G/$EXE"
+    #     The folder is seeded past both rotation limits (devcore.h): the ctl start must leave 200 taken files and 4096 ids.
+    rm -rf "$G/ctl"; cp "$STANDIN" "$G/$EXE"; mkdir -p "$G/ctl"
+    for i in $(seq 1 205); do : > "$G/ctl/seed$i.cmd.taken"; done
+    seq 1 8193 | sed 's/^/seed/' > "$G/ctl/_ids.txt"
     printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\nstate_json=0\r\n[null]\r\nsmoke_patch=1\r\n' > "$G/$INI"
-    run wait 'ctl\peek2.done' > "$OUT/smoke/standin_run.txt" 2>&1 &
+    run wait 'ctl\peek2.done' > "$SM/standin_run.txt" 2>&1 &
     RUN=$!
     for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
     ask() { printf '%s\n' "$2" > "$G/ctl/$1.tmp"; mv "$G/ctl/$1.tmp" "$G/ctl/$1.cmd"; for _ in $(seq 1 150); do [[ -f "$G/ctl/$1.done" ]] && return; sleep 0.2; done; }
     ask ping1 'ping'; ask lua1 'lua C:\outside\x.lua 5'; ask peek1 'peek null.smoke_patch 4'; ask peek2 'peek null.dummy_hook 4'
-    wait "$RUN" || { echo "build.sh smoke: the stand-in launch failed"; cat "$OUT/smoke/standin_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+    wait "$RUN" || { echo "build.sh smoke: the stand-in launch failed"; cat "$SM/standin_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
     check "patch_engine: apply - 3 sites: 3 ok, 0 bad, 1 to write (1 bytes), 0 already patched, 1 hooks verified"
     check "patch_engine: wrote null.smoke_patch at "; check "patch_engine: protections restored on 1 page(s): 0x00001000="; check "patch_engine: 1 of 1 planned sites written"
     if grep -q "left changed\|left writable" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: a page was left changed"; cat "$G/$MOD/logs/proxy.log"; exit 1; fi
@@ -382,10 +388,13 @@ if [[ "$WHAT" == smoke ]]; then
     has() { grep -q "$2" "$1" || { echo "build.sh smoke: '$2' not in $1"; cat "$1"; cat "$G/$MOD/logs/proxy.log"; exit 1; }; }
     has "$G/ctl/ping1.done" '"pong": true'; has "$G/ctl/lua1.done" '"status": "refused"'
     has "$G/ctl/peek1.done" '"hex": "02 00 00 00"'; has "$G/ctl/peek2.done" '"hex": "55 8b ec 83"'
-    has "$OUT/smoke/standin_run.txt" 'smoke: patched code returned 2'
-    has "$OUT/smoke/standin_run.txt" 'smoke: page 0x00001000 protect 0x20 before 0x20'
+    check "ctl: rotated: 5 taken files deleted, 4097 old ids dropped from _ids.txt"
+    TAKEN="$(find "$G/ctl" -name '*.cmd.taken' | wc -l)"; IDS="$(grep -c . "$G/ctl/_ids.txt")"   # plus this launch's four requests
+    [[ "$TAKEN" == 204 && "$IDS" == 4100 ]] || { echo "build.sh smoke: rotation left $TAKEN taken files and $IDS ids, not 204 and 4100"; exit 1; }
+    has "$SM/standin_run.txt" 'smoke: patched code returned 2'
+    has "$SM/standin_run.txt" 'smoke: page 0x00001000 protect 0x20 before 0x20'
     grep -a 'patch_engine: \(apply\|wrote\|protections\)\|ctl: folder\|ctl: could not' "$G/$MOD/logs/proxy.log" | tr -d '\r' | sed 's/^.*patch_engine: /patch_engine: /; s/^.*ctl: /ctl: /; s/^/build.sh smoke: /'
-    tr -d '\r' < "$OUT/smoke/standin_run.txt" | grep '^smoke: \(page\|patched\)' | sed 's/^/build.sh smoke: /'
+    tr -d '\r' < "$SM/standin_run.txt" | grep '^smoke: \(page\|patched\)' | sed 's/^/build.sh smoke: /'
     grep -ao '"hex": "[0-9a-f ]*"' "$G/ctl/peek1.done" "$G/ctl/peek2.done" | sed 's/^.*ctl.//; s/^/build.sh smoke: /'
   else echo "build.sh smoke: this game has no null.smoke_patch row: no real-process launch"; fi
   echo "build.sh smoke: passed ($LAUNCHES launches under wine, 2 dumps)"

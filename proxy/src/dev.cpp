@@ -494,12 +494,27 @@ void HandleRequest(const std::wstring& dir, const std::wstring& file, int64_t wr
     WriteFileAtomic(done, ResultJson(id, TrimS(text), o, start, UnixMs(), {}));
 }
 
-// W34 (C8): the channel runs Lua in the game, so the folder is its owner's alone, wherever dev.ctl_dir points. A protected DACL with one ACE
-// for the owner; files created from now on inherit it (SetFileSecurityW does not walk what is already there). A failure never stops the
-// channel: wine and FAT may refuse. Never from DllMain: the ctl thread starts at the first Direct3DCreate9 (W33).
+// The SID of the user this process runs as, as text; "" = unknown, and GetLastError says why.
+std::wstring ProcessUserSid() {
+    HANDLE t = nullptr; std::wstring sid;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &t)) return sid;
+    DWORD n = 0; GetTokenInformation(t, TokenUser, nullptr, 0, &n);
+    std::vector<uint8_t> b(n); LPWSTR text = nullptr;
+    if (n && GetTokenInformation(t, TokenUser, b.data(), n, &n) && ConvertSidToStringSidW(((TOKEN_USER*)b.data())->User.Sid, &text)) { sid = text; LocalFree(text); }
+    CloseHandle(t);
+    return sid;
+}
+
+// W34 (C8): the channel runs Lua in the game, so the folder is the game's user's alone, wherever dev.ctl_dir points. A protected DACL with one ACE
+// for that user; files created from now on inherit it (SetFileSecurityW does not walk what is already there). The ACE names the user's SID, not
+// OWNER RIGHTS (OW): wine maps an OW ACE to mode 000 and reports success, which kills the channel for a non-root user, and on Windows an OW ACE
+// locks the game out of a folder an elevated process made (its owner is Administrators). A failure never stops the channel (FAT refuses).
+// Never from DllMain: the ctl thread starts at the first Direct3DCreate9 (W33).
 void CtlRestrictFolder(const std::wstring& dir) {
     PSECURITY_DESCRIPTOR sd = nullptr; DWORD err = 0;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:PAI(A;OICI;FA;;;OW)", SDDL_REVISION_1, &sd, nullptr)) err = GetLastError();
+    const std::wstring sid = ProcessUserSid();
+    if (sid.empty()) err = GetLastError();
+    else if (!ConvertStringSecurityDescriptorToSecurityDescriptorW((L"D:PAI(A;OICI;FA;;;" + sid + L")").c_str(), SDDL_REVISION_1, &sd, nullptr)) err = GetLastError();
     else {
         if (!SetFileSecurityW(dir.c_str(), DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, sd)) err = GetLastError();
         LocalFree(sd);

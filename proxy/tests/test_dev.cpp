@@ -442,7 +442,8 @@ int main(int argc, char** argv) {
         const size_t fn = dv.find("void CtlRestrictFolder("), fe = dv.find("\n}\n", fn);
         CHECK(fn != np && fe != np);
         const std::string fb = dv.substr(fn, fe - fn);
-        for (const char* s : { "D:PAI(A;OICI;FA;;;OW)", "ConvertStringSecurityDescriptorToSecurityDescriptorW(", "SetFileSecurityW(", "DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION",
+        CHECK(fb.find(";;;OW)") == np);   // wine maps OWNER RIGHTS to mode 000: the ACE names the user (W34 report)
+        for (const char* s : { "D:PAI(A;OICI;FA;;;", "ProcessUserSid()", "ConvertStringSecurityDescriptorToSecurityDescriptorW(", "SetFileSecurityW(", "DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION",
                                "LocalFree(", "ctl: folder %ls is owner-only", "ctl: could not restrict %ls (error %lu): continuing" }) CHECK(fb.find(s) != np);
         const size_t lv = dv.find("if (r.verb == \"lua\") {"), lc = dv.find("LuaPathAllowed(", lv), lr = dv.find("RunLua(id, r.arg", lv);
         CHECK(lv != np && lc != np && lr != np && lc < lr);
