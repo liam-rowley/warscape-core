@@ -263,6 +263,19 @@ generated tables are byte-identical); after the pin bump run `python3 core/proxy
 The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
 `stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
 
+## The game lock is the session's (0.23.0, core W10, C23)
+The holder of `game.lock` is the pair (owner, session); the default owner is the session id, so two sessions can no longer share a lock by a shared name.
+Set `WSC_SESSION_ID` in the session (or pass `--session`; Claude Code's Bash tool already exports `CLAUDE_CODE_SESSION_ID`, which `ctl.py` and `acceptance.py` use
+when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `--owner` both tools refuse (exit 2) and say so. Scripts that name an owner
+(`--owner claude-acceptance`) keep working and need only a session: the same owner with a different session is refused like another owner's until the lock is stale.
+- `job.sh`: one owner rule `^[a-z0-9][a-z0-9_-]{0,39}$` everywhere (scratch was 32), exact-case in the watcher; `lock -` makes the owner the session id; `lock --wait S` polls (max 100);
+  `touch <owner>` and `unlock <owner>` act only on the holder's lock (a bare `touch` is refused, 64); `holds <owner>` asks; `ctl` and `shot.sh` need the lock (take it with `job.sh lock` first).
+- The watcher accepts the lock's `session=` as the request `owner=` too; update the PC's watcher to **1.4.0** (`update kit=`) before relying on that or on the exact-case compare.
+- The stale age is `lock_stale_min` from `watcher.ini` (default 20) on both sides. Waits: `job.sh` and `job.sh ctl` default to 100 s (the Bash tool gives up at 120 s); a timed-out
+  request is withdrawn (`.request.expired`), so a script that relied on it staying queued must pass a longer wait and run in the background.
+- A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
+- `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
+
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
 - **Adapter files a game provides:** `wsc.toml` `[discovery] adapter = "<folder>"` (else the one `discovery/*/games.json`) holding `games.json` with `"target"` and `"reference"`
