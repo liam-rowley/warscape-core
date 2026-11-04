@@ -23,8 +23,11 @@ from pathlib import Path
 
 from _util import CORE, core_source, fixture_game, git
 
+sys.path.insert(0, str(CORE))
+from warscape import policy as pp  # noqa: E402
+
 WSC = CORE / 'wsc.py'
-JUDGED = 'policy: judged with the rules of origin/main at '
+JUDGED ='policy: judged with the rules of origin/main at '
 
 PEEK = '''import subprocess
 from warscape.gates import Result
@@ -178,12 +181,102 @@ class CoreMode(Branches, unittest.TestCase):
     def w27_round(n, v, extra=''):
         return f'## Round {n} (2026-11-04, branch job/W900 at abc123{n})\n\n**Verdict: {v}.**\n{extra}\n'
 
-    def test_w27_a_reviewer_code_commit_under_merge_warns(self):
-        rc, out, err = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n'})])
-        self.assertEqual(rc, 0, out + err)   # a warning: the scan of the merged job branches (the brief's kill criterion)
+    def reviewer_code(self, mode):
+        """A base branch whose wsc.toml says `reviewer_code = <mode>`, whatever main's says."""
+        name = f'rc-{mode}'
+        text = re.sub(r'^reviewer_code = .*\n', '', self.toml(), flags=re.M).replace('[policy]\n', f'[policy]\nreviewer_code = "{mode}"\n', 1)
+        self.branch(name, {'wsc.toml': text})
+        git(self.d, 'update-ref', f'refs/remotes/origin/{name}', name)
+        return f'origin/{name}'
+
+    def reviewer_job(self, extra=None):
+        self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n', **(extra or {})})])
+
+    def test_w40_a_reviewer_code_commit_under_merge_warns_with_a_warn_base(self):
+        base = self.reviewer_code('warn')
+        self.reviewer_job()
+        rc, out, err = self.policy('job/W900', base)
+        self.assertEqual(rc, 0, out + err)
         self.assertIn('policy: warning: round 1 of jobs/W900/review.md says merge', out)
         self.assertIn('lib/reviewer.py', out)
         self.assertIn('write the verdict `merge after fixes`; a fresh round reviews your change', out)
+
+    def test_w40_a_reviewer_code_commit_under_merge_is_refused_with_an_error_base(self):
+        base = self.reviewer_code('error')
+        self.reviewer_job()
+        res = self.policy('job/W900', base)
+        self.assertRefused(res, 'policy: round 1 of jobs/W900/review.md says merge', 'lib/reviewer.py', 'REFUSED',
+                           'write the verdict `merge after fixes`; a fresh round reviews your change')
+        self.assertNotIn('policy: warning: round 1', res[1])
+
+    def test_w40_a_head_that_flips_the_key_is_judged_with_the_bases_value(self):
+        base = self.reviewer_code('error')
+        toml = self.text('wsc.toml', base).replace('reviewer_code = "error"', 'reviewer_code = "warn"')
+        self.reviewer_job({'wsc.toml': toml})
+        self.assertRefused(self.policy('job/W900', base), 'policy: round 1 of jobs/W900/review.md says merge', 'REFUSED')
+
+    def test_w40_a_warn_base_stays_a_warning_when_the_head_says_error(self):
+        base = self.reviewer_code('warn')
+        toml = self.text('wsc.toml', base).replace('reviewer_code = "warn"', 'reviewer_code = "error"')
+        self.reviewer_job({'wsc.toml': toml})
+        rc, out, err = self.policy('job/W900', base)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn('policy: warning: round 1 of jobs/W900/review.md says merge', out)
+
+    def test_w40_a_fresh_round_clears_a_stranded_merge_with_an_error_base(self):
+        base = self.reviewer_code('error')
+        r1 = self.w27_round(1, 'merge')
+        self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + r1, 'lib/reviewer.py': 'y = 2\n'}),
+                      ('R2', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(2, 'merge') + r1})])
+        rc, out, err = self.policy('job/W900', base)
+        self.assertEqual(rc, 0, out + err)
+
+    def scan(self, prs, **kw):
+        """`scan` over this repository with `gh` injected; (exit code, printed lines)."""
+        printed = []
+
+        def fake(cmd, **_):
+            self.assertEqual(cmd[:3], ['gh', 'pr', 'list'])
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(prs), '')
+        rc = pp.scan(self.d, run=fake, out=printed.append, **kw)
+        return rc, printed
+
+    def merged(self, n):
+        """Squash job/W900 onto a throwaway main; the pull request record gh would give."""
+        head, name = self.sha('job/W900'), f'scan-main-{n}'
+        git(self.d, 'checkout', '-q', '-f', '-B', name, 'main')
+        git(self.d, 'commit', '-q', '--allow-empty', '-m', f'squash #{n}')
+        merge = self.sha(name)
+        self.back()
+        git(self.d, 'update-ref', 'refs/remotes/origin/scanned', name)
+        return {'number': n, 'headRefName': 'job/W900', 'headRefOid': head, 'mergeCommit': {'oid': merge}, 'mergedAt': '2026-11-04T10:00:00Z'}
+
+    def test_w40_scan_judges_a_merged_branch_at_its_head_and_counts_the_rule(self):
+        self.reviewer_job()
+        rc, lines = self.scan([self.merged(7)], base='origin/scanned')
+        self.assertEqual(rc, 0, lines)
+        self.assertTrue(any('job/W900 (#7, 2026-11-04)' in x and 'A: round 1 of jobs/W900/review.md says merge' in x for x in lines), lines)
+        self.assertIn('1 branches judged, 0 not judged; A 1,', lines[-1])
+
+    def test_w40_scan_since_leaves_out_what_merged_before_it(self):
+        self.reviewer_job()
+        pr = self.merged(7)
+        rc, lines = self.scan([pr], base='origin/scanned', since=pr['mergeCommit']['oid'])
+        self.assertEqual(rc, 0, lines)
+        self.assertIn('0 branches judged, 0 not judged', lines[-1])
+
+    def test_w40_scan_since_that_does_not_resolve_is_an_error_not_an_empty_count(self):
+        self.reviewer_job()
+        rc, lines = self.scan([self.merged(7)], base='origin/scanned', since=LOST)
+        self.assertEqual(rc, 1, lines)
+        self.assertTrue(any('does not resolve' in x for x in lines), lines)
+
+    def test_w40_scan_a_head_it_cannot_read_is_named_and_exits_1(self):
+        self.reviewer_job()
+        rc, lines = self.scan([{**self.merged(7), 'headRefOid': LOST}], base='origin/scanned')
+        self.assertEqual(rc, 1, lines)
+        self.assertTrue(any('job/W900 (#7' in x and 'not judged' in x for x in lines), lines)
+        self.assertIn('0 branches judged, 1 not judged', lines[-1])
 
     def test_w27_b_round_2_by_the_round_1_session_is_refused(self):
         r1 = self.w27_round(1, 'merge after fixes')
