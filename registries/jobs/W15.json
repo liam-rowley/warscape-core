@@ -3,11 +3,12 @@
   "description": "Covers B6, B28, B43. wsc reg remove <reg> <id> deletes a row (its file in dir storage) after checking no x-ref points at it (B28); the job queue stamps a tool's last_used when a job report cites it, and C9 retirement warnings come back on (B6); wsc find hands exe-shaped words to the exe string index (discovery/exe_strings.py find, from W4) instead of indexing the strings into a registry (B43).",
   "title": "Registry verbs: reg remove, last_used stamping, exe words in find",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [
     "W4"
   ],
-  "brief": "jobs/W15/brief.md"
+  "brief": "jobs/W15/brief.md",
+  "report": "jobs/W15/report.md"
 }
