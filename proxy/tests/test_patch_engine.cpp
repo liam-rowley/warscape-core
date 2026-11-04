@@ -1,5 +1,6 @@
 // Host test: the runtime patch engine (patch_engine.h) on a synthetic game-like image: rebasing under ASLR, anchor and stock
-// checks, all-or-nothing, already-patched, disabled sites, hooks, bad tables, file view == mapped view, and the generated table.
+// checks, all-or-nothing, already-patched, disabled sites, hooks, bad tables, file view == mapped view, the generated table, and the
+// writer's page protections on a mock with VirtualProtect's page semantics (tk::PageMem, W33): two sites on one page, a straddling site.
 #include "testkit.h"
 #include <memory>
 #include "patch_engine.h"
@@ -32,13 +33,6 @@ static std::vector<SiteDef> Sites() {
              Hook("fn.tick", 0x2000, { 0xCC, 0xCC }, { 0x68, 0x00, 0xA0, 0x40, 0x00, 0x8B, 0xC1 }) };
 }
 
-// Fake memory protection for WritePlanAtomic: fails Unprotect on call number failAt (0-based), counts what is still writable.
-struct FakeMem : MemOps {
-    int failAt = -1, calls = 0, writable = 0, flushes = 0; bool failRestore = false;
-    bool Unprotect(uint8_t*, size_t, uint32_t& old) override { if (calls++ == failAt) return false; old = 0x20; ++writable; return true; }
-    bool Reprotect(uint8_t*, size_t, uint32_t old) override { CHECK_EQ(old, 0x20u); if (failRestore) return false; --writable; return true; }
-    void Flush(uint8_t*, size_t) override { ++flushes; }
-};
 
 int main(int argc, char** argv) {
     tk::Args(argc, argv);
@@ -160,8 +154,9 @@ int main(int argc, char** argv) {
             CHECK(pl.verdict == PlanVerdict::Apply); CHECK(pl.sites[3].state == SiteState::Stock); CHECK_EQ(pl.sites[3].valueRva, 0x1206u);
             CHECK_EQ(pl.nWrite, 3);
             CHECK_EQ(Rd32(&m[0x1202]), 0x40B000u + (base - 0x400000u));   // the address really is relocated in memory
-            std::vector<uint8_t> before = m; FakeMem f;
+            std::vector<uint8_t> before = m; tk::PageMem f(b, m.data());
             CHECK(WritePlanAtomic(m.data(), pl, x.data(), f).ok);
+            CHECK(f.Restored()); CHECK(f.NoneTwice());   // W33 (C3): page 0x1000 holds two written sites (0x1103, 0x1206) and ends 0x20
             size_t diff = 0; for (size_t i = 0x1200; i < 0x1210; ++i) diff += m[i] != before[i];
             CHECK_EQ(diff, (size_t)2); CHECK(m[0x1208] == 0x00 && m[0x1209] == 0x3F);   // only the float's two changing bytes; the address untouched
             CHECK_EQ(Rd32(&m[0x1202]), Rd32(&before[0x1202]));
@@ -178,24 +173,44 @@ int main(int argc, char** argv) {
         const PatchPlan pl = MakePatchPlan(v, 0x00610000u - 0x400000u, s.data(), s.size(), on);
         CHECK(pl.verdict == PlanVerdict::Apply); CHECK_EQ(pl.nWrite, 2);
         for (int failAt : { 0, 1 }) {
-            std::vector<uint8_t> mm = m; FakeMem f; f.failAt = failAt;
+            std::vector<uint8_t> mm = m; tk::PageMem f(im, mm.data()); f.failUnprotectAt = failAt;
             const WriteResult r = WritePlanAtomic(mm.data(), pl, s.data(), f);
-            CHECK(!r.ok); CHECK_EQ(r.written, 0); CHECK(mm == m); CHECK_EQ(f.writable, 0); CHECK_EQ(f.flushes, 0);
+            CHECK(!r.ok); CHECK_EQ(r.written, 0); CHECK(mm == m); CHECK(f.Restored()); CHECK(f.NoneTwice()); CHECK_EQ(f.flushes, 0);
             CHECK_EQ(r.failedSite, failAt == 0 ? 0 : 1);
         }
-        {   std::vector<uint8_t> mm = m; FakeMem f;
+        {   std::vector<uint8_t> mm = m; tk::PageMem f(im, mm.data());
             const WriteResult r = WritePlanAtomic(mm.data(), pl, s.data(), f);
-            CHECK(r.ok); CHECK_EQ(r.written, 2); CHECK_EQ(f.writable, 0); CHECK_EQ(f.flushes, 2); CHECK_EQ(r.reprotectFailures, 0);
+            CHECK(r.ok); CHECK_EQ(r.written, 2); CHECK(f.Restored()); CHECK(f.NoneTwice()); CHECK_EQ(f.flushes, 2); CHECK_EQ(r.reprotectFailures, 0);
             CHECK(mm[0x1104] == 0x20 && mm[0x5016] == 0xC8);
             std::vector<uint8_t> want = m; ApplyPlanToBuffer(want.data(), pl, s.data()); CHECK(mm == want);   // same bytes as the pure apply
         }
-        {   std::vector<uint8_t> mm = m; FakeMem f; f.failRestore = true;   // restore failing: written, counted, never half-written
+        {   std::vector<uint8_t> mm = m; tk::PageMem f(im, mm.data()); f.failEveryReprotect = true;   // restore failing: written, counted, never half-written
             const WriteResult r = WritePlanAtomic(mm.data(), pl, s.data(), f);
             CHECK(r.ok); CHECK_EQ(r.written, 2); CHECK_EQ(r.reprotectFailures, 2);
         }
-        {   PatchPlan bad = pl; bad.verdict = PlanVerdict::Refuse; std::vector<uint8_t> mm = m; FakeMem f;
+        {   PatchPlan bad = pl; bad.verdict = PlanVerdict::Refuse; std::vector<uint8_t> mm = m; tk::PageMem f(im, mm.data());
             const WriteResult r = WritePlanAtomic(mm.data(), bad, s.data(), f);
-            CHECK(!r.ok); CHECK_EQ(f.calls, 0); CHECK(mm == m);                       // a refused plan never touches protection
+            CHECK(!r.ok); CHECK_EQ(f.unprotectCalls, 0); CHECK_EQ(f.reprotectCalls, 0); CHECK(mm == m);   // a refused plan never touches protection
+        }
+    }
+    {   // W33 (C3): a site whose value bytes straddle two .text pages (0x2ffe-0x3001), after a site on the first of them (0x2803).
+        // VirtualProtect reports the old protection of the FIRST page of a range only, so a per-site record restores both pages RWX.
+        tk::Image b = im;
+        b.Put(0x2800, { 0xC7, 0x41, 0x4C, 0x00, 0x00, 0xC8, 0x42 });   // mov [ecx+0x4c], 100.0f
+        b.Put(0x2ffb, { 0xC7, 0x41, 0x48, 0x00, 0x00, 0x48, 0x43 });   // mov [ecx+0x48], 200.0f: the value crosses 0x3000
+        const std::vector<SiteDef> x = { Patch("near.a", 0x2800, { 0xC7, 0x41, 0x4C }, { 0x00, 0x00, 0xC8, 0x42 }, { 0x00, 0x00, 0x48, 0x43 }),
+                                         Patch("straddle.b", 0x2ffb, { 0xC7, 0x41, 0x48 }, { 0x00, 0x00, 0x48, 0x43 }, { 0x00, 0x00, 0x96, 0x43 }) };
+        const bool on2[2] = { true, true };
+        for (uint32_t base : { 0x400000u, 0x01230000u }) {
+            std::vector<uint8_t> m = b.Mapped(base); PeInfo pe; ImageView v = tk::MappedView(m, pe);
+            const PatchPlan pl = MakePatchPlan(v, base - 0x400000u, x.data(), x.size(), on2);
+            if (pl.verdict != PlanVerdict::Apply) printf("    straddle at 0x%08x: %s\n", (unsigned)base, pl.reason.c_str());
+            CHECK(pl.verdict == PlanVerdict::Apply); CHECK_EQ(pl.nWrite, 2); CHECK_EQ(pl.sites[1].valueRva, 0x2ffeu);
+            std::vector<uint8_t> want = m; ApplyPlanToBuffer(want.data(), pl, x.data());
+            std::vector<uint8_t> mm = m; tk::PageMem f(b, mm.data());
+            const WriteResult r = WritePlanAtomic(mm.data(), pl, x.data(), f);
+            CHECK(r.ok); CHECK_EQ(r.written, 2); CHECK(mm == want);   // the same bytes as the pure apply
+            CHECK(f.Restored()); CHECK(f.NoneTwice());
         }
     }
     return tk::Done("test_patch_engine");
