@@ -4,6 +4,7 @@
 #include "testkit.h"
 #include "wndprocpolicy.h"
 
+#include <algorithm>
 #include <set>
 
 namespace {
@@ -170,6 +171,56 @@ void OutOfReach() {
     // a dropped module that later writes back the previous proc it saved puts DXVK's orphan on top: the game hears nothing
     { Rig r(true); r.d.Hook(); Subclass(r.w, GL); r.d.Reset(); r.w.Set(r.w.prevOf[GL]); CHECK(r.w.top == DXVK); CHECK(!r.w.Reaches(GAME)); CHECK(!r.w.Cyclic()); }
 }
+
+// a source with its // comments out, so a lint reads code and not the explanation of it
+std::string Code(const std::string& rel) {
+    std::string s = tk::ReadFile(rel), out;
+    CHECK(!s.empty());
+    for (size_t i = 0; i < s.size();) {
+        const size_t e = std::min(s.find('\n', i), s.size()), c = s.find("//", i);
+        out.append(s, i, (c < e ? c : e) - i); out += '\n';
+        i = e + 1;
+    }
+    return out;
+}
+size_t Count(const std::string& s, const std::string& what) { size_t n = 0; for (size_t k = s.find(what); k != std::string::npos; k = s.find(what, k + 1)) ++n; return n; }
+
+void Lints() {
+    const size_t np = std::string::npos;
+    const std::string be = Code("core/backend.cpp"), gd = Code("core/dxvk_wndproc.cpp"), dm = Code("core/dllmain.cpp");
+    // the guard asks the policy, and what it writes is the loaded backend's import table: nothing else, never the exe or a game module
+    CHECK(gd.find("s_book.OnGet(") != np && gd.find("s_book.OnSet(") != np);
+    CHECK(gd.find("IMAGE_DIRECTORY_ENTRY_IMPORT") != np && gd.find("reinterpret_cast<uint8_t*>(dxvk)") != np);
+    CHECK_EQ(Count(gd, "VirtualProtect("), size_t(2));
+    CHECK_EQ(Count(gd, "VirtualProtect(&t->u1.Function, sizeof(DWORD)"), size_t(2));
+    CHECK_EQ(Count(gd, "t->u1.Function = "), size_t(1));
+    for (const char* bad : { "GetModuleHandleW(nullptr)", "GetModuleHandle(nullptr)", "GetModuleHandleA(nullptr)", "PlanEngine(", "SiteAddress(", "exeBase", "WriteProcessMemory",
+                             "memcpy(", "WritePlanAtomic(", "adapter.h", "Adapter(", "CreateThread(", "StartThread(", "LoadLibrary" })
+        if (gd.find(bad) != np) { printf("    dxvk_wndproc.cpp has %s\n", bad); CHECK(false); }
+    // the module it hooks through: only user32's four, by name
+    CHECK_EQ(Count(gd, "GetProcAddress("), size_t(4));
+    CHECK_EQ(Count(gd, "GetModuleHandleW("), size_t(1));
+    CHECK(gd.find("GetModuleHandleW(L\"user32.dll\")") != np);
+
+    // backend.cpp: under s_real and the DXVK name, after LoadDxvk, before the first export is resolved, and only there
+    const size_t load = be.find("BOOL CALLBACK LoadOnce("), call = be.find("DxvkWndProcGuard(s_real)"), under = be.find("if (s_real && !strcmp(s_name, \"dxvk\")) {"),
+                 dxvk = be.find("s_real = LoadDxvk();"), system = be.find("if (!s_real) s_real = LoadSystem();"), first = be.find("Resolve<PFN_Create9>(\"Direct3DCreate9\")");
+    CHECK(load != np && call != np && under != np && dxvk != np && system != np && first != np);
+    CHECK(load < dxvk && dxvk < under && under < call && call < system && system < first);
+    CHECK_EQ(Count(be, "DxvkWndProcGuard("), size_t(1));
+    CHECK(be.find("rt.cfg.Bool(\"proxy.dxvk_wndproc_fix\")") != np);
+    CHECK(be.find("rt.cfg.Bool(\"proxy.dxvk_wndproc_fix\")") < call);
+    // the unknown-backend warning is the else of the `want` test and of nothing else: the guard's if may not come between them (J16's shape did)
+    const size_t want = be.find("if (want == \"dxvk\") {"), unknown = be.find("else if (want != \"system\")");
+    CHECK(want != np && unknown != np && want < unknown);
+    const size_t wantEnd = be.find('\n', want);
+    CHECK(wantEnd != np && be.find_first_not_of(" \n", wantEnd) == unknown);
+    CHECK(unknown < under);
+    // never from DllMain or Init: dllmain.cpp does not name it, and the one caller is LoadOnce (the first export call)
+    CHECK(dm.find("DxvkWndProcGuard") == np);
+    CHECK(be.find("LoadOnce", load + 1) != np);
+    CHECK(be.find("DllMain") == np);
+}
 }
 
 int main(int argc, char** argv) {
@@ -236,5 +287,6 @@ int main(int argc, char** argv) {
     TenRoundTrips();
     NeverOverReach();
     OutOfReach();
+    Lints();
     return tk::Done("test_wndproc");
 }
