@@ -3,11 +3,12 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) rule rows 'verified claims carry a date', 'strict JSON' and 'gates not silenced', the --serve item, the gen_tables path read. verified_dates (VD_DATED, checks.py:100) also accepts \\d{1,2}-\\d{2}, 'session', '.md)' and 'v\\d' as a date, so 'VERIFIED on PC', 'verified in session' and 'verified 3-10 times' pass: require an ISO date or a run-id shape. Duplicate JSON keys are accepted and the last one wins: an object_pairs_hook that refuses them in checks.py:43-59 and registry.py:200,223. [gates] skip drops gates silently (gates.py:326): print one warn line per skipped gate and require a decision id beside each skip (napoleon's test_repo_rules.silenced sits inside the skippable tests gate). The jobs view --serve page puts marked.parse output into innerHTML next to the launch token and loads marked from a CDN with no integrity hash (jobq.py:710, 720): pin it with SRI and escape raw HTML in the output. A stale-path check for living docs: a repo path in backticks that does not exist fails (B24 generalised; coordinate with W12). gen_tables.py reads registries/engine_sites.jsonl by path (gen_tables.py:177): read it through the registry loader so reg migrate --to dir keeps working. After W23 and W12.",
   "title": "Small gate fixes: dates, strict JSON, skipped gates, the serve page, stale doc paths",
   "phase": 1,
-  "status": "needs_brief",
+  "status": "queued",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [
     "W23",
     "W12"
-  ]
+  ],
+  "brief": "jobs/W28/brief.md"
 }
