@@ -285,7 +285,7 @@ def render_ini(ident, keys):
 
 
 def render_console(adapter_rel, src):
-    """console_table.h from the command TSVs named in <adapter>/console_sources.json (discovery/core/console_cmds.py output):
+    """console_table.h from the command TSVs named in <adapter>/console_sources.json (discovery/console_cmds.py output):
     the campaign commands that are no-ops in retail (refused by the console verb) and the system dictionary's names (path label)"""
     def rows(rel):
         lines = (ROOT / rel).read_text(encoding='utf-8').splitlines()

@@ -158,7 +158,7 @@ class ExtendJobs(unittest.TestCase):
 
     def test_jobs_extension_passes_jobs_check(self):
         toml = TOML.replace('hotkeys = "schemas/hotkeys.schema.json"\nengine_facts = "schemas/facts.schema.json"',
-                            'jobs = "schemas/jobs.schema.json"') + '[jobs]\nid_prefix = "J"\n[storage]\ndir = ["jobs"]\n'
+                            'jobs = "schemas/jobs.schema.json"') + '[jobs]\nid_prefix = "J"\n[storage]\ndir = ["jobs"]\n[views]\ncommit = false\n'   # B49: committed views beside a jobs registry fail jobs check (C19)
         ext = {'x-extends': 'core:jobs', 'properties': {'sprint': {'type': 'integer', 'minimum': 1}}}
         repo = TempRepo({'schemas/jobs.schema.json': json.dumps(ext)}, toml=toml)
         try:

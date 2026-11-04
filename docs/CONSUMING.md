@@ -37,6 +37,16 @@ Costs of the recommendation, and what covers them:
   `core/` is empty.
 - **Agent sessions** attach `liam-rowley/warscape-core` (read) next to the game repo; one extra `add_repo`.
 
+## Hooks and gate keys added in 0.24.0 (C23)
+
+- **`.githooks/commit-msg`** refuses a commit whose message has no `Claude-Session:` trailer with a value (read with `git interpret-trailers --parse`, as `policy` reads
+  pushed commits: git sees a trailer only in the last paragraph, with `Co-Authored-By:`). Opt in with `[policy] commit_msg_hook = true` (default `false`; it uses
+  `[policy] session_trailer`, and an empty name switches it off). Merge commits are skipped; fix a refusal with `git commit --trailer "Claude-Session: <id>"`;
+  a human commit bypasses once with `--no-verify`. Same wiring as the pre-push hook (`core.hooksPath core/.githooks`). It runs `wsc policy --commit-msg <file>`.
+- **`run_refs` gate** (fast set): every repo path a tracked `**/runs/**/README.md` names (link targets and backticked paths) must exist: from the root, from the README's
+  folder, as the tail of a tracked path, inside a submodule, or git-ignored. `[gates] run_refs_since = "YYYY-MM-DD"` skips run folders dated before it (default `""`:
+  all checked); set it to the pin-bump date when old READMEs name moved paths.
+
 ## Wiring a game repo (the steps, once approved)
 
 ```sh
@@ -169,7 +179,7 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
-  plan`/`meta`. Nothing refuses the combination yet (B49), so a repo would find out at its first brief.
+  plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
@@ -263,7 +273,7 @@ generated tables are byte-identical); after the pin bump run `python3 core/proxy
 The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
 `stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
 
-## The game lock is the session's (0.23.0, core W10, C23)
+## The game lock is the session's (0.25.0, core W10, C24)
 The holder of `game.lock` is the pair (owner, session); the default owner is the session id, so two sessions can no longer share a lock by a shared name.
 Set `WSC_SESSION_ID` in the session (or pass `--session`; Claude Code's Bash tool already exports `CLAUDE_CODE_SESSION_ID`, which `ctl.py` and `acceptance.py` use
 when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `--owner` both tools refuse (exit 2) and say so. Scripts that name an owner

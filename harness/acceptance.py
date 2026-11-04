@@ -4,7 +4,7 @@
 purpose: run N acceptance passes in the background against the committed baseline file (rule 74), stop at the first failure with its evidence, and append one line per pass to the committed ledger; also the pure checks the policy gate reuses (consecutive passes for a build)
 usage: acceptance.py run --passes N --run RUN_ID [--owner O] [--session S] [--baseline F] [--ledger F] | measure --run RUN_ID [--owner O] [--session S] | check-baseline [--baseline F] | streak --build ID --watcher V [--ledger F]
 when: after every change to proxy/ or harness/ (rule 79: a job branch that changes them needs 20 consecutive ledger passes on its final DLL and watcher build); `check-baseline` and the helpers run in the tests gate
-not-a-verb: orchestrates PC sessions through harness/core/ctl.py and job.sh (game-agnostic: the scenario list is the baseline's, the settings files and exe pin come from the adapter); a J12 core candidate
+not-a-verb: orchestrates PC sessions through harness/ctl.py and job.sh (game-agnostic: the scenario list is the baseline's, the settings files and exe pin come from the adapter); a J12 core candidate
 
 One pass: exe sha1 equals the adapter pin (rule 28); launch headless at the baseline's size; `scene` every baseline step; one `cam` pose and one
 `shot` each; `perf 10` once; a warm reset; a relaunch; exit. Each step is compared with the baseline: load time within its tolerance, the shot

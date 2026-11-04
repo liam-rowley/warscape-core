@@ -5,7 +5,7 @@ grammar in `proxy/src/devcore.h`, host-tested in `proxy/tests/test_dev.cpp`; the
 channel's file protocol and per-verb guide stay in the game's `proxy/README.md` "Dev control channel" until they move here; the driver side is
 `harness/job.sh ctl` (exit 0 ok, 1 failed, 2 refused, 3 timeout, 124 no answer).
 
-From 0.23.0 (W10) `job.sh ctl <owner> ...` needs the game lock: the owner or the session of the lock must be `<owner>` (`job.sh holds <owner>`; take it with `job.sh lock`), and its default wait is 100 s, not 170.
+From 0.25.0 (W10) `job.sh ctl <owner> ...` needs the game lock: the owner or the session of the lock must be `<owner>` (`job.sh holds <owner>`; take it with `job.sh lock`), and its default wait is 100 s, not 170.
 
 ## The protocol in one paragraph
 With `dev.ctl=1` the proxy watches `<dev.ctl_dir>`: a request is `<id>.cmd` (one line, a verb and its arguments), taken by renaming it to
