@@ -546,6 +546,7 @@ def problems(rows, read, folders=()):
                 errs.append(f'{jid}: report.md sits beside a handback: say what the orchestrator added (a "## Orchestrator additions" section)')
             if S.failed_results and S.root is not None:
                 errs += [f'{jid}: report: {e}' for e in failed_results_problems(jid, report, S.root, S.failed_results)]
+            errs += [f'{jid}: report: {e}' for e in usage_problems(jid, r, brief, report)]
         review = read(f'{S.jobs_dir}/{jid}/review.md')
         if review is not None:
             if not DATED.search('\n'.join(review.split('\n')[:5])):
