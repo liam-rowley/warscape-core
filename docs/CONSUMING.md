@@ -267,40 +267,21 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
    as before, with the note.
 
 ## The proxy, the harness and the save tools (0.4.0)
-From 0.4.0 the core carries the proxy DLL's core (`proxy/src`), its host tests and tools (`proxy/tests`, `proxy/tools`), the PC
-watcher kit (`harness/`) and the ESF save tools (`saves/`). A game keeps its adapters: `proxy/<game>/` (adapter.cpp, identity.json,
-the generated tables and config file, lua/) and `harness/<game>/` (adapter.json, profiles/), plus its registries. The tools find
-them through `proxy/tools/layout.py`: the game root is the superproject that pins the core (or `$WSP_GAME_ROOT`), and the adapters
-are `wsc.toml` `[proxy] adapter` / `[harness] adapter` when set, else the one `proxy/*/adapter.cpp` / `harness/*/adapter.json`.
-Run them from the game repo as `core/proxy/tools/build.sh`, `core/harness/job.sh` and so on; `python3 core/proxy/tools/layout.py`
-prints what they will use. The DLL build id hashes the inputs' content under role names, read through the gitlink for files in
-the core, so moving them here kept every game build id (napoleon J12); the build contract (the roles, the toolchain pin and its check, tracked
-sources only, the DLL's `self_hash` log line, the CI step summary) is [PROXY_BUILD.md](PROXY_BUILD.md). The core's CI builds and tests them against the null game
-(`proxy/tests/null_game/README.md`); from 0.19.0 the tools' Python host tests run here too (`tests/test_pc_deploy.py`, `test_ctl.py`,
-`test_acceptance.py`, `test_saves.py`, `test_job_sh.py`; W8), so a game keeps only the tests over its own data (its scenario rows and
-battle presets for rule 78, its save map, recipes and staging, its real identity).
-The Git Bash finder is core code from 0.19.0 (`warscape/gitbash.py`: `harness/ctl.py` no longer loads the game's `tools/verbs/setup.py`): a
-game's setup verb imports it (`from warscape.gitbash import git_bash, bash_kind, bash_for_tests`; verbs run with the core on `sys.path`)
-instead of keeping its own, and a host test that runs a shell script takes its bash from `bash_or_skip(self)` (a skip, or a failure under
-`$WSC_REQUIRE_BASH`).
-A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
-(watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher
+kit, the save tools), how the tools find a game's adapters, the UI pin file, and the contract doc of each proxy feature.
 
-**The UI pin file** (`[proxy] ui_pins`, else `viewer/pins.json`; the `ui_pins` input) needs `rmlui`, `freetype`, `lua`, `stb_image` and
-`stb_image_write` (the PNG dump, since 0.10.0); copy a missing entry from the null game's `proxy/tests/null_game/viewer/pins.json`.
-
-Proxy features a game turns on through its adapter and its config_keys rows each have one contract doc: the RmlUi host
-([PROXY_UI.md](PROXY_UI.md)), battle unit orders ([PROXY_ORDERS.md](PROXY_ORDERS.md)) and, from 0.13.0, the gesture layer
-([PROXY_GESTURES.md](PROXY_GESTURES.md): a `GestureAdapter` in `GameAdapter::gesture`, the `controls.gestures` key, the ctl `gesture` verb;
-`GameAdapter` gained that member, so an adapter's aggregate initialiser needs one more entry, `nullptr` for none).
-The frame capture (`dev.capture`, the ctl `capture` verb, the `frame.txt` record lines) is [PROXY_CAPTURE.md](PROXY_CAPTURE.md): from 0.21.0 it hooks
-37 device slots and 2 state-block slots, fails an abandoned or empty capture with a `state`, records only the thread that took the arm, and writes
-`SBCREATE`, `SBCAPTURE`, `SBAPPLY` (with a `STATE` readback), `OTHERTHREAD` and `ABANDONED` lines; a game's own capture docs point there.
-Engine sites and their config keys ([PROXY_SITES.md](PROXY_SITES.md)): from 0.16.0 a `patch` row may take its value from a numeric key
-(`value_key`, `value_scale`, `value_floor_stock`) and a key may carry `type`, `min` and `max`. Nothing changes for existing rows (their
-generated tables are byte-identical); after the pin bump run `python3 core/proxy/tools/gen_tables.py --check`.
-The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
-`stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
+## The game lock is the session's (0.29.0, core W10, C26)
+The holder of `game.lock` is the pair (owner, session); the default owner is the session id, so two sessions can no longer share a lock by a shared name.
+Set `WSC_SESSION_ID` in the session (or pass `--session`; Claude Code's Bash tool already exports `CLAUDE_CODE_SESSION_ID`, which `ctl.py` and `acceptance.py` use
+when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `--owner` both tools refuse (exit 2) and say so. Scripts that name an owner
+(`--owner claude-acceptance`) keep working and need only a session: the same owner with a different session is refused like another owner's until the lock is stale.
+- `job.sh`: one owner rule `^[a-z0-9][a-z0-9_-]{0,39}$` everywhere (scratch was 32), exact-case in the watcher; `lock -` makes the owner the session id; `lock --wait S` polls (max 100);
+  `touch <owner>` and `unlock <owner>` act only on the holder's lock (a bare `touch` is refused, 64); `holds <owner>` asks; `ctl` and `shot.sh` need the lock (take it with `job.sh lock` first).
+- The watcher accepts the lock's `session=` as the request `owner=` too; update the PC's watcher to **1.4.0** (`update kit=`) before relying on that or on the exact-case compare.
+- The stale age is `lock_stale_min` from `watcher.ini` (default 20) on both sides. Waits: `job.sh` and `job.sh ctl` default to 100 s (the Bash tool gives up at 120 s); a timed-out
+  request is withdrawn (`.request.expired`), so a script that relied on it staying queued must pass a longer wait and run in the background.
+- A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
+- `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

@@ -388,6 +388,53 @@ try {
     $oddPrefs = [byte[]](0, 255, 13, 10, 10, 13, 0xC3, 0xA9, 200, 1, 2, 3)
     function Latest-Probe { return (Get-ChildItem (Join-Path $root 'runs') -Directory -Filter '*_winprobe' | Sort-Object Name | Select-Object -Last 1) }
 
+    Test-Case 'W10 owner: a request owner equal to the lock''s session id is accepted, a different-case owner is refused (exact-case compare)' {
+        Set-Lock 'ci-own'    # Set-Lock writes session=ci
+        Assert-Eq (Run-Job 'kill owner=ci-own' 'ow1' 30).d.status 'ok' 'the lock owner'
+        Assert-Eq (Run-Job 'kill owner=ci' 'ow2' 30).d.status 'ok' 'the lock''s session id'
+        $r = Run-Job 'kill owner=CI-OWN' 'ow3' 30
+        Assert-Eq $r.d.status 'refused' 'different case'; Assert-Match $r.d.reason 'lower' 'says to lower-case it'
+        Clear-Lock
+    }
+    Test-Case 'W10 B21: a ps1 job exits with its last statement, not an old native code' {
+        $t = New-Tmp 'rc'; $a = Join-Path $t 'a'; $b = Join-Path $t 'b'; New-Item -ItemType Directory -Path $a -Force | Out-Null
+        $r1 = Run-Job "#ps1`r`ncmd /c exit 3`r`nWrite-Output fine" 'rc1' 30
+        Assert-Eq $r1.d.status 'ok' "an early handled native failure ($($r1.out))"
+        $r2 = Run-Job "#ps1`r`nWrite-Output start`r`ncmd /c exit 4" 'rc2' 30
+        Assert-Eq $r2.d.status 'failed' 'a last native failure'; Assert-Eq $r2.d.exit 4 'keeps its code'
+        $r3 = Run-Job "#ps1`r`nrobocopy '$a' '$b' /E | Out-Null`r`nexit 0" 'rc3' 30
+        Assert-Eq $r3.d.status 'ok' "robocopy ending in exit 0 ($($r3.out))"
+        $r4 = Run-Job "#ps1`r`ncmd /c exit 2`r`nexit 7" 'rc4' 30
+        Assert-Eq $r4.d.exit 7 'an explicit exit 7 stays 7'
+        Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Test-Case 'W10 B27: when kill is done the status already says not_running with no game image listed' {
+        Set-Lock 'cik27'
+        Assert-Eq (Run-Job 'launch visible=1 owner=cik27' 'k27l' 40).d.status 'ok' 'launch'
+        Assert-Eq (Run-Job 'kill owner=cik27' 'k27k' 40).d.status 'ok' 'kill'
+        $st = Get-St    # no waiting
+        Assert-Eq $st.game_state.state 'not_running' 'game_state'
+        Assert-Eq @($st.processes | Where-Object { $_.image -eq 'FakeGame.exe' }).Count 0 'no game image in processes'
+        Clear-Lock
+    }
+    Test-Case 'W10 B30: a profile through a real headless launch sets every copy of a duplicated prefs key' {
+        Set-Lock 'ci30'; Set-Vd '3840x2160'; Set-Proxy $true; Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
+        $t = "x_res 100; # x_res <int32>, first #`r`ny_res 2160; # y_res <int32> #`r`nx_res 200; # x_res <int32>, second #`r`ngfx_fullscreen true; # g #`r`n"
+        [IO.File]::WriteAllBytes($prefs, ([byte[]]@(0xFF, 0xFE) + (New-Object Text.UnicodeEncoding($false, $false)).GetBytes($t))); $h0 = Hashes
+        $id = Submit 'launch owner=ci30 headless_wait_s=60' (New-JobId 'dup')
+        $p = Wait-FakePid
+        Write-HStatus $p 'starting'; Start-Sleep -Milliseconds 700
+        Write-HStatus $p 'on_virtual' 'window on the virtual display'
+        $r = Get-Result $id 60
+        Assert-Eq $r.d.status 'ok' "launch ($($r.out))"
+        $pt = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($prefs), 2, [IO.File]::ReadAllBytes($prefs).Length - 2)
+        Assert-Eq ([regex]::Matches($pt, 'x_res 3840;').Count) 2 "both copies set ($pt)"
+        Run-Job 'kill owner=ci30' 'dupk' 40 | Out-Null
+        Clear-Lock
+        Wait-Until { (Hashes) -eq $h0 } 30 'lock release restores every file' | Out-Null
+        [IO.File]::WriteAllBytes($prefs, $oddPrefs)
+        Remove-Item -LiteralPath $hdll, $hstat -Force -ErrorAction SilentlyContinue
+    }
     Test-Case 'headless launch: on_virtual = ok; the display is checked, prefs and mod ini overlaid on top (profile-style snapshot), the window probe measures the launch, files come back byte for byte' {
         Set-Lock 'ci9'; Set-Vd '3840x2160'; Set-Proxy $true; Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
         [IO.File]::WriteAllBytes($prefs, (Real-Prefs)); $h0 = Hashes

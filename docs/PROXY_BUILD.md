@@ -1,7 +1,7 @@
 # The proxy DLL build contract
 
 What a build id names, how the DLL is built from it, and how a log proves which DLL ran (W24, C25). The scripts are `proxy/tools/build.sh`,
-`build_id.py` and `toolchain.py`; how a game runs them is `CONSUMING.md`, "The proxy, the harness and the save tools".
+`build_id.py` and `toolchain.py`; how a game runs them is [PROXY_HARNESS.md](PROXY_HARNESS.md).
 
 ## The build id: committed inputs under role names
 `build_id.py` hashes the git object id of each DLL input at a revision, under a fixed role name, in this order (12 hex of sha256 over

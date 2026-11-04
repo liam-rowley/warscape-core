@@ -715,8 +715,49 @@ def resolve_keys(text, sets):
     return out
 
 
-def set_keys(game, pairs, config_file, state=None):
-    """Returns 0, or 1 when the exe is not vanilla afterwards (checked after, never refused; recorded in install.json when there is one)."""
+def pending_restore(state):
+    """The watcher's pending profile restore (<state>/watcher/profiles/_active.json) as a dict, or None. The watcher removes the file once the
+    game is closed and the lock released, expired or changed owner; a restore that runs after `set` puts the old keys back (B39)."""
+    p = Path(state) / 'watcher' / 'profiles' / '_active.json'
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_bytes().decode('utf-8-sig'))
+    except (OSError, ValueError):
+        return {'name': '?', 'owner': '?'}
+    return d if isinstance(d, dict) else {'name': '?', 'owner': '?'}
+
+
+def wait_for_restore(state, wait_s, sleep=time.sleep):
+    """B39: with a usable watcher, wait up to wait_s (once a second) for a pending profile restore to finish; refuse (SystemExit) while it
+    is still there. No state, no watcher folder or an unusable watcher: print one line that a pending restore cannot be seen."""
+    if state is None:
+        print('pc_deploy set: no --state, so a pending watcher profile restore cannot be seen (pass --state to have set wait for it)')
+        return
+    why, st = watcher_view(state)
+    if st is None:
+        print(f'pc_deploy set: {why or "no watcher folder under the state"}: a pending watcher profile restore cannot be seen')
+        return
+    act = pending_restore(state)
+    waited = 0
+    while act is not None and waited < wait_s:
+        sleep(1)
+        waited += 1
+        act = pending_restore(state)
+    if act is None:
+        return
+    lock = st.get('lock')
+    running = [str(p.get('image')) for p in st.get('processes', [])]
+    raise SystemExit(
+        f"pc_deploy set: refused, the watcher still has profile '{act.get('name')}' (owner {act.get('owner')}) to restore, and a restore that runs after "
+        f"this set would put the old keys back; the lock is {'held by ' + str(lock.get('owner')) if isinstance(lock, dict) else 'not held'}, the game is "
+        f"{'running (' + ', '.join(running) + ')' if running else 'not running'}. The restore waits for the game to close and the lock to be released "
+        f"(job.sh unlock <owner>); waited {waited} s (--wait-restore N to wait longer). Nothing was written.")
+
+
+def set_keys(game, pairs, config_file, state=None, wait_restore=30, sleep=time.sleep):
+    """Returns 0, or 1 when the exe is not vanilla afterwards (checked after, never refused; recorded in install.json when there is one).
+    B39: waits for (--wait-restore, default 30 s) or refuses on a pending watcher profile restore before it writes."""
     if not config_file:   # the installed kit's name for it, else the identity's (a kit copy: the one beside it)
         rec0 = Path(state) / STATE_FILE if state else None
         config_file = (json.loads(rec0.read_text(encoding='utf-8')).get('config_file') if rec0 and rec0.exists() else None) or (default_identity() or {}).get('config_file')
@@ -726,6 +767,7 @@ def set_keys(game, pairs, config_file, state=None):
     bad = [x for x in pairs if '=' not in x]
     if bad:
         raise SystemExit(f'pc_deploy set: expected key=value, got {bad}')
+    wait_for_restore(state, wait_restore, sleep)
     text = p.read_bytes().decode('utf-8')
     sets = resolve_keys(text, dict(x.split('=', 1) for x in pairs))
     p.write_bytes(edit_ini(text, sets).encode('utf-8'))
@@ -826,7 +868,7 @@ def main():
     s = sub.add_parser('snapshot'); s.add_argument('--game', required=True); s.add_argument('--out', required=True)
     i = sub.add_parser('install'); i.add_argument('--kit', required=True); i.add_argument('--game', required=True); i.add_argument('--state', required=True); i.add_argument('--assume-closed', action='store_true')
     u = sub.add_parser('uninstall'); u.add_argument('--game', required=True); u.add_argument('--state', required=True); u.add_argument('--assume-closed', action='store_true')
-    c = sub.add_parser('set'); c.add_argument('--game', required=True); c.add_argument('--state'); c.add_argument('--config-file', help="the proxy's config file name (default: the identity's config_file)"); c.add_argument('pairs', nargs='+')
+    c = sub.add_parser('set'); c.add_argument('--game', required=True); c.add_argument('--state'); c.add_argument('--config-file', help="the proxy's config file name (default: the identity's config_file)"); c.add_argument('--wait-restore', type=int, default=30, help='seconds to wait for a pending watcher profile restore before refusing (0 refuses at once; default 30)'); c.add_argument('pairs', nargs='+')
     st = sub.add_parser('status'); st.add_argument('--game', required=True); st.add_argument('--state', required=True)
     sl = sub.add_parser('sync-lua'); sl.add_argument('--game', required=True); sl.add_argument('--state', required=True); sl.add_argument('--assume-closed', action='store_true'); sl.add_argument('--dry-run', action='store_true')
     d = sub.add_parser('diff'); d.add_argument('a'); d.add_argument('b')
@@ -847,7 +889,7 @@ def main():
     elif a.cmd == 'uninstall':
         return 0 if uninstall(a.game, a.state, a.assume_closed) else 1
     elif a.cmd == 'set':
-        return set_keys(a.game, a.pairs, a.config_file, a.state)
+        return set_keys(a.game, a.pairs, a.config_file, a.state, a.wait_restore)
     elif a.cmd == 'status':
         return status(a.game, a.state)
     elif a.cmd == 'sync-lua':
