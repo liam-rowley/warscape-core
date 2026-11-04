@@ -141,7 +141,7 @@ jobs:
           key: fetch-1-${{ steps.fetch_key.outputs.key }}
       - id: dll
         run: proxy/tools/build.sh all
-      # proxy map (W35, C28): the linker map, its sidecar and the build line of this job's DLL as proxy-map-<build id>, the name build.sh
+      # proxy map (W35, C29): the linker map, its sidecar and the build line of this job's DLL as proxy-map-<build id>, the name build.sh
       # printed into the build step's outputs; 90 days is GitHub's maximum, a release attaches its own (docs/PROXY_BUILD.md).
       - id: proxy_map
         if: success() && steps.dll.outputs.map_name != ''

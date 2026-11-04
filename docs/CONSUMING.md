@@ -71,7 +71,7 @@ exempt = ["tests/**", "**/runs/**"]
 max_kb = 30
 
 [cli]
-verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract as warscape/verbs/)
+verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract; never a core verb's name: reg find gates jobs policy ci discovery crash agent-settings)
 ```
 
 CI in the game repo (`.github/workflows/gates.yml`):
@@ -292,6 +292,19 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
   request is withdrawn (`.request.expired`), so a script that relied on it staying queued must pass a longer wait and run in the background.
 - A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
+
+## Crash symbolisation and guarded verbs (0.35.0, core W35, C29; [PROXY_BUILD.md](PROXY_BUILD.md))
+- **Pin bump:** `build.sh` changed, so the build id is new: one 20-pass run (rule 79). Delete any game verb named `crash` or `agent-settings`.
+- **CI:** put `{{wsc proxy_map step=dll}}` right after the proxy build step, give that step `id: dll`, then `wsc ci render`; the job uploads
+  `proxy-map-<build id>` (90 days). **Release:** attach `d3d9.map` and `d3d9.map.json` (beside the DLL) to each release you publish.
+- **`wsc crash symbolise <dump> --map <d3d9.map> | --build-id <id>`** names the exception frame of a proxy dump from the map; refuses a map
+  whose sidecar disagrees with the log, the DLL or the dump.
+- **`wsc agent-settings allow|remove "<rule>"`** adds a rule to `.claude/settings.json` `permissions.allow` only when a `[agent_settings]
+  safe = [...]` pattern in `wsc.toml` covers it (e.g. `"Bash(git status:*)"`), no `deny` rule overlaps it and it has no wildcard or shell
+  operator; it never edits hooks or `deny`, writes only `.claude/*.json` (no hook line needed) and refuses without `[agent_settings]`.
+- **`job.sh vdisplay-aside <owner|-> <session> <why>`** moves a stale `vdisplay_restore.json` to `_to_delete\` (unique name, prints the
+  saved mode) only when the lock is free or yours, the watcher runs with no game, and its restore failed or dropped (the last `vdisplay:`
+  line of `watcher.log`) or the file is older than the stale limit. The watcher kit does not change.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

@@ -152,7 +152,7 @@ ui_lua_obj() {
   rm -f "$O.part.o" "$O.all.o"
 }
 
-# $4 = the linker map to write beside the DLL (W35, C28), empty = link without -Map (repro's check that the flag moves no byte).
+# $4 = the linker map to write beside the DLL (W35, C29), empty = link without -Map (repro's check that the flag moves no byte).
 build_dll() {
   local S="$1" A="$2" O="$3" M="${4:-}" L="$3.lua"; mkdir -p "$L"
   local CC="${CXX/g++/gcc}" SRCS=() n MAPF=()
@@ -172,7 +172,7 @@ build_dll() {
     -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" "${MAPF[@]}" -o "$O" "${SRCS[@]}" "$A/adapter.cpp" \
     "$L"/*.o $(LC_ALL=C ls "$U"/rml/*.o "$U"/ft/*.o) "$S/d3d9.def" -ldbghelp -ladvapi32
   [[ -n "$M" ]] || return 0
-  # W35 (C28): the GNU ld map, made reproducible (checkout paths become labels, gcc's temporary objects are named after their sources
+  # W35 (C29): the GNU ld map, made reproducible (checkout paths become labels, gcc's temporary objects are named after their sources
   # in link order: warscape/minidump.py normalise_map), and its sidecar d3d9.map.json {dll, build_id, dll_sha256, image_base, size,
   # size_of_image}. No --cref: `wsc crash symbolise` needs only the sections and symbols. No timestamp enters either file.
   local names=()
@@ -244,7 +244,7 @@ if [[ "$WHAT" == repro ]]; then
   build_dll "$R/src" "$R/adapter" "$R/out/d3d9.dll" "$R/out/d3d9.map"
   if cmp -s "$OUT/$ADAPTER/d3d9.dll" "$R/out/d3d9.dll"; then echo "build.sh repro: identical from another path"; summary "- repro: identical from another path"
   else echo "build.sh repro: FAILED: the DLL depends on the checkout path"; cmp -l "$OUT/$ADAPTER/d3d9.dll" "$R/out/d3d9.dll" | head -5; exit 1; fi
-  # W35 (C28): the map is reproducible too (the same labels and names from another path), and so is its sidecar
+  # W35 (C29): the map is reproducible too (the same labels and names from another path), and so is its sidecar
   if cmp -s "$OUT/$ADAPTER/d3d9.map" "$R/out/d3d9.map" && cmp -s "$OUT/$ADAPTER/d3d9.map.json" "$R/out/d3d9.map.json"; then
     echo "build.sh repro: the linker map and its sidecar are identical from another path ($(wc -c < "$R/out/d3d9.map" | tr -d ' ') bytes)"; summary "- repro: the linker map is identical from another path"
   else echo "build.sh repro: FAILED: the linker map depends on the checkout path"; diff "$OUT/$ADAPTER/d3d9.map" "$R/out/d3d9.map" | head -10; diff "$OUT/$ADAPTER/d3d9.map.json" "$R/out/d3d9.map.json"; exit 1; fi
@@ -336,7 +336,7 @@ if [[ "$WHAT" == smoke ]]; then
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
   [[ -z "$SITE" ]] || grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
-  # 9) W35 (C28): a fault inside the DLL, named from the linker map. The host calls the export wsp_sentinel with a bad lua_State
+  # 9) W35 (C29): a fault inside the DLL, named from the linker map. The host calls the export wsp_sentinel with a bad lua_State
   #    (dev.lua_bridge on, the override's plan allows engine reads), the Lua core's lua_gettop reads through it, the unhandled filter
   #    writes the dump, and `wsc crash symbolise` (standard library only) names lua_gettop as the exception frame. The dump and the log
   #    are kept beside the smoke folder (CI uploads them) so the same command can be run on them anywhere.
