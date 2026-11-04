@@ -404,13 +404,13 @@ class Render(unittest.TestCase):
         from warscape.repo import Ctx
         self.assertEqual(ci_render.problems(Ctx.load(ROOT)), [])
 
-    # W21: a game renders the same blocks; a byte that changes fails its `ci_render` gate after a pin bump. Hashes taken on main before W21.
+    # W21: a game renders the same blocks; a byte that changes fails its `ci_render` gate after a pin bump. Hashes taken on main before W21; the gates.yml and 'all blocks' ones were retaken in W22 for the intended change (changes diff step, notify main_health job), the blocks pinned separately below.
     ALL_BLOCKS = ('jobs:\n{{wsc changes}}\n  a:\n{{wsc if native}}\n  b:\n{{wsc if host dispatch}}\n{{wsc pass_marker native}}\n'
                   '{{wsc pass_marker host shell=bash}}\n{{wsc policy}}\n{{wsc notify gates needs=changes,a,b}}\n{{wsc notify policy}}\n')
-    GOLDEN = {'fixture_game gates.yml': '08df5d836f17dae07ffcb1e3a08ef17e152d82904397c44d679e9886d04855af',
+    GOLDEN = {'fixture_game gates.yml': 'dff03d1ec57a47c0531f8cf38f84687ef998018de8cc5828108faaa8b8592dc5',
               'fixture_game policy.yml': 'fd4af2f072285b78862fec6b164003a5b6ce92d04b1cb56d82264c3fb5afbe9d',
-              'all blocks, a game': '53e941b58805bea2d3973ce0f5914ef85cfa2e8b0f472bf9fdcbc7fd294f8f7c',
-              'all blocks, the core': '7349ba6580dc6921190139b1257c028e9dbab54f3e8e64bc38a7d545483c7e15'}
+              'all blocks, a game': '5a935793569f6f2b91ec70357fc67f1147e0a824486160a467502e044e9e766f',
+              'all blocks, the core': 'e013d9c689f263ad27645d0e217d23d92265d06a39aa6c55b23a33b1b407e1a0'}
 
     def test_the_existing_blocks_render_byte_for_byte_as_before(self):
         import hashlib

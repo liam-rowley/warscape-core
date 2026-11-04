@@ -14,7 +14,8 @@ text, which carries its own indentation). Blocks:
                                (proxy/tools/netfetch.py ci-cache), actions/cache of the raw downloads (continue-on-error: a cache
                                fault never fails the job), then `netfetch.py prefetch` (the fetchers with a retry on network flakes)
   policy                       the `policy` job (pull requests; skips drafts); [ci] policy_extra_steps are inserted before the command
-  notify gates needs=a,b,c     the failure-comment job of a push workflow, after the jobs a, b, c
+  notify gates needs=a,b,c     the failure-comment job of a push workflow, after the jobs a, b, c, then the `main_health` job (W22: on main, one
+                               issue per red required job, `wsc ci main-health`)
   notify policy                the failure-comment job of the policy workflow
 The first line of a rendered file says it is generated. Slow job bodies stay in the template, outside the blocks.
 """
@@ -35,8 +36,9 @@ def _token(cfg, indent):
 def block_changes(cfg):
     sets = list(cfg['inputs'])
     wsc = _wsc(cfg)
-    out = ['  # changes: which slow jobs this run needs. Diffs against the merge base with main (a push to any branch but main)',
-           '  # or the previous main tip (a push to main). When the base is unknown (first push to main, a force push past it) everything runs.',
+    out = ['  # changes: which slow jobs this run needs. A push to a branch diffs against its merge base with main. A push to main has no base',
+           '  # (W22): every set counts as changed and only a pass marker for its tree skips it, so a set that failed on main runs again.',
+           '  # When the base is unknown (a branch with no merge base, a shallow clone) everything runs.',
            f'  # Which files feed which job: `wsc.toml` [ci] inputs, read by `{wsc} ci inputs`. Then a changed set whose tree hash has a pass marker',
            '  # is turned off; its outputs are the combined answer: true = inputs changed against the base AND no marker for this tree.',
            '  changes:', '    runs-on: ubuntu-latest', '    timeout-minutes: 5', '    outputs:']
@@ -46,8 +48,8 @@ def block_changes(cfg):
             '          fetch-depth: 0' + _token(cfg, '          ')]
     if cfg['core']:
         out += [f"      # only the {cfg['core']} commit this repo pins, shallow: the verbs need no history", f"      - run: git submodule update --init --depth 1 {cfg['core']}"]
-    out += ['      - id: diff', '        env:', '          BEFORE: ${{ github.event.before }}', '        run: |',
-            '          if [ "$GITHUB_REF" = refs/heads/main ]; then base=$BEFORE', '          else base=$(git merge-base origin/main HEAD || true); fi',
+    out += ['      - id: diff', '        run: |',
+            "          if [ \"$GITHUB_REF\" = refs/heads/main ]; then base=''", '          else base=$(git merge-base origin/main HEAD || true); fi',
             f'          {wsc} ci inputs --base "$base" >> "$GITHUB_OUTPUT"', '          cat "$GITHUB_OUTPUT"',
             '      # pass markers: looked up only for a set that changed, on a push, with a hash; the marker is a one-line file, restored whole']
     for k in sets:
@@ -138,7 +140,25 @@ def block_notify(cfg, kind, needs=''):
     out += ['      - env:', '          GH_TOKEN: ${{ github.token }}',
             f'        run: {wsc} ci notify --run-id ${{{{ github.run_id }}}} --attempt ${{{{ github.run_attempt }}}} --branch "{branch}" '
             '--repo "${{ github.repository }}"']
+    if kind != 'policy':
+        out += main_health_job(cfg, needs)
     return '\n'.join(out)
+
+
+def main_health_job(cfg, needs):
+    """W22: on main, open, update or close one issue per red required job (`wsc ci main-health`). A second job and not a wider `notify`: other
+    permissions (`issues: write`), other trigger (`always()`: closing needs a green run), and the notify job's text must not move.
+    `continue-on-error`, and not a required check: a fault here never turns main red."""
+    out = ['  main_health:', f'    needs: [{", ".join(needs.split(","))}]',
+           "    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'", '    continue-on-error: true',
+           '    runs-on: ubuntu-latest', '    timeout-minutes: 5', '    permissions:', '      contents: read', '      issues: write', '      actions: read',
+           '    steps:', f'      - uses: {REF_CHECKOUT}']
+    if cfg['core']:
+        out += ['        with:', '          submodules: true' + _token(cfg, '          ')]
+    out += ['      - env:', '          GH_TOKEN: ${{ github.token }}',
+            f'        run: {_wsc(cfg)} ci main-health --run-id ${{{{ github.run_id }}}} --attempt ${{{{ github.run_attempt }}}} '
+            '--repo "${{ github.repository }}"']
+    return out
 
 
 def expand(line, cfg):

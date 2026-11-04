@@ -12,6 +12,19 @@ import subprocess
 from .repo import git_env
 
 MARK = '<!-- ci_notify run {run} attempt {attempt} -->'
+SKIP = ('changes', 'notify', 'main_health')   # workflow jobs that are never a required check
+RED = ('failure', 'timed_out', 'startup_failure')
+GREEN = ('success', 'skipped')
+
+
+def required_jobs(cfg, jobs):
+    """The jobs of one run (the API's job dicts) that count as required: the names in `[ci] required_checks` that the run produced (a check no
+    push run makes, like `policy`, is ignored), or, when that list is empty, every job but `changes`, `notify` and `main_health`.
+    One rule for `wsc ci main-health` and for `jobs next|review|view`."""
+    explicit = list(cfg.get('required_checks') or [])
+    if explicit:
+        return [j for j in jobs if j.get('name') in explicit]
+    return [j for j in jobs if j.get('name') not in SKIP]
 
 
 # ------------------------------------------------------------------ inputs

@@ -9,6 +9,8 @@
 # checks on its head; `policy` needs the pull request and lives in policy.yml. A newer push cancels an older run on the same branch, never on main.
 # Pass markers (napoleon J54, J57): `proxy` and `harness-windows` run only when their inputs (wsc.toml [ci] inputs) changed and that input tree
 # has not passed already; a skipped job counts as passed for required checks and auto-merge, so a docs-only branch does not wait for them.
+# Main health (W22): a push to main has no diff base, so a set runs unless a pass marker proves its tree passed (a red set is rerun by the next
+# push), and the `main_health` job (from the notify block) opens, updates or closes one issue per red required job (`wsc ci main-health`).
 # Fail safe: each slow job's `if:` starts with `!cancelled()` and runs whenever `changes` did not succeed; a cache error, an empty hash or an
 # unreadable marker runs the job.
 name: gates

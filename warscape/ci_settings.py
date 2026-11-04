@@ -7,6 +7,7 @@ as `wsc ci notify` (warscape/ci.py `gh`). The settings are the owner's; this onl
   (`gates (ubuntu-latest)`), which cannot be known without a YAML parser: it is named for `[ci] required_checks` instead of guessed;
 - every required check must be produced by a workflow job (a renamed job's old check never reports, so every merge waits for it);
 - `allow_auto_merge` must be on (`gh pr merge --auto` has nothing to wait for otherwise);
+- issues must be enabled (`wsc ci main-health` opens one per red required job on main);
 - no rule may require approving reviews (one account cannot approve its own pull request: the pipeline's merges stall).
 Notes, not problems: a workflow job that is not required (napoleon's `viewer`), `strict` up-to-date checks, classic protection that
 cannot be read without admin rights. Exit 0 no problem, 1 problems, 2 the settings cannot be read (no `gh`, not logged in, no access).
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from . import ci
 
-SKIP = ('changes', 'notify')
+SKIP = ci.SKIP   # changes, notify, main_health (W22): not required checks
 
 
 def workflow_jobs(text):
@@ -70,7 +71,7 @@ def read_settings(repo, branch, run):
     st, rules, msg = _api(f'repos/{repo}/rules/branches/{branch}', run)
     if st != 200:
         raise LookupError(f'cannot read the rulesets of {branch}: {msg}')
-    s = {'auto_merge': bool(info.get('allow_auto_merge')), 'required': [], 'strict': False, 'approvals': 0, 'classic': 'none', 'where': {}}
+    s = {'auto_merge': bool(info.get('allow_auto_merge')), 'issues': info.get('has_issues'), 'required': [], 'strict': False, 'approvals': 0, 'classic': 'none', 'where': {}}
     for r in rules or []:
         p = r.get('parameters') or {}
         if r.get('type') == 'required_status_checks':
@@ -125,6 +126,8 @@ def findings(cfg, jobs, s, branch):
                                    'it never reports, so every merge waits for it (a renamed job?)'))
     if not s['auto_merge']:
         out.append(('problem', 'allow_auto_merge is false: `gh pr merge --auto` has nothing to wait for (Settings, General, "Allow auto-merge")'))
+    if s.get('issues') is False:
+        out.append(('problem', 'issues are disabled: `main_health` cannot open an issue for a red main (Settings, General, Features, "Issues")'))
     if s['approvals']:
         out.append(('problem', f'a rule requires {s["approvals"]} approving review(s): one account cannot approve its own pull request, '
                                'so the pipeline\'s merges stall'))
