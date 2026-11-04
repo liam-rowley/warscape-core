@@ -64,3 +64,13 @@ the builder's own apart from this note. Branch `job/W30`, one commit (2d39a1d). 
    are not re-checked unless they are edited.
 2. Should the match be stricter (full relative path only)? Recommended: no. The point is that the failure is named, and its file name
    is enough.
+
+## Fix round 1
+1. **Blocker, `RUN_CITE` captured a trailing period** (fixed, commit dccf46d, test repaired in the merge commit). The pattern now ends on a word character
+   (`runs/[\w.-]*\w`), so `runs/r1.`, `(runs/r1)`, `runs/r1,` and `runs/r1:` all resolve to `runs/r1`. New test `test_citation_followed_by_punctuation` cites the folder
+   with each ending, so a platform that strips trailing dots cannot hide it. `tests.test_jobs`: 82 passed.
+2. **VERSION collision** (fixed in the merge commit). `origin/main` moved to 0.24.0 (W12); I merged it and set `VERSION` to 0.25.0. Re-check against `main` at merge time if another job lands first.
+3. **Stray blank line before `class Check`** (fixed, dccf46d).
+4. **Later: not run red first.** Left as is; the new punctuation test would have failed on the old pattern on Linux, which is the case it now covers.
+
+`python3 wsc.py gates`: 14 ok, 1 warn (skipped POSIX/capstone tests), 0 failed. `policy`: only the missing merge verdict and the `done` row fail.
