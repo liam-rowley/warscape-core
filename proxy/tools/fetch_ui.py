@@ -12,8 +12,8 @@ fetcher. The Lua copy is the viewer's: float lua_Number (the engine's number typ
 (fetch_lua.py: the engine's dummynode, no GC step) is a different copy for the engine's own lua_State. The host links this one with
 its symbols made local (build.sh), so the two never meet.
 The pin file is validated against schemas/ui_pins.schema.json (warscape/schema.py) before anything is fetched, and every problem is
-named (W16, B52): a bad commit or sha256 shape is found here, not by the network. Needs git (RmlUi, FreeType) and network; downloads are cached under the output folder. Each download and git fetch is retried on a
-network flake (netfetch.retry, W24, B62; one stderr line per retry), never a sha mismatch or a failed patch. A checkout is trusted only
+named (W16, B52): a bad commit or sha256 shape is found here, not by the network. Needs git (RmlUi, FreeType) and network;
+downloads are cached under the output folder. Each download and git fetch is retried on a network flake (netfetch.retry, W24, B62; one stderr line per retry), never a sha mismatch or a failed patch. A checkout is trusted only
 when HEAD is the pinned commit and the working tree equals HEAD; anything else (a fetch that failed after `git init`, a cache restored in
 part, another pin) is removed and fetched again.
 """

@@ -96,6 +96,13 @@ jobs:
       - run: python core/wsc.py gates
 ```
 
+## Game proxy tests and the pin file schema (0.31.0, W16; [PROXY_HARNESS.md](PROXY_HARNESS.md))
+- **Move the checks the core dropped:** `test_console.cpp` and `test_camera.cpp` no longer check a game's console and camera numbers. Add them to the
+  game's own `proxy/tests/` (the text is in core `jobs/W16/report.md`, "Consumer test files"); `core/proxy/tools/build.sh tests` lists them as game tests.
+- **Pin file:** `python3 core/proxy/tools/fetch_ui.py --check` must pass (add `stb_image_write` if missing; extra pins such as `emsdk_image` stay).
+- **Rule 79:** `build_sh`, `build_id` and `fetch_ui` changed, so the build id changes with no `proxy/src` change: 20 passes on the new id.
+  Optional: exempt `proxy/tests/` from the game's rule-79 path (not a DLL input). `--docker` from the game repo works as before.
+
 ## Upgrading and releasing
 
 - **Core release:** a PR bumps `VERSION`; after Liam merges it, the tag `vX.Y.Z` is cut on that merge commit. Tags are never moved.
