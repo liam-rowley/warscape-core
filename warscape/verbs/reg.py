@@ -180,7 +180,7 @@ def run(args, ctx):
     if args.action in ('add', 'set'):
         reg = _pick(regs, [args.registry])[0]
         if args.action == 'add' and reg.schema.get('x-source') == 'tool-headers':
-            paths = tools.missing(ctx, reg) if args.missing else args.items
+            paths = [str(ctx.root / p) for p in tools.missing(ctx, reg)] if args.missing else args.items   # repo-relative, not cwd-relative
             if not paths:
                 print('nothing to add' if args.missing else 'give tool file paths (or --missing)')
                 return 0 if args.missing else 2
