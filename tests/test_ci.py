@@ -722,5 +722,43 @@ class CheckSettings(unittest.TestCase):
         self.assertIn('check-settings', out.stdout)
 
 
+class ProxyMap(unittest.TestCase):
+    """W35: the `proxy_map` block uploads the linker map, its sidecar and the build line as `proxy-map-<build id>`, the id being what
+    build.sh printed into the build step's outputs (never a second computation), with upload-artifact pinned to a full commit sha and
+    kept 90 days, and names it in the step summary. The core's own template uses it after the build step with that id."""
+
+    def test_the_block_names_the_id_from_the_build_line_and_pins_a_sha(self):
+        text = ci_render.render_text('    steps:\n{{wsc proxy_map step=dll}}\n', {**CFG, 'core': ''}, 'ci/x.yml.in')
+        self.assertRegex(text, r'uses: actions/upload-artifact@[0-9a-f]{40}')
+        self.assertIn('name: ${{ steps.dll.outputs.map_name }}', text)
+        self.assertIn('retention-days: 90', text)
+        self.assertIn('${{ steps.dll.outputs.map_files }}', text)
+        self.assertIn('if-no-files-found: error', text)
+        self.assertIn('GITHUB_STEP_SUMMARY', text)
+        self.assertNotIn('build_id.py', text)   # the name is never computed a second time
+
+    def test_the_core_template_uploads_after_the_build_step(self):
+        t = (ROOT / 'ci' / 'gates.yml.in').read_text()
+        self.assertIn('{{wsc proxy_map step=dll}}', t)
+        self.assertLess(t.index('id: dll'), t.index('{{wsc proxy_map step=dll}}'))
+        self.assertIn('proxy-map-', (ROOT / '.github' / 'workflows' / 'gates.yml').read_text().replace('${{ steps.dll.outputs.map_name }}', 'proxy-map-'))
+
+    def test_no_plain_yaml_value_holds_a_colon_space(self):
+        # W35: `run: echo "- a: b"` is a YAML error (": " inside a plain scalar) that GitHub reports only as "a workflow file issue"
+        for wf in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+            bad = []
+            for n, ln in enumerate(wf.read_text(encoding='utf-8').splitlines(), 1):
+                m = re.match(r'^\s*(-\s+)?[\w-]+:\s+(.*)$', ln)
+                if m and m.group(2) and m.group(2)[0] not in '|>"\'{[&*!#' and not m.group(2).startswith('${{'):
+                    if ': ' in re.sub(r'\$\{\{.*?\}\}', '', m.group(2).split(' #')[0]):
+                        bad.append(f'{wf.name}:{n}: {ln.strip()[:100]}')
+            self.assertEqual(bad, [], '\n'.join(bad))
+
+    def test_build_sh_writes_the_outputs_the_block_reads(self):
+        b = (ROOT / 'proxy' / 'tools' / 'build.sh').read_text()
+        self.assertIn('map_name=proxy-map-$BUILD_ID', b)
+        self.assertIn('map_files=', b)
+
+
 if __name__ == '__main__':
     unittest.main()

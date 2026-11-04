@@ -39,6 +39,10 @@ DEFAULTS = {
         'path_ignore': [],                 # doc_paths gate (W28): backticked tokens (exact, or globs) that look like a path but are not one of this repo's
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
+    # wsc agent-settings (W35, C35): the Claude Code command rules an agent may add to .claude/settings.json without asking, e.g.
+    # "Bash(git status:*)"; a rule is added only when one of these covers it (itself, or extended by whole words without a write flag).
+    # Empty (the default) = the verb is not configured. exact_only = true: only the patterns themselves.
+    'agent_settings': {'safe': [], 'exact_only': False},
     'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`; skip: "<gate>:<decision id>" (a [policy] decisions row; W28)
               'dirs': [],                  # repo-relative folders of game gate modules (warscape/gatemods.py)
               'run_refs_since': ''},       # YYYY-MM-DD: the `run_refs` gate skips run folders dated before it ('' = checks every run README; C23)
