@@ -119,6 +119,23 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 1
+      - name: W24 toolchain probe (temporary; stops the job on purpose)
+        run: |
+          sudo apt-get update -q >/dev/null
+          echo "== runner: preinstalled"; dpkg-query -W -f '${db:Status-Abbrev} ${Package}=${Version}\n' '*mingw-w64*' 2>&1 | sort || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends g++-mingw-w64-i686-win32 >/dev/null
+          echo "== runner: installed"; dpkg-query -W -f '${db:Status-Abbrev} ${Package}=${Version}\n' '*mingw-w64*' | sort
+          echo "== runner: madison"; for p in $(dpkg-query -W -f '${Package}\n' '*mingw-w64*' | sort); do apt-cache madison "$p"; done
+          echo "== runner: version lines"; i686-w64-mingw32-g++-win32 --version | head -1; i686-w64-mingw32-ld --version | head -1
+          readlink -f "$(command -v i686-w64-mingw32-g++-win32)"; dpkg -S "$(readlink -f "$(command -v i686-w64-mingw32-g++-win32)")"
+          echo "== runner: sources"; grep -rh '^Suites\|^URIs\|^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | sort -u
+          docker run --rm ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 bash -c '
+            apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends g++-mingw-w64-i686-win32 >/dev/null
+            echo "== image: installed"; dpkg-query -W -f "\${db:Status-Abbrev} \${Package}=\${Version}\n" "*mingw-w64*" | sort
+            echo "== image: madison"; for p in $(dpkg-query -W -f "\${Package}\n" "*mingw-w64*" | sort); do apt-cache madison "$p"; done
+            echo "== image: version lines"; i686-w64-mingw32-g++-win32 --version | head -1; i686-w64-mingw32-ld --version | head -1
+            echo "== image: sources"; grep -rh "^Suites\|^URIs\|^deb " /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | sort -u'
+          exit 1
       - run: sudo apt-get update -q && sudo apt-get install -y -q g++-mingw-w64-i686
       # fetch cache (W21): the raw downloads (tarballs, RmlUi and FreeType checkouts), keyed by the pins and [ci] salt, never the patched
       # trees; a warm cache makes the fetch offline. A cache fault never fails the job; the fetchers' sha checks judge every byte.
