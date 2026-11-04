@@ -169,7 +169,7 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
-- **Claim and autopilot (0.31.0, core W26, C28).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
+- **Claim and autopilot (0.34.0, core W26, C29).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
   (`brief/<id>`), so two sessions never get one job; a lost race moves on (at most 5 tries), any other push failure exits 1. `--peek` and `--offline`
   claim nothing. Order is (phase, number). An empty claim older than 24 h is listed with its release command (never released by a tool).
   `--auto` starts a review only on a green head, a fix once CI has finished, one `needs_pc` row at a time, and prunes dead worktrees each tick.
@@ -299,6 +299,13 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
   request is withdrawn (`.request.expired`), so a script that relied on it staying queued must pass a longer wait and run in the background.
 - A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
+
+## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
+- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
+  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
+- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
+- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
+- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
