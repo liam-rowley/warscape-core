@@ -1,5 +1,5 @@
 // Host test: the DXVK window-proc guard (wndprocpolicy.h) against a model of DXVK 3.1.1 d3d9_window.cpp and a foreign subclass.
-// Regression for J16 (proxy/runs/20261030_j16dumps): without the guard a fullscreen re-entry leaves opengl32!wglWndProc and DXVK's
+// Regression for J16 (the first consumer's run 20261030_j16dumps): without the guard a fullscreen re-entry leaves opengl32!wglWndProc and DXVK's
 // proc each calling the other (the WER dumps' 8-frame cycle, 1060 repeats); with it the chain stays acyclic and ends at the game.
 #include "testkit.h"
 #include "wndprocpolicy.h"
@@ -34,7 +34,7 @@ struct Window {
     }
 };
 
-// Another module subclasses on top (opengl32 for NVIDIA's ICD, or an overlay).
+// Another module subclasses on top (opengl32 for a driver's ICD, or an overlay).
 void Subclass(Window& w, uintptr_t proc) { w.prevOf[proc] = w.Set(proc); }
 
 // DXVK 3.1.1 ResetWindowProc / HookWindowProc, verbatim in logic; reads and writes go through the guard when `guard` is set.

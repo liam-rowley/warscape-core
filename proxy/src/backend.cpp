@@ -91,11 +91,12 @@ BOOL CALLBACK LoadOnce(PINIT_ONCE, PVOID, PVOID*) {
     const std::string want = rt.enabled ? rt.cfg.Str("proxy.backend") : std::string("system");
     if (!rt.enabled) LOGI("backend: proxy disabled or second instance -> system d3d9");
     if (want == "dxvk") { s_real = LoadDxvk(); if (!s_real) LOGW("backend: dxvk unavailable, falling back to the system d3d9"); }
+    else if (want != "system") LOGW("backend: unknown proxy.backend '%s' (system | dxvk), using system", want.c_str());
+    // on the loaded DLL, not the config string; before the first Direct3DCreate9 into it and before any thread the dev side starts there
     if (s_real && !strcmp(s_name, "dxvk")) {
         if (rt.cfg.Bool("proxy.dxvk_wndproc_fix")) LOGI("backend: wndproc guard on DXVK's imports: %d slots", DxvkWndProcGuard(s_real));
         else LOGW("backend: proxy.dxvk_wndproc_fix=0: an in-game fullscreen re-entry can loop DXVK's and a foreign window proc (J16)");
     }
-    else if (want != "system") LOGW("backend: unknown proxy.backend '%s' (system | dxvk), using system", want.c_str());
     if (!s_real) s_real = LoadSystem();
     if (!s_real) { LOGE("backend: no d3d9 could be loaded: the game cannot create a device"); return TRUE; }
     p_Create9 = Resolve<PFN_Create9>("Direct3DCreate9");

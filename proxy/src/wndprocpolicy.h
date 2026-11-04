@@ -1,6 +1,6 @@
 // wndprocpolicy.h - what DXVK sees when it reads a window's GWL_WNDPROC (pure logic: host-tested in tests/test_wndproc.cpp).
-// J16 (proxy/runs/20261030_j16dumps): DXVK 3.1.1 d3d9_window.cpp subclasses the game window on entering fullscreen. When another
-// module subclasses it afterwards (opengl32!wglWndProc, installed for NVIDIA's ICD), DXVK's ResetWindowProc finds a foreign proc on
+// J16 (the first consumer's run 20261030_j16dumps): DXVK 3.1.1 d3d9_window.cpp subclasses the game window on entering fullscreen. When another
+// module subclasses it afterwards (opengl32!wglWndProc, installed for a driver's ICD), DXVK's ResetWindowProc finds a foreign proc on
 // top, so it erases its record without unhooking; the next HookWindowProc then saves the foreign proc as its previous one while the
 // foreign proc still has DXVK's as its previous: the two call each other until the 1 MB main stack overflows (both WER dumps).
 // The guard: on a window DXVK hooked, a GWL_WNDPROC read made by DXVK reports DXVK's own proc, so DXVK restores the proc it saved
