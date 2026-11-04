@@ -64,7 +64,7 @@ class FindExe(unittest.TestCase):
         self.assertIn('exe strings (discovery/game/exe_strings.tsv.gz): 3 hits', out)
 
     def test_in_names_where_to_search(self):
-        rc, out = self.repo.wsc('find', 'gfx_hardware_shadows', '--in', 'tools')
+        rc, out = self.repo.wsc('find', 'CampaignUI', '--in', 'tools')
         self.assertNotIn('exe strings', out)
         self.assertEqual(rc, 1, out)
         rc, out = self.repo.wsc('find', 'shadow', '--in', 'exe_strings')
@@ -85,7 +85,7 @@ class FindExe(unittest.TestCase):
         self.assertEqual(rows, [{'registry': 'exe_strings', 'row': dict(zip(exe_strings.HEADER, ROWS[2]))}])
 
     def test_exit_1_when_neither_has_a_hit(self):
-        rc, out = self.repo.wsc('find', 'nothing_like_this')
+        rc, out = self.repo.wsc('find', 'zzq_xyzzy')
         self.assertEqual(rc, 1, out)
         self.assertIn('no matches', out)
         self.assertIn('exe strings (discovery/game/exe_strings.tsv.gz): 0 hits', out)
@@ -96,7 +96,7 @@ class NoTable(unittest.TestCase):
         repo = TempRepo({'shadows.py': TOOL})
         self.addCleanup(repo.close)
         repo.wsc('reg', 'add', 'tools', 'shadows.py')
-        rc, out = repo.wsc('find', 'gfx_hardware_shadows')
+        rc, out = repo.wsc('find', 'CampaignUI')
         self.assertEqual(rc, 1, out)
         self.assertNotIn('exe', out)
         rc, out = repo.wsc('find', 'shadow')
@@ -109,7 +109,7 @@ class NoTable(unittest.TestCase):
     def test_an_adapter_without_a_table_is_silent(self):
         repo = TempRepo({'discovery/game/games.json': '{}\n'}, toml=TOML)
         self.addCleanup(repo.close)
-        rc, out = repo.wsc('find', 'gfx_hardware_shadows')
+        rc, out = repo.wsc('find', 'CampaignUI')
         self.assertEqual(rc, 1, out)
         self.assertNotIn('exe', out)
 
