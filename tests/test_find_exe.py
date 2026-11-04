@@ -1,4 +1,5 @@
 """`wsc find` hands exe-shaped words to the game's exe string index (W15, backlog B43; decision 4 of the brief)."""
+import importlib
 import json
 import sys
 import unittest
@@ -6,8 +7,8 @@ import unittest
 from _util import CORE, MINIMAL_TOML, TempRepo
 
 sys.path.insert(0, str(CORE / 'discovery'))
-import exe_strings  # noqa: E402
-import tsvgz  # noqa: E402
+exe_strings = importlib.import_module('exe_strings')   # discovery/ modules, by name (not stdlib, so not an import statement)
+tsvgz = importlib.import_module('tsvgz')
 
 from warscape.verbs import find  # noqa: E402
 
