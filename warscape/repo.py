@@ -71,6 +71,7 @@ DEFAULTS = {
         'decisions': '',                   # repo-relative append-only decisions file ('' = not checked)
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
+        'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
         'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
                  'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
