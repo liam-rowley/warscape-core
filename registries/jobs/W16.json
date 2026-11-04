@@ -3,11 +3,12 @@
   "description": "Covers B15, B16, B52. Move the first consumer's console and camera checks out of proxy/tests/test_console.cpp and test_camera.cpp into an <adapter>/tests/ hook that build.sh tests also compiles (B15); build.sh --docker and build_id.py work with the null game inside the core (B16); the null game's viewer/pins.json names only core things and fetch_ui.py validates it against a schema (B52, from the W2 review).",
   "title": "The null game builds and tests on its own",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [
     "W2"
   ],
-  "brief": "jobs/W16/brief.md"
+  "brief": "jobs/W16/brief.md",
+  "report": "jobs/W16/report.md"
 }
