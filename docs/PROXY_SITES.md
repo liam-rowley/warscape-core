@@ -21,7 +21,7 @@ value bytes carry no relocation; no two sites overlap. A patch whose bytes alrea
 means nothing is written**, and every site is still logged. At write time every page a written site touches is made writable first,
 once, and keeps its own old protection; one failure restores the pages already changed and writes nothing (`WritePlanAtomic`). After the
 write each page is restored once with its recorded value and read back: `patch_engine: protections restored on <n> page(s): <rva>=<prot> ...`,
-and a `left changed` warning for a page that does not read back as recorded (a copy-on-write page reads back as its written form; W33, C30).
+and a `left changed` warning for a page that does not read back as recorded (a copy-on-write page reads back as its written form; W33, C28).
 A disabled site is still checked: it is part of the exe's identity.
 
 **An absolute address inside the anchor** (`c7 05 <abs32> <imm32>`, `mov dword [abs32], imm32`) needs nothing special: write the

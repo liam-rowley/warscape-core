@@ -2,11 +2,11 @@
 // autostart and warm reset. Game-agnostic; the game's specifics come from Adapter().dev and the Lua files in its lua folder.
 // Every key defaults off (config_keys rows, release value off). With no dev key on and no proxy.file_rules, DevInit returns before
 // doing anything and the proxy behaves exactly as the skeleton; nothing here runs in pass-through (plan.engineHooks / plan.d3dHooks false).
-// proxy.file_rules (W33, C30) is the release file rules: read here, it turns no dev feature on (no s_active, no timeline, no thread).
+// proxy.file_rules (W33, C28) is the release file rules: read here, it turns no dev feature on (no s_active, no timeline, no thread).
 //
 // Threads: the engine thread (Lua pumps, Present: one thread, empire-remastered fact), the state thread (state.json ~2/s, scene
 // updates), the control thread (one request at a time, FIFO by file time; it also runs the config autostart). Shared state is under
-// s_cs. No thread starts in DllMain (W33, C30): DevInit only decides which ones the keys need (DevThreadsFor) and they start, through
+// s_cs. No thread starts in DllMain (W33, C28): DevInit only decides which ones the keys need (DevThreadsFor) and they start, through
 // StartThread, at the first Direct3DCreate9 (DevOnDirect3DCreate).
 // Control protocol (proxy/README.md "Dev control channel"; the core's rules: docs/PROXY_CTL.md): <ctl_dir>\<id>.cmd -> <ctl_dir>\<id>.done
 // (JSON, written last). A request written before this process started is refused as stale, never run (W17).

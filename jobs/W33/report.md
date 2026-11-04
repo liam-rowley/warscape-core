@@ -1,6 +1,6 @@
 # W33 report: Patch engine page protections and dev threads off DllMain
 
-The patch writer now makes each code page writable once, keeps that page's own old protection, restores it once and reads it back. Before, a page with two sites (and a site's second page) was left RWX: audit C3, shown red at run time on a mock that behaves like VirtualProtect. No proxy thread starts in DllMain any more. `StartThread` refuses while `Rt().inDllMain` is set. The dev threads start at the first `Direct3DCreate9`, and only for the keys that need them (`DevThreadsFor`). A new release key, `proxy.file_rules`, lets a release ship its data rules with every `dev.*` key off (audit C4 and G2's root). Decision C30, version 0.33.0. Host tests, both DLL builds and the 10-launch wine smoke pass in the pinned image.
+The patch writer now makes each code page writable once, keeps that page's own old protection, restores it once and reads it back. Before, a page with two sites (and a site's second page) was left RWX: audit C3, shown red at run time on a mock that behaves like VirtualProtect. No proxy thread starts in DllMain any more. `StartThread` refuses while `Rt().inDllMain` is set. The dev threads start at the first `Direct3DCreate9`, and only for the keys that need them (`DevThreadsFor`). A new release key, `proxy.file_rules`, lets a release ship its data rules with every `dev.*` key off (audit C4 and G2's root). Decision C28, version 0.33.0. Host tests, both DLL builds and the 10-launch wine smoke pass in the pinned image.
 
 ## What was built
 ### Page protections (decisions 1-6)
@@ -51,10 +51,10 @@ The patch writer now makes each code page writable once, keeps that page's own o
 - The early-return lint now checks the new condition.
 
 ### Docs, decision, backlog (decisions 15-19)
-- `DECISIONS.md`: C30. The brief said C24, but C24 to C29 are taken (C28 and C29 on W15 and W25).
+- `DECISIONS.md`: C28. The brief said C24, but C24 to C27 are taken on `main`.
 - `PROXY_SITES.md`: the write-time sentences, rewritten.
 - `PROXY_CTL.md`: the ctl thread's start point, and why a request written before it is not stale.
-- `CONSUMING.md`: "DLL changes in 0.33.0 (W33, C30)", at 29.9 KB, under the cap.
+- `CONSUMING.md`: "DLL changes in 0.33.0 (W33, C28)", at 29.9 KB, under the cap.
 - `BACKLOG.md`: B66 removed (built since 0.5.0).
 
 ## Tests, red then green
@@ -76,13 +76,14 @@ All of these ran in the pinned ubuntu image (`toolchain.py image`) with the pinn
   - **Launch 9** sets only `[proxy] file_rules=rules.txt`. The log has `redirect: 1 rules from ... (proxy.file_rules)` and `(proxy.file_rules line 1)`, no `dev: timeline=` line, no `thread:` line, and `process detach`.
   - **The `open` mode** ran in launch 9. Wine routes the exe's own import table through the hook, and the host printed `smoke: open data\smoke_in.txt: redirected by proxy.file_rules`, so the redirect is proved end to end.
   - **Launch 10** (`[dev] skip_intro=1 file_rules=rules.txt`): `state=0 ctl=0`, no `thread:` line, and `process detach (FreeLibrary)`.
+- The no-gesture null game (`WSP_GAME_ROOT=proxy/tests/null_game_no_gesture`): `build.sh dll` and `build.sh smoke` pass, `passed (10 launches under wine, 2 dumps)`.
 - CI's `proxy` job on the pushed branch: see the pull request checks.
 
 ## Version
-0.33.0, a minor bump. At push time, origin/main was at 0.30.0, W15 had 0.31.0 with C28, and W25 had 0.32.0 with C29. If one of them merges after this job, or W16 takes a number, follow the brief: merge `main` and take the next number. Tags are Liam's.
+0.33.0, a minor bump. When this was pushed, `origin/main` was at 0.30.1 (W38, merged into this branch). The open branches had already taken versions: W15 0.31.0 with C28, and W25 0.32.0 with C29. `wsc policy` wants the next decision number on `main`, so this branch uses C28, the same number W15 uses. Whichever of them merges second merges `main` and takes the next number, for the decision row and for `VERSION`. Never rebase. Tags are Liam's.
 
 ## Deviations from the brief and why
-- **Decision number C30, not C24.** C24 to C27 are on main, and C28 and C29 are on W15 and W25.
+- **Decision number C28, not C24.** C24 to C27 are on `main`. `wsc policy` asks for the next number on `main`, so W15's C28 collides with this one, and the second to merge renumbers.
 - **`StartThread` creates the thread suspended**, logs, then resumes. The brief's sequence was `CreateThread`, `CloseHandle`, then `LOGI`. That order lets the new ctl thread log `ctl: watching` before the creator logs `thread: dev.ctl started`, which would make step 6's line-order check race. `ResumeThread` is the only added call. It never runs in DllMain, because the starter refuses there.
 - **`DevSideInit`**: DevInit's dev-only body moved into a static function in the same file, so that the release key shares DevInit's gate without a second copy of it. The gate lint still finds the plan gate before `s_active = true;`.
 - **`FilesInit` with only the release key** runs only when the rule file gave rules. A missing or empty file installs no hooks and logs the warning.

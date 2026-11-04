@@ -34,7 +34,7 @@ The options weighed against it (subtree, a vendored copy, `pip install`) and the
 - **PC:** nothing; `--docker` installs the pins. Off the pin, `WSP_TOOLCHAIN=any` gives a `-dirty` DLL; an untracked source refuses the build.
 - `proxy.log`'s second line is `self_hash: ...`; `ctl.py` `build_info()` returns `dll_sha256`.
 
-## DLL changes in 0.33.0 (W33, C30)
+## DLL changes in 0.33.0 (W33, C28)
 - **New key `proxy.file_rules`** (release file rules; `filerules.h` grammar; applied after the dev rules; no dev feature, no thread). Add the
   row to `registries/config_keys` (text: `proxy/tests/null_game/registries/config_keys.jsonl`), then `gen_tables.py`; without it the host
   tests fail and name the key. A release component that ships a rule file sets it through its `ini_set`; `release_value` stays "".

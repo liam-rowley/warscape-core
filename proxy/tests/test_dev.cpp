@@ -273,7 +273,7 @@ int main(int argc, char** argv) {
         j = PeekResultJson("s", 0x00401000, p, 4, nullptr);
         CHECK(j.find("\"failed_hop\": 2") != std::string::npos && j.find("hex") == std::string::npos && j.find("\"ptr\": \"0x00000000\"") != std::string::npos);
     }
-    {   // W33 (C30): DevThreadsFor on all 16 combinations: state = state_json or timeline, ctl = ctl or autostart
+    {   // W33 (C28): DevThreadsFor on all 16 combinations: state = state_json or timeline, ctl = ctl or autostart
         for (int m = 0; m < 16; ++m) {
             const bool sj = m & 1, tl = m & 2, ctl = m & 4, au = m & 8;
             const DevThreads t = DevThreadsFor(sj, tl, ctl, au);
@@ -290,7 +290,7 @@ int main(int argc, char** argv) {
         CHECK(gate != std::string::npos && act != std::string::npos && gate < act);
         // no dev key and no proxy.file_rules: return before anything (the skeleton's behaviour)
         CHECK(dv.find("if (!k.Any() && releaseRules.empty()) return;") < gate);
-        {   // W33 (C30): no proxy thread starts in DllMain. DllMain raises inDllMain around wsp::Init (and the detach work);
+        {   // W33 (C28): no proxy thread starts in DllMain. DllMain raises inDllMain around wsp::Init (and the detach work);
             // StartThread refuses while it is up; the dev threads start at the first Direct3DCreate9, after the installs
             const size_t np = std::string::npos;
             const std::string dmr = tk::ReadFile("core/dllmain.cpp");
