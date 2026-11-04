@@ -273,6 +273,14 @@ int main(int argc, char** argv) {
         j = PeekResultJson("s", 0x00401000, p, 4, nullptr);
         CHECK(j.find("\"failed_hop\": 2") != std::string::npos && j.find("hex") == std::string::npos && j.find("\"ptr\": \"0x00000000\"") != std::string::npos);
     }
+    {   // W33 (C24): DevThreadsFor on all 16 combinations: state = state_json or timeline, ctl = ctl or autostart
+        for (int m = 0; m < 16; ++m) {
+            const bool sj = m & 1, tl = m & 2, ctl = m & 4, au = m & 8;
+            const DevThreads t = DevThreadsFor(sj, tl, ctl, au);
+            CHECK_EQ(t.state, sj || tl); CHECK_EQ(t.ctl, ctl || au);
+        }
+        CHECK(!DevThreadsFor(false, false, false, false).state && !DevThreadsFor(false, false, false, false).ctl);   // hooks-only keys: no thread
+    }
     {   // source lints
         // the dev side starts after the plan, and only runs when the plan allows hooks (pass-through: nothing)
         const std::string dm = Strip(tk::ReadFile("core/dllmain.cpp"));
@@ -280,7 +288,52 @@ int main(int argc, char** argv) {
         const std::string dv = Strip(tk::ReadFile("core/dev.cpp"));
         const size_t gate = dv.find("if (!rt.plan.engineHooks || !rt.plan.d3dHooks)"), act = dv.find("s_active = true;");
         CHECK(gate != std::string::npos && act != std::string::npos && gate < act);
-        CHECK(dv.find("if (!k.Any()) return;") < gate);   // no dev key: return before anything (the skeleton's behaviour)
+        // no dev key and no proxy.file_rules: return before anything (the skeleton's behaviour)
+        CHECK(dv.find("if (!k.Any() && releaseRules.empty()) return;") < gate);
+        {   // W33 (C24): no proxy thread starts in DllMain. DllMain raises inDllMain around wsp::Init (and the detach work);
+            // StartThread refuses while it is up; the dev threads start at the first Direct3DCreate9, after the installs
+            const size_t np = std::string::npos;
+            const std::string dmr = tk::ReadFile("core/dllmain.cpp");
+            const size_t dmain = dm.find("BOOL WINAPI DllMain("), on = dm.find("Rt().inDllMain = true;", dmain), init = dm.find("wsp::Init(inst);", dmain),
+                         off = dm.find("Rt().inDllMain = false;", dmain);
+            CHECK(dmain != np && on != np && init != np && off != np && on < init && init < off);
+            const size_t st = dm.find("bool StartThread("), flag = dm.find("Rt().inDllMain", st), ct = dm.find("CreateThread(", st);
+            CHECK(st != np && flag != np && ct != np && flag < ct);
+            // CreateThread( appears in the sources only in StartThread and in headless.cpp's two starts (off DllMain, through Ensure)
+            const std::string all[] = { "backend.cpp", "camera.cpp", "capture.cpp", "console.cpp", "crash.cpp", "dev.cpp", "dllmain.cpp", "files.cpp",
+                                        "gesture.cpp", "guard_driver.cpp", "headless.cpp", "hooks.cpp", "log.cpp", "luabridge.cpp", "orders.cpp",
+                                        "patch_driver.cpp", "ui_host.cpp", "ui_lua.cpp", "ui_render_d3d9.cpp", "runtime.h", "dev.h", "devcore.h" };
+            for (const std::string& f : all) {
+                const std::string src = Strip(tk::ReadFile("core/" + f));
+                CHECK(!src.empty() || f == "devcore.h");
+                int n = 0; for (size_t k = src.find("CreateThread("); k != np; k = src.find("CreateThread(", k + 1)) ++n;
+                const int allowed = f == "dllmain.cpp" ? 1 : f == "headless.cpp" ? 2 : 0;
+                if (n != allowed) { printf("    %s: %d CreateThread( calls (allowed %d): start threads through StartThread (it refuses inside DllMain)\n", f.c_str(), n, allowed); CHECK(false); }
+            }
+            (void)dmr;
+            // DevInit (and the dev side it calls) starts no thread; DevOnDirect3DCreate starts them after OrdersInstall();
+            const size_t di = dv.find("void DevInit() {"), dod = dv.find("void DevOnDirect3DCreate(");
+            CHECK(di != np && dod != np && di < dod);
+            if (di != np && dod != np && di < dod) {
+                const std::string body = dv.substr(di, dod - di);
+                CHECK(body.find("StartThread(") == np && body.find("CreateThread(") == np);
+            }
+            const size_t odEnd = dv.find("\n}\n", dod);
+            const std::string od = dod == np ? std::string() : dv.substr(dod, odEnd - dod);
+            const size_t files = od.find("FilesOnDirect3DCreate();"), early = od.find("if (!s_active) return;"), orders = od.find("OrdersInstall();"),
+                         once = od.find("InterlockedCompareExchange("), stS = od.find("StartThread(StateThread"), stC = od.find("StartThread(CtlThread");
+            CHECK(files != np && early != np && files < early);   // the deferred IAT pass runs for proxy.file_rules with the dev side off
+            CHECK(orders != np && once != np && stS != np && stC != np && orders < once && once < stS && once < stC);
+            // Any() is the dev keys only: it does not see the release key
+            const std::string dh = Strip(tk::ReadFile("core/dev.h"));
+            const size_t any = dh.find("bool Any() const"), anyEnd = dh.find("}", any);
+            CHECK(any != np && anyEnd != np);
+            if (any != np && anyEnd != np) {
+                const std::string a = dh.substr(any, anyEnd - any);
+                CHECK(a.find("release") == np && a.find("proxy") == np);
+            }
+            CHECK(tk::ReadFile("core/dev.cpp").find("cfg.Str(\"proxy.file_rules\")") != np);
+        }
         const std::string lb = Strip(tk::ReadFile("core/luabridge.cpp"));
         CHECK(lb.find("Rt().plan.engineReads") != std::string::npos);
         CHECK(lb.find("luaL_error") == std::string::npos && lb.find("luaL_check") == std::string::npos);   // never raise from C

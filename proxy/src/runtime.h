@@ -26,8 +26,13 @@ struct Runtime {
     bool         sitesAccepted = false;   // the patch engine ran and refused no site (patch_driver.cpp)
     std::string  sitesWhy;                // why not, for the features that need a site
     std::vector<uintptr_t> siteAddr;      // per adapter site: its checked address (rva + anchor, rebased), 0 when not checked ok
+    bool         inDllMain = false;       // DllMain's PROCESS_ATTACH / PROCESS_DETACH work is running (StartThread refuses, W33)
 };
 Runtime& Rt();
+// dllmain.cpp: the one way a proxy thread starts (W33, C24). It refuses inside DllMain (one LOGE naming the thread): a thread started
+// under the loader lock runs beside a game that may still be single-threaded on an unserialised heap. Otherwise CreateThread,
+// CloseHandle and "thread: <name> started (tid N)". headless.cpp's two starts run off DllMain through its Ensure (the source lint).
+bool StartThread(LPTHREAD_START_ROUTINE fn, const char* name);
 
 // log.cpp
 void LogOpen(const std::wstring& dir, const std::wstring& baseName, LogLevel minLevel);   // rotates <base>.log -> <base>.prev.log
@@ -80,8 +85,8 @@ bool ReadFileBytes(const std::wstring& path, std::string& out, uint64_t offset =
 bool WriteFileAtomic(const std::wstring& path, const std::string& data);   // temp name + MoveFileEx
 
 // dev.cpp: the dev side (timeline, file rules, state file, control channel, autostart, reset); nothing runs unless a dev key is on
-void DevInit();                          // DllMain, after the plan
-void DevOnDirect3DCreate(void* d3d);     // the Direct3DCreate9 export, after the backend returned an object
+void DevInit();                          // DllMain, after the plan (also reads proxy.file_rules, W33); starts no thread
+void DevOnDirect3DCreate(void* d3d);     // the Direct3DCreate9 export, after the backend returned an object; the dev threads start here
 void DevOnDetach();
 
 // headless.cpp: headless runs on the virtual display (J13); nothing runs unless headless.enabled
