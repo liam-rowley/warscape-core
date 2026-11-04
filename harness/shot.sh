@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # purpose: screenshot of the headless virtual display (the rect headless_status.json names) through a read-only watcher job, saved as a JPEG; prints its path
 # usage: harness/shot.sh <owner> <out.jpg>   (out path as a Windows path or a Git Bash /c/... path; the game must be running headless)
-# when: before/after evidence in PC sittings (J15 console checks, J4 scenarios); no game lock needed, nothing is changed
+# when: before/after evidence in PC sittings (J15 console checks, J4 scenarios); needs the game lock (job.sh lock first; W10, C26: the lock is the session's), though it changes nothing
 # not-a-verb: a PC sitting helper over job.sh, run in Git Bash on the PC
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -9,6 +9,7 @@ owner="${1:?owner}"; out="${2:?out.jpg}"
 win="$(cygpath -aw "$out" 2>/dev/null || echo "$out")"
 # the status file the adapter names (headless.status_file under game_dir; J15 review 9, J12 fix 1c): job.sh resolves the adapter
 adapter="$("$BASH" "$HERE/job.sh" adapter)" || exit 64
+"$BASH" "$HERE/job.sh" --adapter "$adapter" holds "$owner" || exit $?   # W10: the caller holds the game lock (exit 2 names the command to take it)
 status="$(python3 -c 'import json,os,sys; a=json.load(open(sys.argv[1],encoding="utf-8")); print(os.path.join(os.path.expandvars(a["game_dir"]), a["headless"]["status_file"]))' "$adapter")" || { echo "shot.sh: the adapter $adapter names no game_dir or headless.status_file" >&2; exit 64; }
 tmp="$(mktemp)"
 cat > "$tmp" <<PS
@@ -40,5 +41,5 @@ if (\$s.state -ne 'on_virtual') { Write-Output "SHOT FAILED: headless state is \
 \$out.Save('$win', \$enc, \$ep)
 Write-Output "shot: $win \$ow x \$oh (from \$w x \$h at \$(\$r[0]),\$(\$r[1]))"
 PS
-"$BASH" "$HERE/job.sh" "$owner" "$tmp" 90; rc=$?
+"$BASH" "$HERE/job.sh" --adapter "$adapter" "$owner" "$tmp" 90; rc=$?
 rm -f "$tmp"; exit $rc

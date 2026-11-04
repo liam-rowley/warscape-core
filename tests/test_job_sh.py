@@ -98,16 +98,16 @@ class JobSh(unittest.TestCase):
 
     def test_scratch_creates_the_owner_folder_and_refuses_bad_owners(self):
         # J18 (J5 ledger row 31): <state>/_scratch/<owner>/, owner like the job ids J2 to J6 used (j2, j3s2, j6)
-        for owner in ('j18', 'j3s2', 'a', 'x_y-z', 'a' * 32):
+        for owner in ('j18', 'j3s2', 'a', 'x_y-z', 'a' * 40):
             r = run(['--adapter', str(self.adapter), 'scratch', owner], self.env)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(r.stdout.strip(), bash_path(self.state / '_scratch' / owner))
             self.assertTrue((self.state / '_scratch' / owner).is_dir())
-        for owner in ('', 'J18', '-x', '_x', 'a b', '../x', 'a/b', 'a' * 33, 'x.y'):
+        for owner in ('', 'J18', '-x', '_x', 'a b', '../x', 'a/b', 'a' * 41, 'x.y', 'Upper'):
             r = run(['--adapter', str(self.adapter), 'scratch', owner], self.env)
             self.assertEqual(r.returncode, 64, owner)
             self.assertIn('must match', r.stderr)
-        self.assertEqual(sorted(p.name for p in (self.state / '_scratch').iterdir()), sorted(['j18', 'j3s2', 'a', 'x_y-z', 'a' * 32]))
+        self.assertEqual(sorted(p.name for p in (self.state / '_scratch').iterdir()), sorted(['j18', 'j3s2', 'a', 'x_y-z', 'a' * 40]))
 
     def test_root_comes_from_the_adapter_not_a_default(self):
         r = run(['--adapter', str(self.adapter), 'root'], self.env)
@@ -145,15 +145,29 @@ class JobSh(unittest.TestCase):
         self.w.result = {'status': 'timeout', 'exit': -1, 'out': ''}
         self.assertEqual(run(['--adapter', str(self.adapter), 'me', '-', '20'], self.env, stdin='x\n').returncode, 124)
 
-    def test_no_answer_is_124_and_the_request_stays_queued(self):
+    def test_no_answer_is_124_and_the_request_is_withdrawn(self):
+        # W10 (H11): a timed-out request is renamed to .request.expired exactly as the ctl path does, so it cannot fire later
         t0 = time.time()
         r = run(['--adapter', str(self.adapter), 'me', '-', '2'], self.env, stdin='noop\n')
         self.assertEqual(r.returncode, 124)
         self.assertLess(time.time() - t0, 10)
-        self.assertEqual(len(list((self.root / 'jobs').glob('*.request'))), 1)
+        self.assertIn('withdrawn', r.stderr)
+        self.assertEqual(len(list((self.root / 'jobs').glob('*.request'))), 0)
+        self.assertEqual(len(list((self.root / 'jobs').glob('*.request.expired'))), 1)
         self.assertEqual(len(list((self.root / 'jobs').glob('*.tmp'))), 0)      # submitted atomically: no half-written .tmp left behind
 
+    def take(self, owner='me', session='s1', purpose='p'):
+        r = run(['--adapter', str(self.adapter), 'lock', owner, session, purpose], self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def jobsh(self, *args, env=None):
+        return run(['--adapter', str(self.adapter), *args], dict(self.env, **(env or {})))
+
+    def stale(self, secs=1300):
+        os.utime(self.root / 'game.lock', (time.time() - secs, time.time() - secs))
+
     def test_ctl_ok_and_exit_codes(self):
+        self.take()
         ctl = self.state / 'ctl'
         answers = iter(['ok', 'failed', 'timeout', 'refused'])
 
@@ -172,6 +186,7 @@ class JobSh(unittest.TestCase):
     def test_ctl_dir_comes_from_the_mod_ini_not_the_watcher_root(self):
         # J3 review 5: a changed dev.ctl_dir used to time out every call; now the requests go where the proxy reads them
         elsewhere = Path(self.tmp.name) / 'ctl_elsewhere'
+        self.take()
         (self.game / 'mod.ini').write_text(f'[dev]\nctl_dir={elsewhere}\n')
         r = run(['--adapter', str(self.adapter), 'ctl', 'me', 'ping', '1'], self.env)
         self.assertEqual(r.returncode, 124)
@@ -185,6 +200,7 @@ class JobSh(unittest.TestCase):
         default = Path(self.tmp.name) / 'default_ctl'
         (repo / 'registries').mkdir(parents=True)
         (repo / 'registries' / 'config_keys.jsonl').write_text(json.dumps({'id': 'dev.ctl_dir', 'default': str(default)}) + '\n')
+        self.take()
         (self.game / 'mod.ini').unlink()
         r = run(['--adapter', str(self.adapter), 'ctl', 'me', 'ping', '1'], dict(self.env, WSP_GAME_ROOT=str(repo)))
         self.assertIn(bash_path(default), r.stderr)
@@ -193,6 +209,7 @@ class JobSh(unittest.TestCase):
 
     def test_ctl_no_answer_withdraws_the_request(self):
         # a request nobody answered must not stay as .cmd: the proxy would run it on its next launch (a stale exit or reset)
+        self.take()
         r = run(['--adapter', str(self.adapter), 'ctl', 'me', 'exit', '1'], self.env)
         self.assertEqual(r.returncode, 124)
         self.assertIn('withdrawn', r.stderr)
@@ -220,7 +237,7 @@ class JobSh(unittest.TestCase):
         os.utime(self.root / 'game.lock', (time.time() - 1300, time.time() - 1300))
         self.assertEqual(run(a + ['lock', 'other', 's', 'p'], self.env).returncode, 0)         # stale: may be taken over
         self.assertEqual(run(a + ['unlock', 'me'], self.env).returncode, 2)                      # not the owner
-        self.assertEqual(run(a + ['touch'], self.env).returncode, 0)
+        self.assertEqual(run(a + ['touch', 'other'], self.env).returncode, 0)
         self.assertEqual(run(a + ['unlock', 'other'], self.env).returncode, 0)
         self.assertFalse((self.root / 'game.lock').exists())
         self.assertEqual(len(list((self.root / '_to_delete').glob('game.lock.released_other_*'))), 1)
@@ -245,8 +262,148 @@ class JobSh(unittest.TestCase):
         self.assertEqual(run(a + ['lock', 'new', 's', 'p'], self.env).returncode, 0)
         self.assertIn('owner=new ', (self.root / 'game.lock').read_text())
         self.assertEqual(len(list((self.root / '_to_delete').glob('game.lock.stale_old_*'))), 1)
-        self.assertEqual(run(a + ['lock', 'new', 's2', 'refresh'], self.env).returncode, 0)   # its own lock: rewritten in place
-        self.assertIn('session=s2 ', (self.root / 'game.lock').read_text())
+        self.assertEqual(run(a + ['lock', 'new', 's', 'refresh'], self.env).returncode, 0)   # its own lock (same owner AND session): rewritten in place
+        self.assertIn('purpose=refresh ', (self.root / 'game.lock').read_text())
+
+    # ---- W10: the lock owner is the session (H2) ----------------------------------------------------------------------------------
+    def test_one_owner_rule_for_every_command(self):
+        for args in (['lock', 'Me', 's', 'p'], ['lock', '-x', 's', 'p'], ['touch', 'Me'], ['unlock', 'Me'], ['holds', 'Me'], ['ctl', 'Me', 'ping', '1'],
+                     ['Me', '-', '1'], ['lock', 'a' * 41, 's', 'p']):
+            r = self.jobsh(*args)
+            self.assertEqual(r.returncode, 64, args)
+            self.assertIn('lower', r.stderr)
+        self.take('a' * 40, 's')   # 40 is the limit: a session id is a 36-character UUID
+
+    def test_same_owner_other_session_is_refused_until_stale(self):
+        self.take('claude-acceptance', 'sess-a')
+        r = self.jobsh('lock', 'claude-acceptance', 'sess-b', 'p')
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('sess-a', r.stderr)
+        self.assertIn('session=sess-a ', (self.root / 'game.lock').read_text())
+        self.stale()
+        self.assertEqual(self.jobsh('lock', 'claude-acceptance', 'sess-b', 'p').returncode, 0)
+
+    def test_lock_dash_means_owner_is_the_session(self):
+        self.assertEqual(self.jobsh('lock', '-', 'abc-123', 'p').returncode, 0)
+        self.assertIn('owner=abc-123 session=abc-123 ', (self.root / 'game.lock').read_text())
+
+    def test_lock_wait_takes_a_lock_released_meanwhile_and_times_out_with_124(self):
+        self.take('a', 's')
+        threading.Timer(2.0, lambda: (self.root / 'game.lock').unlink()).start()
+        t0 = time.time()
+        r = self.jobsh('lock', '--wait', '30', 'b', 's2', 'p')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertLess(time.time() - t0, 20)
+        self.assertIn('owner=b ', (self.root / 'game.lock').read_text())
+        t0 = time.time()
+        r = self.jobsh('lock', '--wait', '3', 'c', 's3', 'p')
+        self.assertEqual(r.returncode, 124)
+        self.assertIn("held by 'b'", r.stderr)
+        self.assertGreaterEqual(time.time() - t0, 2.5)
+        self.assertEqual(self.jobsh('lock', 'c', 's3', 'p').returncode, 2)   # no wait: a plain refusal stays 2
+
+    def test_holds(self):
+        self.assertEqual(self.jobsh('holds', 'me').returncode, 2)
+        self.take('me', 'sess-1')
+        self.assertEqual(self.jobsh('holds', 'me').returncode, 0)
+        self.assertEqual(self.jobsh('holds', 'sess-1').returncode, 0)   # the session id holds it too
+        r = self.jobsh('holds', 'other')
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("'me'", r.stderr)
+        self.assertIn('job.sh lock', r.stderr)
+        self.stale()
+        r = self.jobsh('holds', 'me')
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('stale', r.stderr)
+
+    def test_ctl_needs_the_lock(self):
+        r = self.jobsh('ctl', 'me', 'ping', '1')
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('job.sh lock', r.stderr)
+        self.assertFalse((self.state / 'ctl').exists())   # nothing was written
+        self.take('other', 's')
+        self.assertEqual(self.jobsh('ctl', 'me', 'ping', '1').returncode, 2)
+        self.assertFalse((self.state / 'ctl').exists())
+        self.stale()
+        self.take('me', 'sess-9')
+        self.assertEqual(self.jobsh('ctl', 'me', 'ping', '1').returncode, 124)      # accepted (nobody answers)
+        self.assertEqual(self.jobsh('ctl', 'sess-9', 'ping', '1').returncode, 124)  # by session id too
+
+    def test_touch_and_unlock_are_for_the_holder_only(self):
+        self.assertEqual(self.jobsh('touch', 'me').returncode, 2)   # no lock
+        self.take('me', 'sess-1')
+        r = self.jobsh('touch')
+        self.assertEqual(r.returncode, 64)
+        self.assertIn('touch <owner>', r.stderr)
+        self.stale()
+        self.assertEqual(self.jobsh('touch', 'other').returncode, 2)
+        self.assertGreater(time.time() - (self.root / 'game.lock').stat().st_mtime, 1000)   # not refreshed
+        self.assertEqual(self.jobsh('touch', 'me').returncode, 0)
+        self.assertLess(time.time() - (self.root / 'game.lock').stat().st_mtime, 100)
+        self.assertEqual(self.jobsh('unlock', 'other').returncode, 2)
+        self.assertEqual(self.jobsh('unlock', 'sess-1').returncode, 0)   # by session
+        self.assertFalse((self.root / 'game.lock').exists())
+
+    def test_the_stale_age_is_the_watchers(self):
+        self.take('a', 's')
+        self.stale(100)
+        self.assertEqual(self.jobsh('lock', 'b', 's', 'p').returncode, 2)   # no ini: 20 min
+        (self.root / 'watcher.ini').write_text('# x\nhang_s = 120\nlock_stale_min = 1\n')
+        r = self.jobsh('lock', 'b', 's', 'p')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('it after 1 min', r.stdout)
+        (self.root / 'watcher.ini').write_text('lock_stale_min=banana\n')
+        self.stale(100)
+        self.assertEqual(self.jobsh('lock', 'c', 's', 'p').returncode, 2)   # unparsable: 20 min
+
+    # ---- B20: the takeover of a stale lock re-checks what it moved ---------------------------------------------------------------
+    def hooked(self, hook, owner='new'):
+        self.take('old', 's')
+        self.stale()
+        r = self.jobsh('lock', owner, 's', 'p', env={'JOB_SH_TEST': '1', 'JOB_SH_TEST_HOOK': hook})
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn('same moment', r.stderr)
+        td = self.root / '_to_delete'
+        self.assertEqual(list(td.glob('game.lock*')) if td.exists() else [], [])
+        return (self.root / 'game.lock').read_text()
+
+    def test_b20_a_lock_replaced_by_another_taker_is_put_back(self):
+        hook = 'echo "owner=thief session=t purpose=x started=2026-01-01T00:00:00Z" > "$ROOT/game.lock.n" && mv -f "$ROOT/game.lock.n" "$ROOT/game.lock"'
+        self.assertIn('owner=thief ', self.hooked(hook))
+
+    def test_b20_a_lock_only_touched_is_put_back(self):
+        self.assertIn('owner=old ', self.hooked('touch "$ROOT/game.lock"'))
+        self.assertLess(time.time() - (self.root / 'game.lock').stat().st_mtime, 100)
+
+    def test_b20_the_seam_is_ignored_without_job_sh_test(self):
+        self.take('old', 's')
+        self.stale()
+        r = self.jobsh('lock', 'new', 's', 'p', env={'JOB_SH_TEST_HOOK': 'touch "$ROOT/game.lock"'})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_b20_four_takers_over_a_stale_lock_exactly_one_wins(self):
+        a = ['--adapter', str(self.adapter)]
+        for rnd in range(2):
+            self.take('old', 's')
+            self.stale()
+            procs = [subprocess.Popen([BASH, str(JOB), *a, 'lock', f'r{rnd}t{i}', 's', 'p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True, env=job_env()) for i in range(4)]
+            outs = [p.communicate(timeout=60) for p in procs]; codes = [p.returncode for p in procs]
+            self.assertEqual(sorted(codes), [0, 2, 2, 2], (codes, outs))
+            self.assertIn(f'owner=r{rnd}t{codes.index(0)} ', (self.root / 'game.lock').read_text())
+            self.assertEqual(self.jobsh('unlock', f'r{rnd}t{codes.index(0)}').returncode, 0)
+
+    # ---- H11: waits ------------------------------------------------------------------------------------------------------------
+    def test_the_default_wait_is_100_s_in_the_usage_text(self):
+        r = self.jobsh()
+        self.assertEqual(r.returncode, 64)
+        self.assertIn('default 100', r.stdout)
+
+    def test_a_request_the_watcher_took_but_never_answered_says_the_result_will_still_land(self):
+        self.watcher(None)   # takes (unlinks) every request, answers none
+        r = run(['--adapter', str(self.adapter), 'me', '-', '2'], self.env, stdin='noop\n')
+        self.assertEqual(r.returncode, 124)
+        self.assertIn('still land', r.stderr)
 
     def test_status_reads_heartbeat(self):
         a = ['--adapter', str(self.adapter)]

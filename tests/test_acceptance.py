@@ -165,5 +165,76 @@ class OnePass(unittest.TestCase):
         self.assertFalse(ok); self.assertEqual(steps['settings_identical']['changed'], ['prefs'])
 
 
+class Identity(unittest.TestCase):
+    """W10 (H2): the lock owner is the session. run/measure default --owner and --session to the session id and refuse without one, naming
+    the fix; an explicit --owner still works; PcEnv passes the owner to `touch` (a bare touch is refused by job.sh)."""
+
+    def run_main(self, argv, env):
+        import os
+        import contextlib
+        import io
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        def pcenv(owner, session, *a, **k):
+            seen.append((owner, session))
+            raise Stop
+
+        d = tempfile.mkdtemp()
+        b = Path(d) / 'b.json'
+        b.write_text(json.dumps(baseline()))
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, dict(env, WSP_GAME_ROOT=str(NULL_GAME))), mock.patch.object(acc, 'ROOT', NULL_GAME), mock.patch.object(acc, 'run_problems', return_value=[]), mock.patch.object(acc, 'PcEnv', pcenv), \
+                contextlib.redirect_stderr(err):
+            for k in ('WSC_SESSION_ID', 'CLAUDE_CODE_SESSION_ID'):
+                if k not in env:
+                    os.environ.pop(k, None)
+            try:
+                rc = acc.main(['run', '--run', 't', '--branch', 'job/J9', '--baseline', str(b), '--ledger', str(Path(d) / 'l.jsonl'), *argv])
+            except Stop:
+                rc = 'started'
+        return rc, seen, err.getvalue()
+
+    def test_no_session_refuses_with_exit_2_and_names_the_fix(self):
+        rc, seen, err = self.run_main([], {})
+        self.assertEqual(rc, 2)
+        self.assertEqual(seen, [])
+        for word in ('--session', 'WSC_SESSION_ID', '--owner'):
+            self.assertIn(word, err)
+
+    def test_the_owner_and_session_default_to_the_session_id(self):
+        self.assertEqual(self.run_main([], {'WSC_SESSION_ID': 'sess-a'})[:2], ('started', [('sess-a', 'sess-a')]))
+        self.assertEqual(self.run_main(['--session', 'sess-b'], {})[:2], ('started', [('sess-b', 'sess-b')]))
+
+    def test_an_explicit_owner_still_works(self):
+        self.assertEqual(self.run_main(['--owner', 'claude-acceptance'], {'WSC_SESSION_ID': 'sess-a'})[:2], ('started', [('claude-acceptance', 'sess-a')]))
+        self.assertEqual(self.run_main(['--owner', 'claude-acceptance'], {})[:2], ('started', [('claude-acceptance', 'claude-acceptance')]))
+
+    def test_the_measure_command_refuses_without_a_session_too(self):
+        import contextlib
+        import io
+        import os
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, {'WSP_GAME_ROOT': str(NULL_GAME)}), mock.patch.object(acc, 'ROOT', NULL_GAME), contextlib.redirect_stderr(err):
+            for k in ('WSC_SESSION_ID', 'CLAUDE_CODE_SESSION_ID'):
+                os.environ.pop(k, None)
+            self.assertEqual(acc.main(['measure', '--run', 't']), 2)
+        self.assertIn('WSC_SESSION_ID', err.getvalue())
+
+    def test_pcenv_passes_the_owner_to_touch_and_unlock(self):
+        calls = []
+        e = object.__new__(acc.PcEnv)
+        e.owner, e.session, e.locked, e.sleep = 'o1', 's1', False, lambda s: None
+        e.sh = lambda *a: (calls.append(a), (0, 'ok'))[1]
+        e.pc = mock.Mock()
+        e.pc.status.return_value = {'profile_active': None, 'lock': None}
+        e.lock()
+        e.lock()
+        e.release()
+        self.assertEqual(calls, [('lock', 'o1', 's1', 'acceptance pass'), ('touch', 'o1'), ('unlock', 'o1')])
+
+
 if __name__ == '__main__':
     unittest.main()
