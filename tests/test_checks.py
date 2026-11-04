@@ -42,6 +42,23 @@ class StrictJson(unittest.TestCase):
         self.assertIsNone(checks.strict_json_error('{"a": 1}\n\n{"b": 2}\n', jsonl=True))
         self.assertTrue(checks.strict_json_error('{"a": 1}\n{"b": -Infinity}\n', jsonl=True).startswith('line 2'))
 
+    def test_duplicate_keys_are_refused(self):
+        """W28: last-one-wins is a silent data loss; a key twice in one object is refused, nested too, and per line in JSON Lines."""
+        self.assertIn("duplicate key 'a'", checks.strict_json_error('{"a": 1, "a": 2}'))
+        self.assertIn("duplicate key 'k'", checks.strict_json_error('{"x": [{"k": 1, "k": 1}]}'))
+        self.assertIsNone(checks.strict_json_error('{"a": {"a": 1}, "b": [{"a": 2}]}'))   # the same key in different objects is fine
+        self.assertEqual(checks.strict_json_error('{"a": 1}\n{"b": 1, "b": 2}\n', jsonl=True), "line 2: duplicate key 'b'")
+        with self.assertRaises(ValueError):
+            checks.strict_loads('{"a": 1, "a": 1}')
+
+    def test_json_gate_refuses_a_duplicate_key(self):
+        from _util import TempRepo
+        repo = TempRepo({'data/x.json': '{"a": 1, "a": 2}\n'})
+        self.addCleanup(repo.close)
+        rc, out = repo.wsc('gates', '--only', 'json')
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("data/x.json: duplicate key 'a'", out)
+
 
 class Conflicts(unittest.TestCase):
     def test_full_trio_only(self):

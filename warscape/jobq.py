@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from . import ci, gatemods
+from .checks import strict_loads
 from .policy import verdict
 from .repo import DEFAULTS
 
@@ -59,7 +60,7 @@ def configure_from(cfg, root=None, reg_dir='registries'):
     S.legacy_rounds = S.legacy_briefs = frozenset()
     if root is not None:
         if cfg['legacy']:
-            data = json.loads((Path(root) / cfg['legacy']).read_text(encoding='utf-8'))
+            data = strict_loads((Path(root) / cfg['legacy']).read_text(encoding='utf-8'))
             S.legacy_rounds, S.legacy_briefs = frozenset(data.get('round_rules', [])), frozenset(data.get('brief_hooks', []))
     return S
 
@@ -170,7 +171,7 @@ def failed_results_problems(jid, text, root, glob):
         seen.add(folder)
         for f in sorted(folder.glob(glob)):
             try:
-                if not f.is_file() or json.loads(f.read_text(encoding='utf-8')).get('status') != 'failed':
+                if not f.is_file() or strict_loads(f.read_text(encoding='utf-8')).get('status') != 'failed':
                     continue
             except (OSError, ValueError, AttributeError):
                 continue
@@ -595,7 +596,7 @@ def _blobs(root, specs, run=subprocess.run):
 def branch_row_spec(ref, jid, reg_dir):
     """Where a job branch keeps job `jid`'s row: [(`<ref>:<path>`, text -> the row or None)], first match wins. Since J55 the row is its
     own file (`<reg_dir>/jobs/<id>.json`; the core's id_to_file of a plain id is the id); a branch cut before J55 has the JSONL."""
-    return [(f'{ref}:{reg_dir}/jobs/{jid}.json', lambda text: json.loads(text) if text else None),
+    return [(f'{ref}:{reg_dir}/jobs/{jid}.json', lambda text: strict_loads(text) if text else None),
             (f'{ref}:{reg_dir}/jobs.jsonl', lambda text: next((x for x in load_rows(text) if x.get('id') == jid), None))]
 
 
@@ -664,7 +665,7 @@ def waiting_rules(ledger_text, jid):
 
 
 def load_rows(text):
-    return [json.loads(l) for l in (text or '').splitlines() if l.strip()]
+    return [strict_loads(l) for l in (text or '').splitlines() if l.strip()]
 
 
 # ------------------------------------------------------------------ view

@@ -7,7 +7,6 @@ when: after any change to the engine_sites or config_keys registry or identity.j
 not-a-verb: games cannot add wsc verbs for the proxy yet (wsc.toml verb_dirs is empty and the generator moves to warscape-core with proxy/core at the end of phase 1); the gates reach it through tests/
 """
 import argparse
-import json
 import math
 import re
 import struct
@@ -16,6 +15,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402  (the game repo and its adapter, before and after the move to warscape-core)
+
+if str(layout.own_root()) not in sys.path:   # the core's library (warscape/), beside this tool's own wsc.toml
+    sys.path.insert(1, str(layout.own_root()))
+from warscape.checks import strict_loads  # noqa: E402  (W28: repo data refuses NaN and duplicate keys)
 
 ROOT = layout.game_root()
 MAX_BYTES = 32   # patch_engine.h kMaxSiteBytes
@@ -26,7 +29,7 @@ def jsonl(path):
     p = ROOT / path
     if not p.exists():
         return []
-    return [json.loads(l) for l in p.read_text(encoding='utf-8').splitlines() if l.strip()]
+    return [strict_loads(l) for l in p.read_text(encoding='utf-8').splitlines() if l.strip()]
 
 
 def hexbytes(s):
@@ -317,7 +320,7 @@ def main():
             print(f'gen_tables: {e}')
             return 2
     adapter = ROOT / a.adapter
-    ident = json.loads((adapter / 'identity.json').read_text(encoding='utf-8'))
+    ident = strict_loads((adapter / 'identity.json').read_text(encoding='utf-8'))
     sites = sorted(jsonl('registries/engine_sites.jsonl'), key=lambda s: int(s['rva'], 16))
     keys = sorted(jsonl('registries/config_keys.jsonl'), key=lambda k: k['id'])
     errs = validate_sites(sites, keys, ident)
@@ -329,7 +332,7 @@ def main():
     want = {adapter / 'generated' / 'tables.h': render_header(ident, sites, keys, a.adapter),
             adapter / ident['config_file']: render_ini(ident, keys)}
     if (adapter / 'console_sources.json').exists():
-        src = json.loads((adapter / 'console_sources.json').read_text(encoding='utf-8'))
+        src = strict_loads((adapter / 'console_sources.json').read_text(encoding='utf-8'))
         want[adapter / 'generated' / 'console_table.h'] = render_console(a.adapter, src)
     stale = []
     for p, text in want.items():

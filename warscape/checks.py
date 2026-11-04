@@ -41,8 +41,23 @@ def _boom(c):
     raise ValueError(f'non-finite constant {c}')
 
 
+def no_duplicate_keys(pairs):
+    """`object_pairs_hook` for repo data (W28): a key twice in one object is refused, never last-one-wins."""
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise ValueError(f'duplicate key {k!r}')
+        out[k] = v
+    return out
+
+
+def strict_loads(text):
+    """`json.loads` for repo data: NaN/Infinity and duplicate keys are refused (ValueError)."""
+    return json.loads(text, parse_constant=_boom, object_pairs_hook=no_duplicate_keys)
+
+
 def strict_json_error(text, jsonl=False):
-    """None if `text` is strict JSON (or strict JSON Lines), else the error. NaN/Infinity are refused; a BOM is refused."""
+    """None if `text` is strict JSON (or strict JSON Lines), else the error. NaN/Infinity, duplicate keys and a BOM are refused."""
     if text.startswith('﻿'):
         return 'starts with a byte-order mark'
     try:
@@ -50,11 +65,11 @@ def strict_json_error(text, jsonl=False):
             for i, line in enumerate(text.split('\n'), 1):
                 if line.strip():
                     try:
-                        json.loads(line, parse_constant=_boom)
+                        strict_loads(line)
                     except ValueError as e:
                         return f'line {i}: {e}'
         else:
-            json.loads(text, parse_constant=_boom)
+            strict_loads(text)
     except ValueError as e:
         return str(e)
     return None
