@@ -48,7 +48,7 @@ event type, which input paths carried clicks, Lua, and frame cost p50/p99/max of
 
 ## Build
 `proxy/tools/fetch_ui.py` fetches RmlUi, FreeType, Lua and stb by the game's pin file (`layout.py ui-pins`: `[proxy] ui_pins`, else
-`viewer/pins.json`). `build.sh` compiles RmlUi Core with its FreeType font engine and FreeType (TrueType modules only, no zlib) into the
+`viewer/pins.json`; its schema is `schemas/ui_pins.schema.json`, checked before any download, `fetch_ui.py --check` for the check alone). `build.sh` compiles RmlUi Core with its FreeType font engine and FreeType (TrueType modules only, no zlib) into the
 DLL, cached per compiler under `build/ui/obj/<tag>` (a stamp of the pins, the compat header, the compiler and the flags). The DLL's imports
 stay system-only and `repro` stays byte-identical. Loose UI files reach the game through the harness adapter's `kit_ui` list
 (`pc_deploy.py kit`, sha-checked install, byte-exact uninstall).

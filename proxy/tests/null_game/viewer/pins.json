@@ -1,12 +1,12 @@
 {
-  "_doc": "J31: the versions the review viewer and the in-game host (J30) build from. viewer/core/fetch_sources.py fetches each by commit or sha256; nothing is vendored. Change a pin only with a reason in the job report.",
+  "_doc": "The null game's UI pin file (the ui_pins role of its DLL; schemas/ui_pins.schema.json, checked by proxy/tools/fetch_ui.py --check): the sources the in-game RmlUi host builds from (docs/PROXY_UI.md). proxy/tools/fetch_ui.py fetches each by commit or sha256; nothing is vendored. A game copies an entry from here; change a pin only with a reason in the job report.",
   "rmlui": {
     "version": "6.3",
     "repo": "https://github.com/mikke89/RmlUi.git",
     "tag": "6.3",
     "commit": "ba95ffe8bfb6370efb2cdcca927eaad4710c5413",
     "licence": "MIT",
-    "why": "empire-remastered's shipped version (empire-remastered rml_mod/src/CMakeLists.txt, LEGAL_NOTES A1)"
+    "why": "the RmlUi version the host is written against (docs/PROXY_UI.md: -DRMLUI_VERSION in proxy/tools/build.sh)"
   },
   "freetype": {
     "version": "2.13.3",
@@ -14,20 +14,14 @@
     "tag": "VER-2-13-3",
     "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
     "licence": "FTL",
-    "why": "empire-remastered's FreeType (same CMakeLists), TTF only, no optional dependencies"
+    "why": "RmlUi's font engine, TrueType modules only and no optional dependencies (proxy/tools/build.sh, docs/PROXY_UI.md)"
   },
   "lua": {
     "version": "5.1.1",
     "url": "https://www.lua.org/ftp/lua-5.1.1.tar.gz",
     "sha256": "c5daeed0a75d8e4dd2328b7c7a69888247868154acbda69110e97d4a6e17d1f0",
     "licence": "MIT",
-    "why": "the engine's Lua (exe string 'Lua 5.1 Copyright (C) 1994-2006'); the same tarball as proxy/tools/fetch_lua.py (tests/test_viewer.py checks they agree); built with float lua_Number"
-  },
-  "emsdk_image": {
-    "image": "emscripten/emsdk",
-    "tag": "4.0.10",
-    "digest": "sha256:90b757eb11fa9a0e3ce4d2d9f76d932a56018e4accc37b5a28b2783751e60eb7",
-    "why": "official Emscripten image (emcc 4.0.10, cmake 3.22, node 22); keeps Emscripten off the PC (D30, D31)"
+    "why": "the engine's Lua 5.1.1; the same tarball as proxy/tools/fetch_lua.py PIN (tests/test_moved_tools.py checks they agree); built here with float lua_Number"
   },
   "stb_image": {
     "version": "2.30",
@@ -35,7 +29,7 @@
     "commit": "f0569113c93ad095470c54bf34a17b36646bbbb5",
     "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3",
     "licence": "MIT or public domain",
-    "why": "PNG and JPEG decoding for art (the review artifact serves web image types only, not .tga); the same commit as empire-remastered's rml_mod"
+    "why": "PNG and JPEG decoding for the host's images (docs/PROXY_UI.md); the same stb commit as stb_image_write"
   },
   "stb_image_write": {
     "version": "1.16",

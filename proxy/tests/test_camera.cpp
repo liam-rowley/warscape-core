@@ -1,20 +1,19 @@
 // test_camera.cpp - host tests for the battle camera setter (J43): the pose -> target conversion against campose.py's conventions,
-// its refusals; the adapter's offsets against the bytes of its engine_sites rows; and source lints (key off = no engine read, the
-// setter called only after the chain and vtable slot checks, no game named in core). Built and run by proxy/tools/build.sh tests.
+// its refusals; the adapter contract checker (adapter_checks.h, W16) on a synthetic site table, one passing and one failing case per
+// rule; and source lints (key off = no engine read, the setter called only after the chain and vtable slot checks, no game named in
+// core). A game checks its own camera numbers in its own proxy/tests (layout.py proxy-tests). Built and run by proxy/tools/build.sh tests.
 #include "testkit.h"
 #include "camera.h"
+#include "adapter_checks.h"
 #include "adapter.cpp"
 
 using namespace wsp;
 
-static const SiteDef* Site(const char* id) {
-    for (size_t i = 0; i < gen::kSiteCount; ++i) if (!strcmp(gen::kSites[i].id, id)) return &gen::kSites[i];
-    return nullptr;
-}
-static uint32_t StockDword(const char* id, int off) {
-    const SiteDef* s = Site(id);
-    if (!s || off + 4 > s->len) return 0xffffffffu;
-    return (uint32_t)s->stock[off] | (uint32_t)s->stock[off + 1] << 8 | (uint32_t)s->stock[off + 2] << 16 | (uint32_t)s->stock[off + 3] << 24;
+static bool Has(const std::vector<std::string>& p, const char* part) {
+    for (const std::string& s : p) if (s.find(part) != std::string::npos) return true;
+    for (const std::string& s : p) printf("    (problem: %s)\n", s.c_str());
+    printf("    no problem names '%s'\n", part);
+    return false;
 }
 static bool Near(float a, float b, float t = 1e-3f) { return std::fabs(a - b) <= t; }
 
@@ -39,27 +38,24 @@ int main(int argc, char** argv) {
         p.yaw = 0; CHECK(!CamTargetFor(p, 0, t, why) && why.find("distance") != std::string::npos);
         CHECK(CamTargetFor(p, 1, t, why));
     }
-    if (Adapter().camera) {   // the adapter (when it has a camera setter): every site exists, every offset is the number in its row's stock bytes
-        const CameraAdapter& c = *Adapter().camera;
-        for (const char* id : { c.chainSite, c.modeSite, c.setSite }) {
-            const SiteDef* s = Site(id);
-            if (!s) printf("    site %s missing\n", id);
-            CHECK(s && s->kind == kHook && s->configKey && !strcmp(s->configKey, "dev.camera"));
-        }
-        CHECK(Site(c.chainSite)->stock[0] == 0xa1);                                                   // mov eax, [imm32]: the owner global
-        CHECK(c.globalOperand == 1);
-        CHECK(Site(c.chainSite)->stock[8] == 0x8b && Site(c.chainSite)->stock[9] == 0x80);            // mov eax, [eax + imm32]
-        CHECK(StockDword(c.chainSite, c.battleOffOperand) == 0xf8);
-        CHECK(Site(c.chainSite)->stock[14] == 0x8b && Site(c.chainSite)->stock[15] == 0x80);          // mov eax, [eax + imm32]
-        CHECK(StockDword(c.chainSite, c.controllerOffOperand) == 0x281b8);
-        CHECK(Site(c.modeSite)->stock[0] == 0x8b && Site(c.modeSite)->stock[1] == 0x8e);              // mov ecx, [esi + imm32]
-        CHECK(StockDword(c.modeSite, c.modeOffOperand) == 0x800);
-        CHECK(StockDword(c.modeSite, 18) == 0xc0);                                                    // ... call [eax + 0xc0]: a mode method
-        CHECK(c.setSlot * 4 == 0xbc);
-        const SiteDef* s = Site(c.setSite);
-        CHECK(s->stock[0] == 0x83 && s->stock[1] == 0xec && s->stock[2] == 0x08);                     // sub esp, 8: the function entry
-        CHECK(s->anchorLen == 4 && s->anchor[0] == 0xcc && s->anchor[3] == 0xcc);                      // int3 padding before it
-        CHECK(c.targetDistance > 0);
+    {   // the contract checker on a synthetic camera: three hook rows keyed dev.camera
+        static const char* const ids[] = { "chain", "mode", "set" };
+        std::vector<SiteDef> t(3);
+        for (int i = 0; i < 3; ++i) { t[i] = SiteDef{}; t[i].id = ids[i]; t[i].kind = kHook; t[i].len = 20; t[i].configKey = "dev.camera"; }
+        const CameraAdapter good = { "chain", 1, 10, 16, "mode", 2, "set", 47, 100.0f };
+        CHECK(adck::CameraAdapterProblems(good, adck::TableLookup(t.data(), t.size())).empty());
+        auto bad = [&](CameraAdapter c, std::vector<SiteDef> tt, const char* part) { CHECK(Has(adck::CameraAdapterProblems(c, adck::TableLookup(tt.data(), tt.size())), part)); };
+        { CameraAdapter c = good; c.setSite = "nowhere"; bad(c, t, "nowhere is not in the site table"); }
+        { auto tt = t; tt[1].kind = kPatch; bad(good, tt, "mode is not a hook row"); }
+        { auto tt = t; tt[0].configKey = "dev.console"; bad(good, tt, "chain is not keyed by dev.camera"); }
+        { CameraAdapter c = good; c.globalOperand = 17; bad(c, t, "chain operand at +17"); }
+        { CameraAdapter c = good; c.battleOffOperand = -2; bad(c, t, "chain operand at +-2"); }
+        { CameraAdapter c = good; c.controllerOffOperand = 20; bad(c, t, "chain operand at +20"); }
+        { auto tt = t; tt[1].len = 5; bad(good, tt, "mode operand at +2"); }
+        { CameraAdapter c = good; c.setSlot = -1; bad(c, t, "setSlot"); }
+        { CameraAdapter c = good; c.targetDistance = 0; bad(c, t, "targetDistance"); }
+        { CameraAdapter c = good; c.targetDistance = NAN; bad(c, t, "targetDistance"); }
+        { CameraAdapter c = good; c.chainSite = nullptr; bad(c, t, "chain site is not named"); }
     }
     {   // source lints
         const std::string cc = tk::ReadFile("core/camera.cpp"), ch = tk::ReadFile("core/camera.h");

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # purpose: build the proxy d3d9.dll (mingw-w64 i686, the release route) and/or build and run the host tests (g++)
-# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31); smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
+# usage: proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; tests: the core's proxy/tests/test_*.cpp, then the game's own (layout.py proxy-tests, W16); --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31), the outer of the game root and the core mounted; smoke: run the built DLL under wine with a stand-in exe; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)
 # when: after any change to the proxy sources or the adapter (CI runs `all` on every push); on the PC always with --docker; the DLL in <game repo>/build/proxy/<adapter name>/d3d9.dll is what proxy/tools/pc_deploy.py kits
 # not-a-verb: a compiler driver for C++ sources, not a registry operation; CI and agents call it directly
 set -euo pipefail
@@ -15,6 +15,10 @@ WHAT="${1:-all}"
 if [[ "${2:-}" == "--adapter" ]]; then WSP_PROXY_ADAPTER="$(cd "${3:?adapter folder}" && pwd)"; export WSP_PROXY_ADAPTER; fi
 ROOT="$(upath "$(layout game-root)")"; SRC="$(upath "$(layout proxy-src)")"; ADIR="$(upath "$(layout proxy-adapter)")"; ADAPTER="$(basename "$ADIR")"
 OUT="$ROOT/build/proxy"; mkdir -p "$OUT/$ADAPTER" "$OUT/tests"
+# W16 (B15): the game's own C++ host tests (layout.py proxy-tests: [proxy] tests, else <game>/proxy/tests with a test_*.cpp, else none),
+# compiled after the core's with the same flags. Outside the adapter folder on purpose: that folder is a build-id input, these are not.
+GTESTS=""
+if [[ "$WHAT" == tests || "$WHAT" == all ]]; then GTESTS="$(layout proxy-tests)"; [[ -z "$GTESTS" ]] || GTESTS="$(upath "$GTESTS")"; fi
 # Build id = a hash of the DLL inputs' content (proxy/tools/build_id.py, the one implementation, which rule 79 also uses): a report
 # commit, a reword or a rebase that leaves the inputs alone keeps the id; -dirty when an input has local changes (J45).
 if [[ -n "${WSP_BUILD_ID:-}" ]]; then
@@ -50,13 +54,23 @@ if [[ $DOCKER == 1 ]]; then
     [[ -f "$OUT/$ADAPTER/d3d9.dll" ]] || { echo "build.sh --docker smoke: no $OUT/$ADAPTER/d3d9.dll: run build.sh --docker all first"; exit 2; }
     PRE="dpkg --add-architecture i386"; APT="$APT wine wine32:i386"
   fi
-  # The game repo is mounted at /src (the core, as its submodule, is inside it). The container has no git: it is told the game root
-  # and the adapter, as paths relative to the mount.
-  rel() { python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]).replace(os.sep, "/"))' "$1" "$ROOT"; }
-  MNT="$ROOT"; command -v cygpath >/dev/null && MNT="$(cygpath -w "$ROOT")"   # Git Bash: docker wants C:\...
+  # W16 (B16): one mount at /src, the outer of the two roots: the game repo when it holds the core as its submodule, the core when it
+  # holds the game (its null game, proxy/tests/null_game); neither inside the other is refused (no second mount). The container has no
+  # git: it is told the game root, the adapter and the game's tests as paths relative to the mount.
+  OWNP="$(cd "$OWN" && pwd -P)"; ROOTP="$(cd "$ROOT" && pwd -P)"
+  if [[ "$OWNP/" == "$ROOTP/"* ]]; then TOP="$ROOT"
+  elif [[ "$ROOTP/" == "$OWNP/"* ]]; then TOP="$OWN"
+  else echo "build.sh --docker: the game root $ROOT and the core $OWN are not one inside the other, and one mount cannot hold both: refused (put the game root inside the core or the core inside the game repo)"; exit 2; fi
+  rel() { python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]).replace(os.sep, "/"))' "$1" "$TOP"; }
+  GTENV=()
+  if [[ -n "$GTESTS" ]]; then
+    [[ "$(rel "$GTESTS")" != ..* ]] || { echo "build.sh --docker: the game's tests $GTESTS are outside the mount $TOP: refused"; exit 2; }
+    GTENV=(-e WSP_PROXY_TESTS="/src/$(rel "$GTESTS")")
+  fi
+  MNT="$TOP"; command -v cygpath >/dev/null && MNT="$(cygpath -w "$TOP")"   # Git Bash: docker wants C:\...
   echo "build.sh --docker: $WHAT in $IMAGE, build $BUILD_ID"
   # MSYS_NO_PATHCONV: Git Bash would rewrite /src and the -v argument into Windows paths
-  MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_SOURCES="$SOURCES" -e WSP_GAME_ROOT=/src -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "$IMAGE" bash -c \
+  MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_SOURCES="$SOURCES" -e WSP_GAME_ROOT="/src/$(rel "$ROOT")" -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "${GTENV[@]}" "$IMAGE" bash -c \
     "set -e; $PRE; apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $APT >/dev/null
      $(rel "$OWN")/proxy/tools/build.sh $WHAT"
   exit $?
@@ -197,21 +211,28 @@ if [[ "$WHAT" == dll || "$WHAT" == all ]]; then
 fi
 
 if [[ "$WHAT" == tests || "$WHAT" == all ]]; then
-  fail=0
-  # the tests include core headers, the adapter's generated tables and testkit.h by name, and read files through --src/--adapter/--tests
-  for t in "$OWN"/proxy/tests/test_*.cpp; do
-    n="$(basename "$t" .cpp)"
-    MORE=()
+  fail=0; ncore=0; ngame=0
+  # the tests include core headers, the adapter's generated tables and testkit.h by name, and read files through --src/--adapter/--tests.
+  # $1 = the set (core or game), $2 = the test source. A game test also gets its own folder on the include path; its binary goes under game/.
+  host_test() {
+    local set="$1" t="$2" n o MORE=() INC=()
+    n="$(basename "$t" .cpp)"; o="$OUT/tests/$n"
+    if [[ "$set" == game ]]; then INC=(-I"$GTESTS"); mkdir -p "$OUT/tests/game"; o="$OUT/tests/game/$n"; fi
     if grep -q '^// link: ui' "$t"; then   # the RmlUi host's document tests (J30): host RmlUi + FreeType + the localised ui_lua object
       HU="$(ui_objs g++ gcc host "$SRC")"; [[ -f "$HU/STAMP" ]] || exit 3
       [[ -f "$OUT/tests/ui_lua.o" ]] || ui_lua_obj "$SRC" "$HU" "$OUT/tests/ui_lua.o" g++ ""
       MORE=("${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" "$OUT/tests/ui_lua.o" $(LC_ALL=C ls "$HU"/rml/*.o "$HU"/ft/*.o))
     fi
-    g++ -std=c++17 -O1 -Wall -Wextra -Wshadow -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" -o "$OUT/tests/$n" "$t" "${MORE[@]}"
-    if WSP_UI_SRC="$UI_SRC" "$OUT/tests/$n" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $n FAILED"; fail=1; fi
-  done
+    echo "build.sh: $set test $n"
+    g++ -std=c++17 -O1 -Wall -Wextra -Wshadow -Werror -I"$SRC" -I"$ADIR" -I"$OWN/proxy/tests" "${INC[@]}" -o "$o" "$t" "${MORE[@]}"
+    if WSP_UI_SRC="$UI_SRC" "$o" --src "$SRC" --adapter "$ADIR" --tests "$OWN/proxy/tests"; then :; else echo "build.sh: $set test $n FAILED"; fail=1; fi
+  }
+  for t in "$OWN"/proxy/tests/test_*.cpp; do host_test core "$t"; ncore=$((ncore + 1)); done
+  if [[ -n "$GTESTS" ]]; then   # none: skipped silently
+    while IFS= read -r t; do host_test game "$t"; ngame=$((ngame + 1)); done < <(find "$GTESTS" -maxdepth 1 -name 'test_*.cpp' | LC_ALL=C sort)
+  fi
   rm -f "$OUT/tests/ui_lua.o"
-  [[ $fail == 0 ]] && echo "build.sh: host tests passed" || exit 1
+  [[ $fail == 0 ]] && echo "build.sh: host tests passed ($ncore core, $ngame game)" || exit 1
 fi
 
 if [[ "$WHAT" == repro ]]; then
