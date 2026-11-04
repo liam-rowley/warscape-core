@@ -21,8 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from _util import CORE, core_source, git
-from test_fixture_game import Fixture
+from _util import CORE, core_source, fixture_game, git
 
 WSC = CORE / 'wsc.py'
 JUDGED = 'policy: judged with the rules of origin/main at '
@@ -282,9 +281,19 @@ class CoreMode(Branches, unittest.TestCase):
             self.assertIn(f'policy: {fact}\n', err)
 
 
-class GameMode(Branches, Fixture):
+class GameMode(Branches, unittest.TestCase):
     game = True
     trailer = 'Agent-Session'
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.d = Path(cls._tmp.name) / 'game'
+        fixture_game(cls.d)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
 
     def test_a_head_that_edits_or_drops_the_bases_gate_modules_is_still_judged_by_them(self):
         rules = self.text('gates/rules.py').replace("errs = [] if f['kind'] != 'job' else", 'errs = [] if True else')

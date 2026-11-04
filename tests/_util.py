@@ -43,6 +43,25 @@ def core_source():
         _CORE_SOURCE[:] = [td, src]
     return _CORE_SOURCE[1]
 
+
+FIXTURE = CORE / 'tests' / 'fixture_game'
+FIXTURE_REPORT = ('# F1 report: Fixture first job\n\n## What exists\nNothing; a fixture.\n\n## Deviations from the brief, and why\nNone.\n\n'
+                  '## Open questions\nNone.\n')
+
+
+def fixture_game(dest):
+    """tests/fixture_game as a throwaway git repo at `dest`: its F1 report written (the file the fixture cannot ship as a report.md), its
+    workflows rendered, the throwaway core added as its `core` submodule (W23: `policy` judges with the core commit the base pins), all
+    committed as `main`, and `origin/main` pointing there."""
+    shutil.copytree(FIXTURE, dest)
+    (dest / 'jobs' / 'F1' / 'report.md').write_text(FIXTURE_REPORT, encoding='utf-8', newline='\n')
+    subprocess.run([sys.executable, str(CORE / 'wsc.py'), '--root', str(dest), 'ci', 'render'], capture_output=True, check=True, timeout=120)
+    git(dest, 'init', '-q', '-b', 'main')
+    git(dest, 'submodule', 'add', '-q', str(core_source()), 'core')
+    git(dest, 'add', '-A')
+    git(dest, 'commit', '-q', '-m', 'fixture')
+    git(dest, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+
 MINIMAL_TOML = '''
 registries_dir = "registries"
 [registries]
