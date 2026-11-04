@@ -1,0 +1,25 @@
+#!/bin/sh
+# purpose: Refuse a commit whose message has no `Claude-Session:` trailer with a value (`wsc policy --commit-msg`; git reads a trailer only in the last paragraph, with Co-Authored-By); silent unless the repo sets `[policy] commit_msg_hook = true`.
+# usage: git config core.hooksPath .githooks   (in a game repo with the core at core/: core/.githooks), then opt in with `[policy] commit_msg_hook = true` in wsc.toml. Fix a refusal with git commit --trailer "Claude-Session: <session id>"; a human commit bypasses once with git commit --no-verify.
+# when: automatic on every git commit (git passes the message file); merge commits are skipped.
+# not-a-verb: git runs hooks by file name; this one only calls `wsc policy --commit-msg`.
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+if [ -f "$top/wsc.py" ]; then cli="$top/wsc.py"
+elif [ -f "$top/core/wsc.py" ]; then cli="$top/core/wsc.py"
+else
+  echo "commit-msg: wsc.py not found at the repo root or core/ (core missing? git submodule update --init). Commit refused." >&2
+  exit 1
+fi
+# a merge commit carries git's own message (a human merges main into a branch)
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then exit 0; fi
+py=""
+for c in python3.12 python3 python py; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 12))' >/dev/null 2>&1; then py=$c; break; fi
+done
+if [ -z "$py" ]; then
+  echo "commit-msg: no Python 3.12+ on PATH, so the message cannot be checked. Commit refused (install Python 3.12+, or bypass once with --no-verify)." >&2
+  exit 1
+fi
+cd "$top" || exit 1
+"$py" "$cli" policy --commit-msg "$1"
+exit $?

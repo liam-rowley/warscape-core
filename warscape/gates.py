@@ -251,14 +251,51 @@ def gate_jobs(ctx):
     return Result('jobs', 'warn' if warns else 'ok', f'{len(rows)} jobs rows, queue ok' + (f'; {len(warns)} warnings' if warns else ''), warns)
 
 
+def _tracked(ctx):
+    """Tracked repo paths, submodule files included (`git ls-files --cached --recurse-submodules`), and the submodule folders. Untracked files do not count:
+    a path a run README names must be committed."""
+    try:
+        out = subprocess.run(['git', '-C', str(ctx.root), 'ls-files', '-z', '--cached', '--recurse-submodules'], env=git_env(), capture_output=True,
+                             check=True).stdout.decode('utf-8', 'replace')
+        subs = subprocess.run(['git', '-C', str(ctx.root), 'ls-files', '-s'], env=git_env(), capture_output=True, check=True).stdout.decode('utf-8', 'replace')
+    except (OSError, subprocess.CalledProcessError):
+        return list(ctx.files()), []
+    return [p for p in out.split('\0') if p], [l.split('\t', 1)[1] for l in subs.splitlines() if l.startswith('160000') and '\t' in l]
+
+
+def gate_run_refs(ctx):
+    """Every repo path a tracked `**/runs/**/README.md` names exists (B13): a link target or a backticked path (`warscape/checks.py` run_ref_tokens). Found
+    from the root, from the README's folder, as the tail of any tracked path, in a submodule, or git-ignored on purpose. `[gates] run_refs_since` skips older run folders."""
+    tracked, subs = _tracked(ctx)
+    readmes = {p: t for p in checks.run_readmes(tracked) if (t := _read(ctx, p)) is not None}
+    if not readmes:
+        return Result('run_refs', 'ok', 'no run READMEs')
+    index = checks.run_ref_index(tracked)
+    cache = {}
+
+    def ignored(path):
+        if any(path == s or path.startswith(s + '/') for s in subs):
+            return (ctx.root / path).exists()   # git check-ignore refuses a path inside a submodule: the file on disk is the proof
+        if path not in cache:
+            cache[path] = subprocess.run(['git', '-C', str(ctx.root), 'check-ignore', '-q', '--', path], env=git_env(), capture_output=True).returncode == 0
+        return cache[path]
+    since = ctx.config['gates']['run_refs_since']
+    errs, checked, skipped = checks.run_ref_problems(readmes, index, since, ignored)
+    tail = f'{len(readmes) - skipped} run READMEs, {checked} references' + (f'; {skipped} before {since} skipped' if skipped else '')
+    return Result('run_refs', 'error' if errs else 'ok', f'{len(errs)} run README references not found ({tail})' if errs else f'every run README reference exists ({tail})', errs)
+
+
 def gate_ci_render(ctx):
     """Every workflow listed in `[ci] workflows` equals its render from `<template_dir>/<name>.in` (`wsc ci render`). Skipped when none are listed."""
     if not ctx.config['ci']['workflows']:
         return Result('ci_render', 'ok', 'no rendered workflows')
     from . import ci_render
     errs = ci_render.problems(ctx)
-    return Result('ci_render', 'error' if errs else 'ok', f'{len(errs)} workflows differ from their render' if errs else
-                  f"{len(ctx.config['ci']['workflows'])} workflows match their render", errs)
+    if errs:
+        return Result('ci_render', 'error', f'{len(errs)} workflow problems (render or guard)', errs)
+    warns = ci_render.guards(ctx)[1]   # W23: a bootstrap pull_request trigger left beside pull_request_target
+    return Result('ci_render', 'warn' if warns else 'ok', f"{len(ctx.config['ci']['workflows'])} workflows match their render"
+                  + (f'; {len(warns)} warnings' if warns else ''), warns)
 
 
 SKIPPED = re.compile(r"^(.*?) \.\.\. skipped '(.*)'$")
@@ -308,7 +345,7 @@ GATES = [
     ('schemas', gate_schemas), ('registries', gate_registries), ('tools', gate_tools), ('json', gate_json),
     ('windows_paths', gate_windows_paths), ('doc_size', gate_doc_size), ('verified_dates', gate_verified_dates),
     ('conflict_markers', gate_conflict_markers), ('eol', gate_eol), ('core_pin', gate_core_pin), ('hooks', gate_hooks),
-    ('jobs', gate_jobs), ('ci_render', gate_ci_render), ('tests', gate_tests),
+    ('jobs', gate_jobs), ('ci_render', gate_ci_render), ('run_refs', gate_run_refs), ('tests', gate_tests),
 ]
 NAMES = [n for n, _ in GATES]
 

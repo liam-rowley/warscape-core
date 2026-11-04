@@ -718,7 +718,7 @@ def cmd_build(a):
         if new_doc != doc:
             bad.append(str(ANATOMY.relative_to(ROOT)))
         if bad:
-            sys.exit('shader_catalog build --check: stale: ' + ', '.join(bad) + ' (run: python3 discovery/core/shader_catalog.py build)')
+            sys.exit('shader_catalog build --check: stale: ' + ', '.join(bad) + ' (run: python3 core/discovery/shader_catalog.py build)')
         print(f'shader_catalog build --check: ok ({cat["count"]} shaders, {cat["mapped"]} mapped)')
         return
     CATALOG.write_text(cat_text, encoding='utf-8', newline='\n')

@@ -94,7 +94,35 @@ int main(int argc, char** argv) {
             CHECK(s.find("PlanEngine(") == std::string::npos);
         }
         // the core names no game (it moves to warscape-core)
-        for (const char* f : { "pe.h", "sha1.h", "guard.h", "patch_engine.h", "config.h", "adapter.h", "runtime.h", "dllmain.cpp", "backend.cpp", "crash.cpp",
+        {   // W24 (C25, docs/PROXY_BUILD.md): the self_hash line exactly as W9 parses it, logged right after the launch line (nothing logged between:
+            // it is the second line of every log) and before the dll and config lines; the self-hash path loads nothing, starts no thread, waits for nothing
+            const std::string raw = tk::ReadFile("core/dllmain.cpp");
+            const size_t np = std::string::npos;
+            const size_t launch = raw.find("\"launch %s: %s proxy d3d9.dll build %s loaded into %ls (pid %lu, base %p)\"");
+            const size_t call = raw.find("LogSelfHash(dll);"), dllLine = raw.find("LOGI(\"dll %ls\""), cfg = raw.find("\"config: %ls %s\"");
+            CHECK(launch != np && call != np && dllLine != np && cfg != np);
+            CHECK(launch < call && call < dllLine && dllLine < cfg);
+            if (launch != np && call != np && launch < call) CHECK(raw.substr(launch, call - launch).find("LOG") == np);
+            CHECK(raw.find("LOGI(\"self_hash: sha256 %s bytes %llu build %s (hashed in %lu ms)\", ") != np);
+            CHECK(raw.find("LOGW(\"self_hash: unavailable: %s\", ") != np);
+            const std::string dmS = Strip(raw), gdS = Strip(tk::ReadFile("core/guard_driver.cpp"));
+            auto body = [&](const std::string& s, const char* head) {
+                const size_t a = s.find(head); const size_t b = a == np ? np : s.find("\n}\n", a);
+                CHECK(a != np && b != np); return a == np || b == np ? std::string() : s.substr(a, b - a);
+            };
+            const std::string selfHash = body(dmS, "void LogSelfHash("), loop = body(gdS, "bool ReadChunks(");
+            CHECK(selfHash.find("ReadChunks(") != np && selfHash.find("Sha256") != np && selfHash.find("GetTickCount()") != np);
+            CHECK(loop.find("CreateFileW(") != np && loop.find("ReadFile(") != np && loop.find("CloseHandle(") != np);
+            CHECK(Strip(tk::ReadFile("core/guard_driver.cpp")).find("ReadChunks(path, ") != np);   // the guard hashes the exe through the same loop
+            for (const std::string* s : { &selfHash, &loop })
+                for (const char* bad : { "LoadLibrary", "CreateThread", "_beginthread", "WaitFor", "BCrypt", "Crypt", "GetProcAddress", "Sleep(" })
+                    if (s->find(bad) != np) { printf("    the self-hash path names %s\n", bad); CHECK(false); }
+            const std::string sh = Strip(tk::ReadFile("core/sha256.h"));
+            CHECK(!sh.empty());
+            for (const char* bad : { "LoadLibrary", "CreateThread", "_beginthread", "WaitFor", "Crypt", "windows.h", "#include <w" })
+                if (sh.find(bad) != np) { printf("    sha256.h names %s\n", bad); CHECK(false); }
+        }
+        for (const char* f : { "pe.h", "sha1.h", "sha256.h", "guard.h", "patch_engine.h", "config.h", "adapter.h", "runtime.h", "dllmain.cpp", "backend.cpp", "crash.cpp",
                                "log.cpp", "guard_driver.cpp", "patch_driver.cpp", "d3d9.def" }) {
             std::string s = tk::ReadFile(std::string("core/") + f);
             CHECK(!s.empty());

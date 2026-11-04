@@ -39,7 +39,8 @@ DEFAULTS = {
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
     'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`
-              'dirs': []},                 # repo-relative folders of game gate modules (warscape/gatemods.py)
+              'dirs': [],                  # repo-relative folders of game gate modules (warscape/gatemods.py)
+              'run_refs_since': ''},       # YYYY-MM-DD: the `run_refs` gate skips run folders dated before it ('' = checks every run README; C23)
     'cli': {'verb_dirs': []},              # repo-relative folders of extra verb modules
     'core': {'version': ''},               # the core version this repo pins (checked by the core_pin gate)
     # where a game's adapters are, for the proxy and harness tools (proxy/tools/layout.py, napoleon J12); empty = the one
@@ -56,6 +57,7 @@ DEFAULTS = {
         'dir': 'jobs',                     # jobs/<id>/brief.md, report.md, review.md
         'models': ['sonnet', 'opus'],      # the Model line of a brief; the first is the default, the others need a stated reason
         'legacy': '',                      # repo-relative JSON {"round_rules": [ids], "brief_hooks": [ids]}: jobs frozen before a rule existed
+        'failed_results': '',              # glob (relative to a run folder a report cites) of ctl result JSONs: one with status "failed" must be named in ## Deviations ('' = off)
         'ledgers': '',                     # glob of audit ledgers whose `CL` rows name a job the brief must cover ('' = off)
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
@@ -71,6 +73,7 @@ DEFAULTS = {
         'decisions': '',                   # repo-relative append-only decisions file ('' = not checked)
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
+        'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
         'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
                  'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
@@ -161,6 +164,11 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: storage.dir must list declared registries; not declared: {", ".join(map(str, bad))}')
     if not isinstance(cfg['gates']['dirs'], list) or not all(isinstance(d, str) and d for d in cfg['gates']['dirs']):
         raise ConfigError(f'{CONFIG_NAME}: gates.dirs must list repo-relative folders of gate modules')
+    since = cfg['gates']['run_refs_since']
+    if not isinstance(since, str) or (since and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', since)):
+        raise ConfigError(f'{CONFIG_NAME}: gates.run_refs_since must be "" or a date YYYY-MM-DD')
+    if not isinstance(cfg['policy']['commit_msg_hook'], bool):
+        raise ConfigError(f'{CONFIG_NAME}: policy.commit_msg_hook must be true or false')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     return cfg

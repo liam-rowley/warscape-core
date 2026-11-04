@@ -15,10 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = Path(__file__).resolve().parent / 'fixture_game'
 sys.path.insert(0, str(ROOT))
+from _util import FIXTURE_REPORT as REPORT, fixture_game  # noqa: E402
 from warscape import jobq  # noqa: E402
 from warscape.repo import DEFAULTS, Ctx  # noqa: E402
-
-REPORT = '# F1 report: Fixture first job\n\n## What exists\nNothing; a fixture.\n\n## Deviations from the brief, and why\nNone.\n\n## Open questions\nNone.\n'
 
 
 def git(cwd, *args, check=True):
@@ -32,13 +31,7 @@ class Fixture(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.d = Path(cls._tmp.name) / 'game'
-        shutil.copytree(FIXTURE, cls.d)
-        (cls.d / 'jobs' / 'F1' / 'report.md').write_text(REPORT, encoding='utf-8', newline='\n')   # the file the fixture cannot ship as a report.md
-        cls.wsc(cls, 'ci', 'render')
-        git(cls.d, 'init', '-q', '-b', 'main')
-        git(cls.d, 'add', '-A')
-        git(cls.d, 'commit', '-q', '-m', 'fixture')
-        git(cls.d, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        fixture_game(cls.d)   # W23: with the throwaway core as its `core` submodule (tests/_util.py)
 
     @classmethod
     def tearDownClass(cls):
@@ -66,6 +59,18 @@ class Verbs(Fixture):
             self.assertEqual(p.returncode, 1)
             self.assertIn('F2: brief: fixture rule: the brief does not say', p.stderr)
             self.assertIn('1 problems', p.stdout)
+
+    def test_committed_views_beside_a_jobs_registry_fail_check_and_the_gate_naming_c19(self):
+        """B49: `[views] commit = true` with a `jobs` registry could never pass a brief branch (C19); `jobs check` and the `jobs` gate say so at once."""
+        with tempfile.TemporaryDirectory() as t:
+            g = Path(t) / 'g'
+            shutil.copytree(self.d, g, ignore=shutil.ignore_patterns('.git'))
+            toml = g / 'wsc.toml'
+            toml.write_text(toml.read_text(encoding='utf-8').replace('commit = false', 'commit = true'), encoding='utf-8', newline=chr(10))
+            for args in (['jobs', 'check'], ['gates', '--only', 'jobs']):
+                p = subprocess.run([sys.executable, str(ROOT / 'wsc.py'), '--root', str(g), *args], capture_output=True, text=True, timeout=60)
+                self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+                self.assertIn('views are committed beside a jobs registry: set `[views] commit = false` in wsc.toml (C19)', p.stdout + p.stderr)
 
     def test_next_names_the_job_and_uses_the_configured_texts(self):
         rc, out, err = self.wsc('jobs', 'next', '--offline')

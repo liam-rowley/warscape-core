@@ -45,6 +45,10 @@ void CrashCheckFilter(const char* when);   // logs whether the top-level filter 
 
 // guard_driver.cpp
 void GuardRun();               // sets Rt().engineOk and writes or removes the notice
+// The file-hash read loop of the guard (the exe) and of the DLL's self-hash (W24): 1 MiB ReadFiles, each chunk to eat(ctx, data, n) in order;
+// bytes = the total read; err = the open or read error and its code ("cannot open <what> (error N)", "read error N"). Loader-lock safe.
+bool ReadChunks(const std::wstring& path, const char* what, void (*eat)(void* ctx, const uint8_t* data, size_t n), void* ctx,
+                uint64_t& bytes, std::string& err);
 
 // patch_driver.cpp
 void PatchesRun();             // only when Rt().plan.patches
