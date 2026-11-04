@@ -67,7 +67,7 @@ class MessageRule(unittest.TestCase):
     def test_a_missing_or_empty_value_is_refused(self):
         self.assertIsNotNone(message_problem('subject\n'))
         self.assertIsNotNone(message_problem(f'subject\n\n{CO}\n'))
-        self.assertIn('empty value', message_problem(f'subject\n\nClaude-Session:\n{CO}\n'))
+        self.assertIn('value is empty', message_problem(f'subject\n\nClaude-Session:\n{CO}\n'))
         self.assertIsNotNone(message_problem('subject\n\nClaude-Session:   \n'))
 
     def test_editor_comment_lines_do_not_hide_or_make_a_trailer(self):

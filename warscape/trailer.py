@@ -63,6 +63,6 @@ def message_problem(text, trailer='Claude-Session'):
     vals = [v for k, v in message_trailers(text) if k.lower() == trailer.lower()]
     if any(vals):
         return None
-    what = 'has an empty value' if vals else 'has none (git reads a trailer only in the last paragraph, with the other trailers such as Co-Authored-By)'
-    return (f'the commit message has no `{trailer}:` trailer: the `{trailer}:` line {what}. Put `{trailer}: <session id>` in the last paragraph, '
+    why = 'its value is empty' if vals else 'git reads a trailer only in the last paragraph, with the other trailers such as Co-Authored-By'
+    return (f'the commit message has no `{trailer}:` trailer ({why}). Put `{trailer}: <session id>` in the last paragraph, '
             f'with `Co-Authored-By:`, or use `git commit --trailer "{trailer}: <session id>"`. A human commit bypasses once with `git commit --no-verify`.')
