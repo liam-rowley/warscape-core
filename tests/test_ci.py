@@ -288,6 +288,76 @@ class Render(unittest.TestCase):
         self.assertIn('echo extra', text)
         self.assertIn('policy --branch "${{ github.head_ref }}"', text)
 
+    @staticmethod
+    def run_scripts(text):
+        """Every `run:` script of a workflow: the line itself, plus the block lines of a `run: |`."""
+        lines, out, i = text.splitlines(), [], 0
+        while i < len(lines):
+            m = re.match(r'^(\s*)(?:- )?run:\s*(.*)$', lines[i])
+            i += 1
+            if not m:
+                continue
+            out.append(m.group(2))
+            if m.group(2) in ('|', '>'):
+                while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > len(m.group(1))):
+                    out.append(lines[i])
+                    i += 1
+        return out
+
+    def test_w23_the_policy_job_runs_base_code_and_names_the_head_only_as_data(self):
+        """pull_request_target gives the job the base's privileges: no step checks out, caches or runs the head, and the head's names reach
+        scripts only through `env:` (a branch name may hold `$(...)`)."""
+        for cfg in (self.CFGR, {**self.CFGR, 'core': '', 'token_secret': '', 'policy_extra_steps': ''}):
+            text = self.render('jobs:\n{{wsc policy}}\n{{wsc notify policy}}\n', cfg)
+            scripts = self.run_scripts(text)
+            self.assertTrue(scripts)
+            self.assertEqual([s for s in scripts if '${{' in s], [])
+            self.assertIn('--branch "$HEAD_REF" --base "origin/$BASE_REF" --head "$HEAD_SHA"', text)
+            for env in ('HEAD_REF: ${{ github.head_ref }}', 'BASE_REF: ${{ github.base_ref }}', 'HEAD_SHA: ${{ github.event.pull_request.head.sha }}',
+                        'PR: ${{ github.event.pull_request.number }}'):
+                self.assertIn(env, text)
+            self.assertIn('git fetch --no-tags origin "+refs/pull/$PR/head:refs/remotes/pull/$PR/head"', text)
+            self.assertNotRegex(text, r'(?m)^\s+ref:')   # every checkout is the default one: the base under pull_request_target
+            self.assertNotRegex(text, r'git (checkout|switch|worktree)|actions/cache')
+
+    def test_w23_the_render_guard_refuses_a_policy_template_without_pull_request_target(self):
+        sys.path.insert(0, str(ROOT / 'tests'))
+        from _util import MINIMAL_TOML, TempRepo
+        repo = TempRepo(toml=MINIMAL_TOML + '[ci]\nworkflows = ["policy.yml"]\ncore = ""\n')
+        self.addCleanup(repo.close)
+        old = '# pull_request_target in a comment does not count\nname: policy\non:\n  pull_request:\n    types: [opened]\njobs:\n{{wsc policy}}\n'
+        repo.write('ci/policy.yml.in', old)
+        rc, out = repo.wsc('ci', 'render')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('ci/policy.yml.in has {{wsc policy}} but no pull_request_target trigger', out)
+        self.assertFalse((repo.root / '.github' / 'workflows' / 'policy.yml').exists())
+        rc, out = repo.wsc('gates', '--only', 'ci_render')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('no pull_request_target trigger', out)
+        repo.write('ci/policy.yml.in', old.replace('on:\n', 'on:\n  pull_request_target:\n    types: [opened]\n'))
+        rc, out = repo.wsc('ci', 'render')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('ci/policy.yml.in also has a pull_request trigger', out)
+        rc, out = repo.wsc('gates', '--only', 'ci_render')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('WARN ci_render', out)
+        repo.write('ci/policy.yml.in', old.replace('pull_request:', 'pull_request_target:'))
+        rc, out = repo.wsc('ci', 'render')
+        self.assertEqual(rc, 0, out)
+        rc, out = repo.wsc('gates', '--only', 'ci_render')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('ok   ci_render', out)
+
+    def test_w23_this_repos_policy_workflow_is_pull_request_target_with_the_bootstrap_trigger(self):
+        text = (ROOT / '.github' / 'workflows' / 'policy.yml').read_text(encoding='utf-8')
+        on = text[text.index('\non:\n'):text.index('\npermissions:')]
+        self.assertIn('\n  pull_request_target:\n    types: [opened, synchronize, reopened, ready_for_review]', on)
+        self.assertIn("\n  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    paths: ['jobs/W23/report.md']", on)
+        self.assertEqual([s for s in self.run_scripts(text) if '${{' in s], [])
+        fixture = (ROOT / 'tests' / 'fixture_game' / 'ci' / 'policy.yml.in').read_text(encoding='utf-8')
+        self.assertIn('  pull_request_target:', fixture)
+        self.assertNotRegex(fixture, r'(?m)^  pull_request:')   # the fixture switches with no bootstrap trigger
+
     def test_notify_of_a_push_workflow_waits_for_the_named_jobs(self):
         text = self.render('jobs:\n{{wsc notify gates needs=changes,gates,proxy}}\n')
         self.assertIn('needs: [changes, gates, proxy]', text)

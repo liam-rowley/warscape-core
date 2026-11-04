@@ -1,6 +1,8 @@
 """Shared helpers for the host tests: put the core on sys.path, build throwaway repos, run the CLI in-process."""
 import contextlib
 import io
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +14,34 @@ if str(CORE) not in sys.path:
     sys.path.insert(0, str(CORE))
 
 from warscape.cli import main  # noqa: E402
+
+
+def git(cwd, *args, check=True):
+    """git in a throwaway repo: a fixed identity, no hooks, no signing, LF as written, local file:// submodules allowed."""
+    env = {**os.environ, 'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t'}
+    return subprocess.run(['git', '-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
+                           '-c', 'protocol.file.allow=always', '-c', 'init.defaultBranch=main', *args],
+                          cwd=cwd, env=env, check=check, capture_output=True, text=True)
+
+
+_CORE_SOURCE = []
+
+
+def core_source():
+    """A throwaway core repo, made once per test process (W23): every file `repo.list_files` lists in this checkout, committed as `main`.
+    Tests clone it (the core judging itself) or add it as a game's `core` submodule; none changes it."""
+    if not _CORE_SOURCE:
+        from warscape.repo import list_files
+        td = tempfile.TemporaryDirectory()
+        src = Path(td.name).resolve() / 'core'
+        for rel in list_files(CORE):
+            (src / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(CORE / rel, src / rel)
+        git(src, 'init', '-q', '-b', 'main')
+        git(src, 'add', '-A')
+        git(src, 'commit', '-q', '-m', 'core')
+        _CORE_SOURCE[:] = [td, src]
+    return _CORE_SOURCE[1]
 
 MINIMAL_TOML = '''
 registries_dir = "registries"

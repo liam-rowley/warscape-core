@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = Path(__file__).resolve().parent / 'fixture_game'
 sys.path.insert(0, str(ROOT))
+from _util import core_source  # noqa: E402
 from warscape import jobq  # noqa: E402
 from warscape.repo import DEFAULTS, Ctx  # noqa: E402
 
@@ -36,6 +37,8 @@ class Fixture(unittest.TestCase):
         (cls.d / 'jobs' / 'F1' / 'report.md').write_text(REPORT, encoding='utf-8', newline='\n')   # the file the fixture cannot ship as a report.md
         cls.wsc(cls, 'ci', 'render')
         git(cls.d, 'init', '-q', '-b', 'main')
+        # W23: a real consumer pins the core as a submodule at `[ci] core`; `policy` judges with the core commit the base pins
+        git(cls.d, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', str(core_source()), 'core')
         git(cls.d, 'add', '-A')
         git(cls.d, 'commit', '-q', '-m', 'fixture')
         git(cls.d, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
