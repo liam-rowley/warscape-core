@@ -405,5 +405,19 @@ class NoOldLayoutPaths(unittest.TestCase):
         self.assertEqual(bad, [], '\n'.join(bad))
 
 
+class LinkerMap(unittest.TestCase):
+    """W35: the DLL is linked with a GNU ld map beside it (d3d9.map, normalised by warscape/minidump.py so it is reproducible, plus the
+    d3d9.map.json sidecar); `repro` compares the two maps and links once more without the flag, failing unless the DLL is identical."""
+
+    def test_the_link_line_has_the_map_flag_and_repro_compares_maps_and_a_build_without_it(self):
+        b = (ROOT / 'proxy' / 'tools' / 'build.sh').read_text()
+        self.assertIn('-Wl,-Map,', b)
+        self.assertIn('d3d9.map.json', b)
+        rep = b[b.index('if [[ "$WHAT" == repro ]]'):b.index('if [[ "$WHAT" == smoke ]]')]
+        self.assertIn('cmp -s "$OUT/$ADAPTER/d3d9.map"', rep)
+        self.assertIn('without the map flag', rep)
+        self.assertNotIn('--cref', b)
+
+
 if __name__ == '__main__':
     unittest.main()
