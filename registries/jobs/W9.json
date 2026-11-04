@@ -7,7 +7,8 @@
   "model": "sonnet",
   "needs_pc": true,
   "depends_on": [
-    "W8"
+    "W8",
+    "W10"
   ],
   "brief": "jobs/W9/brief.md"
 }
