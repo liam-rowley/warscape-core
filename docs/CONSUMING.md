@@ -151,6 +151,7 @@ dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
 models = ["sonnet", "opus"]        # the Model line of a brief; models after the first need a stated reason
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
+pc_state = "$LOCALAPPDATA/game_state"  # optional (W26): a needs_pc build is not ready where this folder is absent; WSC_PC_STATE overrides ("" = no PC here)
 failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
@@ -168,6 +169,12 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
+- **Claim and autopilot (0.31.0, core W26, C28).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
+  (`brief/<id>`), so two sessions never get one job; a lost race moves on (at most 5 tries), any other push failure exits 1. `--peek` and `--offline`
+  claim nothing. Order is (phase, number). An empty claim older than 24 h is listed with its release command (never released by a tool).
+  `--auto` starts a review only on a green head, a fix once CI has finished, one `needs_pc` row at a time, and prunes dead worktrees each tick.
+  A game: sets `[jobs] pc_state` (until then nothing is gated) and has its `setup` verb print `warscape.worktrees.report(root, rows, branches)`
+  (dead registrations, merged worktrees, a `.git` above the repo); `wsc jobs worktrees [--prune]` prints the same.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
   `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
