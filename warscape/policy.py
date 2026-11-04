@@ -261,7 +261,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
 
 
 
-# ---------------------------------------------------------------- review integrity (core W27, C28): rules A-F; the git reads come in as `reads`
+# ---------------------------------------------------------------- review integrity (core W27, C29): rules A-F; the git reads come in as `reads`
 RUN_PATH = re.compile(r'(?<![\w./\\:<>~$%@-])(?:[\w.-]+/)*runs/[\w.-]*\w')   # a repo-relative run folder; never part of a URL or an absolute path
 BRANCH_CITE = re.compile(r'(?<![\w./-])(?:origin/)?((job|brief)/([A-Z]+[1-9]\d*))\b')
 ORIGIN_CITE = re.compile(r'(?<![\w./-])origin/([\w.-]+(?:/[\w.-]+)*\w)')

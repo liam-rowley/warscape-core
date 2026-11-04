@@ -30,6 +30,18 @@ using System.IO;
 using System.Threading;
 public static class FAKECLASS {
     public static int Main(string[] a) {
+        // W38: <name>.refuse next to the exe makes this start a proxy refusal: line 1 the status file to write (empty: write none), line 2
+        // the detail; then exit 2160 at once, before the watcher can look
+        string trig = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Process.GetCurrentProcess().ProcessName + ".refuse");
+        if (File.Exists(trig)) {
+            string[] l = File.ReadAllLines(trig);
+            if (l.Length >= 2 && l[0].Length > 0) {
+                File.WriteAllText(l[0] + ".tmp", "{\"pid\": " + Process.GetCurrentProcess().Id + ", \"launch_id\": \"ci\", \"state\": \"refused\", \"detail\": \"" + l[1] + "\", \"exit_code\": 2160}");
+                if (File.Exists(l[0])) File.Delete(l[0]);
+                File.Move(l[0] + ".tmp", l[0]);
+            }
+            return 2160;
+        }
         string mode = a.Length > 0 ? a[0] : "idle";
         string log = a.Length > 1 ? a[1] : null;
         DateTime end = DateTime.UtcNow.AddMinutes(15);
@@ -298,7 +310,7 @@ try {
         Assert-Eq $ro.d.status 'ok' 'read-only tasklist is never blocked'
         Clear-Lock
     }
-    Test-Case 'exe check (J18): a fake game whose sha1 is not the identity is refused (-2), exe_check=warn launches it with a warning, watcher.status has the verdict' {
+    Test-Case 'exe check (J18, W25): a mismatched fake game is refused (-2); watcher.ini exe_check=warn is refused by the running watcher and by a restart job; a fresh start honours it with a warning' {
         Set-Lock 'ci18'
         [IO.File]::WriteAllText($identityPath, '{"sha1": "0000000000000000000000000000000000000000"}', $Utf8NoBom)
         try {
@@ -307,11 +319,29 @@ try {
             Assert-Match $r.d.reason 'EXE CHECK: MISMATCH' 'reason'
             Assert-True ((Fake-Procs).Count -eq 0) 'nothing started'
             Wait-Until { $x = Get-St; $x -and $x.exe -and $x.exe.ok -eq $false } 10 'watcher.status exe.ok false' | Out-Null
+            # W25 (H1): an ini edit never weakens a running watcher's exe_check
             $mark = Log-Mark
             [IO.File]::AppendAllText((Join-Path $root 'watcher.ini'), "`r`nexe_check=warn`r`n", $Utf8NoBom)
-            Wait-LogMatch 'watcher.ini reloaded' 20 'the settings reload' $mark
+            Wait-LogMatch 'asks exe_check=warn; refused, a running watcher never weakens it' 20 'the refused reload' $mark
+            $w = Run-Job 'launch visible=1 owner=ci18' 'exeini' 40
+            Assert-Eq $w.d.status 'refused' "the ini edit did not weaken the gate ($($w.out))"; Assert-Match $w.d.reason 'EXE CHECK: MISMATCH' 'with the exe check text'
+            Wait-Until { $x = Get-St; $x -and $x.exe_check_refused -eq 'warn' } 10 'watcher.status exe_check_refused' | Out-Null
+            # a restart job carries the value in force across watch.cmd's relaunch (restart.carry)
+            $pid0 = Pid-Of-Watcher; $mark = Log-Mark
+            Run-Job 'restart' 'exerestart' 30 | Out-Null
+            Wait-LogMatch 'watcher [0-9.a-z-]+ started \(pid' 150 'the restarted watcher' $mark
+            Wait-Until { $x = Get-St; $x -and [int]$x.pid -ne $pid0 } 40 'a new watcher pid' | Out-Null
+            Wait-Watcher 40 | Out-Null
+            $w = Run-Job 'launch visible=1 owner=ci18' 'exerestarted' 40
+            Assert-Eq $w.d.status 'refused' "a restart job did not weaken the gate ($($w.out))"; Assert-Match $w.d.reason 'EXE CHECK: MISMATCH' 'still the exe check'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'restart.carry'))) 'the carry was read and removed'
+            # Liam's way: stop the watcher and start it by hand; the start reads the ini as written
+            Stop-TestWatcher
+            $mark = Log-Mark
+            Start-TestWatcher | Out-Null
+            Assert-Match (Get-LogSince $mark) 'exe_check=warn at start' 'the start says so loudly'
             $w = Run-Job 'launch visible=1 owner=ci18' 'exewarn' 40
-            Assert-Eq $w.d.status 'ok' "warn launches ($($w.out))"; Assert-Match $w.out 'WARNING \(watcher\): exe check failed' 'with a warning'
+            Assert-Eq $w.d.status 'ok' "a fresh start with warn launches ($($w.out))"; Assert-Match $w.out 'WARNING \(watcher\): exe check failed' 'with a warning'
             Assert-Eq (Run-Job 'kill owner=ci18' 'exekill' 40).d.status 'ok' 'kill'
         } finally {
             $ini = [IO.File]::ReadAllText((Join-Path $root 'watcher.ini')) -replace "`r`nexe_check=warn`r`n", ''
@@ -319,6 +349,7 @@ try {
             [IO.File]::WriteAllText($identityPath, "{`"sha1`": `"$fakeSha1`"}", $Utf8NoBom)
             Stop-Fakes; Clear-Lock
         }
+        Wait-Until { $x = Get-St; $x -and -not $x.exe_check_refused -and $x.exe_check -eq 'refuse' } 20 'back to exe_check=refuse (a reload may strengthen)' | Out-Null
         $st = Run-Job 'status' 'exestatus' 20
         Assert-Match $st.out '"ok":\s+true' 'a status job runs the check and shows the verdict'
     }
@@ -550,20 +581,47 @@ try {
     Test-Case 'headless launch: the proxy refusing (status refused, exit 2160) fails the job with the detail; no status in time kills the game' {
         Set-Lock 'ci12'; Set-Vd '3840x2160'; Set-Proxy $true; Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
         [IO.File]::WriteAllBytes($prefs, (Real-Prefs)); $h0 = Hashes
-        $id = Submit 'launch owner=ci12 headless_wait_s=60' (New-JobId 'hr')
-        $p = Wait-FakePid
-        Write-HStatus $p 'refused' 'no target: the virtual display is gone'
-        Stop-Process -Id $p -Force
-        $r = Get-Result $id 60
-        Assert-Eq $r.d.status 'failed' "refused ($($r.out))"
-        Assert-Match $r.d.reason 'HEADLESS FAILED: the proxy refused the launch: no target: the virtual display is gone \(exit code 2160' 'detail and exit code in the reason'
-        # a stale status of an old pid is ignored; silence is fail closed
-        Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
-        $t = Run-Job 'launch owner=ci12 headless_wait_s=4' 'hrt' 60
-        Assert-Eq $t.d.status 'failed' 'timeout'; Assert-Match $t.d.reason 'no on_virtual status.*within 4 s.*killed' 'timeout reason'
-        Wait-Until { (Fake-Procs).Count -eq 0 } 20 'the game was killed' | Out-Null
-        Clear-Lock; Wait-Until { (Hashes) -eq $h0 } 30 'files restored after failed launches' | Out-Null
-        [IO.File]::WriteAllBytes($prefs, $oddPrefs); Remove-Item -LiteralPath $hdll, $hstat -Force -ErrorAction SilentlyContinue
+        try {   # W38: the cleanup runs even when an assertion throws, so a failure here does not fail the cases after it
+            $id = Submit 'launch owner=ci12 headless_wait_s=60' (New-JobId 'hr')
+            $p = Wait-FakePid
+            Write-HStatus $p 'refused' 'no target: the virtual display is gone'
+            Stop-Process -Id $p -Force
+            $r = Get-Result $id 60
+            Assert-Eq $r.d.status 'failed' "refused ($($r.out))"
+            Assert-Match $r.d.reason 'HEADLESS FAILED: the proxy refused the launch: no target: the virtual display is gone \(exit code 2160' 'detail and exit code in the reason'
+            # a stale status of an old pid is ignored; silence is fail closed
+            Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
+            $t = Run-Job 'launch owner=ci12 headless_wait_s=4' 'hrt' 60
+            Assert-Eq $t.d.status 'failed' 'timeout'; Assert-Match $t.d.reason 'no on_virtual status.*within 4 s.*killed' 'timeout reason'
+            Wait-Until { (Fake-Procs).Count -eq 0 } 20 'the game was killed' | Out-Null
+        } finally {
+            Stop-Fakes
+            Clear-Lock; Wait-Until { (Hashes) -eq $h0 } 30 'files restored after failed launches' | Out-Null
+            [IO.File]::WriteAllBytes($prefs, $oddPrefs); Remove-Item -LiteralPath $hdll, $hstat -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Test-Case 'headless launch: a game that writes refused and exits at once keeps its detail (W38; both orders are pinned in Test-Unit); a stale refusal is not taken for it' {
+        $trig = Join-Path $game 'FakeGame.refuse'
+        Set-Lock 'ci38'; Set-Vd '3840x2160'; Set-Proxy $true; Remove-Item -LiteralPath $hstat -Force -ErrorAction SilentlyContinue
+        [IO.File]::WriteAllBytes($prefs, (Real-Prefs)); $h0 = Hashes
+        try {   # the cleanup runs even when an assertion throws, so a failure here does not fail the cases after it
+            New-Item -ItemType Directory -Path (Split-Path $hstat) -Force | Out-Null
+            [IO.File]::WriteAllLines($trig, [string[]]@($hstat, 'no target: the virtual display is gone'))
+            $r = Run-Job 'launch owner=ci38 headless_wait_s=30' 'hrf' 60
+            Assert-Eq $r.d.status 'failed' "refused before the first look ($($r.out))"
+            Assert-Match $r.d.reason 'HEADLESS FAILED: the proxy refused the launch: no target: the virtual display is gone \(exit code 2160' 'the detail survives the early exit'
+            # an old refusal (another pid, written before this launch) with a game that exits writing nothing: the generic line, not the old detail
+            Write-HStatus 4242 'refused' 'an old refusal'; (Get-Item -LiteralPath $hstat).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-1)
+            [IO.File]::WriteAllLines($trig, [string[]]@('', 'none'))
+            $t = Run-Job 'launch owner=ci38 headless_wait_s=30' 'hrs' 60
+            Assert-Eq $t.d.status 'failed' "exited at once ($($t.out))"
+            Assert-Match $t.d.reason 'is not running after the start \(exit code 2160 = the proxy refused|the game exited before reporting on_virtual' 'a generic line (seen gone, or seen alive then gone)'
+            Assert-NotMatch $t.d.reason 'an old refusal' 'the stale detail is not reported'
+        } finally {
+            Remove-Item -LiteralPath $trig -Force -ErrorAction SilentlyContinue
+            Clear-Lock; Wait-Until { (Hashes) -eq $h0 } 30 'files restored after the refused launches' | Out-Null
+            [IO.File]::WriteAllBytes($prefs, $oddPrefs); Remove-Item -LiteralPath $hdll, $hstat -Force -ErrorAction SilentlyContinue
+        }
     }
     Test-Case 'visible=1: no overlay, no display check, no status wait; the launch is still measured by the window probe' {
         Set-Lock 'ci13'; Set-Vd 'none'; Remove-Item -LiteralPath $hdll, $hstat -Force -ErrorAction SilentlyContinue

@@ -3,9 +3,11 @@
   "description": "Three CI flakes seen on 2026-11-04, each fixed at its cause. (1) The watcher's Headless-Wait reports a proxy refusal as 'not running after the start' when the game wrote its refused status and exited before the watcher first looked (PR 62 harness-windows, run 41852870156): read the status file before giving up. (2) test_pc_deploy's restore-wait test deletes _active.json from a timer at exactly the 1 s poll, and on Windows the delete fails while the reader holds the file (main gates windows-latest, run 41857256437). (3) test_capture's stress check 'a recording starts only with a waiter' reads `waiting` after the render thread's CAS, so a ctl timeout in between counts a false error (W20 run 41844358937, seeds 3 and 4). Liam, 2026-11-04: fix now.",
   "title": "Three CI flakes: the watcher's refused-launch race, the restore-wait test, the capture stress check",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "sonnet",
   "needs_pc": false,
   "depends_on": [],
-  "brief": "jobs/W38/brief.md"
+  "brief": "jobs/W38/brief.md",
+  "report": "jobs/W38/report.md",
+  "review": "jobs/W38/review.md"
 }

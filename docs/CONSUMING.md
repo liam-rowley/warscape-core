@@ -263,13 +263,10 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
 
-## Review integrity (0.31.0, core W27, C28)
-`wsc policy` reads a job branch's commits (by sha) for rules A-F, listed in the docstring of `warscape/policy.py`: reviewer code under `merge` (warning),
-a fresh session per round, append-only rounds, cited evidence (a missing `runs/` folder refuses; an unmerged branch or unpushed commit warns), a thin
-`merge` (warning), decision rows that cite the job (opt-in). Warnings print as `policy: warning:` lines and never refuse. `wsc jobs review` and the
-autopilot claim the round on origin first (`refs/claims/*`; the pusher needs no extra rights). A report beside `jobs/<id>/handback.md` needs `## Orchestrator
-additions`. A game: set `decisions_cite_job = true` in its pin bump if its decisions rows should cite their job, and stub `print_claims` and `take_claim`
-in any test that runs `jobs review` against a real origin.
+## Review integrity (0.34.0, core W27, C29)
+`wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
+lines and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
+`## Orchestrator additions`. A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
 
 ## Moving to base-judged policy (0.26.0, core W23, C24)
 In the pin-bump commit itself, because the render guard and the new facts fail otherwise (napoleon: J78):
@@ -303,6 +300,13 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
   request is withdrawn (`.request.expired`), so a script that relied on it staying queued must pass a longer wait and run in the background.
 - A ps1 job exits with its last statement's code, not an old native one: end a script with `exit 0` when a tool's non-zero code means success (robocopy 1 to 7).
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
+
+## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
+- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
+  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
+- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
+- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
+- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).
