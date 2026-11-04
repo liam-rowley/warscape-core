@@ -351,7 +351,7 @@ class JobSh(unittest.TestCase):
         (self.root / 'watcher.ini').write_text('# x\nhang_s = 120\nlock_stale_min = 1\n')
         r = self.jobsh('lock', 'b', 's', 'p')
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('expires after 1 min', r.stdout)
+        self.assertIn('it after 1 min', r.stdout)
         (self.root / 'watcher.ini').write_text('lock_stale_min=banana\n')
         self.stale(100)
         self.assertEqual(self.jobsh('lock', 'c', 's', 'p').returncode, 2)   # unparsable: 20 min
@@ -388,8 +388,8 @@ class JobSh(unittest.TestCase):
             self.stale()
             procs = [subprocess.Popen([BASH, str(JOB), *a, 'lock', f'r{rnd}t{i}', 's', 'p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                       text=True, env=job_env()) for i in range(4)]
-            codes = [p.communicate(timeout=60) and p.returncode for p in procs]
-            self.assertEqual(sorted(codes), [0, 2, 2, 2], codes)
+            outs = [p.communicate(timeout=60) for p in procs]; codes = [p.returncode for p in procs]
+            self.assertEqual(sorted(codes), [0, 2, 2, 2], (codes, outs))
             self.assertIn(f'owner=r{rnd}t{codes.index(0)} ', (self.root / 'game.lock').read_text())
             self.assertEqual(self.jobsh('unlock', f'r{rnd}t{codes.index(0)}').returncode, 0)
 
