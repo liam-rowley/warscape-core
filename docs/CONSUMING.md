@@ -164,6 +164,7 @@ dir = "jobs"                       # jobs/<id>/brief.md, report.md, review.md
 models = ["sonnet", "opus"]        # the Model line of a brief; models after the first need a stated reason
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
+failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
@@ -273,7 +274,7 @@ generated tables are byte-identical); after the pin bump run `python3 core/proxy
 The dev control channel ([PROXY_CTL.md](PROXY_CTL.md)): from 0.18.0 a request written before the game process started is refused as
 `stale` (job.sh exit 2: resend it), never run; the read-only `peek <site>[+|-<off>] [*[+|-<off>] ...] <len>` reads from an accepted engine site.
 
-## The game lock is the session's (0.25.0, core W10, C24)
+## The game lock is the session's (0.26.0, core W10, C24)
 The holder of `game.lock` is the pair (owner, session); the default owner is the session id, so two sessions can no longer share a lock by a shared name.
 Set `WSC_SESSION_ID` in the session (or pass `--session`; Claude Code's Bash tool already exports `CLAUDE_CODE_SESSION_ID`, which `ctl.py` and `acceptance.py` use
 when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `--owner` both tools refuse (exit 2) and say so. Scripts that name an owner

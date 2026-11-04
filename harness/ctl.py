@@ -162,17 +162,20 @@ def resolve_pose(rows, ref):
     return parse_pose(ref)
 
 
+def angle_diff(a, b):
+    """Smallest difference between two angles in degrees, in [0, 180]: equal angles compare equal in any representation (270 and -90)."""
+    return abs((a - b + 180) % 360 - 180)
+
+
 def pose_check(expected, got, tol):
-    """Compare a pose with the one read back. Each field within tol[field] (default tol['default']). Returns (ok, check dict)."""
+    """Compare a pose with the one read back. Each field within tol[field] (default tol['default']); yaw wraps (angle_diff), pitch does not. Returns (ok, check dict)."""
     detail, ok = {}, True
     for f in POSE_FIELDS:
         if f not in expected:
             continue
         t = tol.get(f, tol.get('default', 0.5))
         g = got.get(f)
-        d = None if g is None else abs(g - expected[f])
-        if f in ('yaw', 'pitch') and d is not None:
-            d = min(d, 360 - d) if d <= 360 else d
+        d = None if g is None else (angle_diff(g, expected[f]) if f == 'yaw' else abs(g - expected[f]))
         within = d is not None and d <= t
         ok = ok and within
         detail[f] = {'expected': expected[f], 'got': g, 'tolerance': t, 'within': within}

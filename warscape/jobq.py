@@ -40,6 +40,8 @@ class Settings:
     jobs_dir = 'jobs'
     reg_dir = 'registries'
     ledgers = ''
+    failed_results = ''
+    root = None
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
     text = dict(DEFAULTS['jobs']['text'])
@@ -51,6 +53,7 @@ S = Settings()
 def configure_from(cfg, root=None, reg_dir='registries'):
     """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file."""
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
+    S.failed_results, S.root = cfg.get('failed_results', ''), (Path(root) if root is not None else None)
     S.text = dict(cfg['text'])
     S.legacy_rounds = S.legacy_briefs = frozenset()
     if root is not None:
@@ -147,6 +150,35 @@ def report_problems(jid, text):
     return errs
 
 
+RUN_CITE = re.compile(r'(?:[\w.-]+/)*runs/[\w.-]*\w')  # ends on a word char: a sentence's '.' or '-' is not part of the path
+
+
+def failed_results_problems(jid, text, root, glob):
+    """Every ctl result (JSON matched by `glob` inside a run folder the report cites) with top-level status "failed" is named, by path
+    relative to the run folder or by file name, in the report's ## Deviations section. A report that cites no run folder passes."""
+    if not glob:
+        return []
+    root = Path(root).resolve()
+    m = re.search(r'^## Deviations\b[^\n]*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    dev = m.group(1) if m else ''
+    errs, seen = [], set()
+    for cite in RUN_CITE.finditer(text):
+        folder = (root / cite.group(0)).resolve()
+        if folder in seen or not folder.is_dir() or root not in folder.parents:
+            continue
+        seen.add(folder)
+        for f in sorted(folder.glob(glob)):
+            try:
+                if not f.is_file() or json.loads(f.read_text(encoding='utf-8')).get('status') != 'failed':
+                    continue
+            except (OSError, ValueError, AttributeError):
+                continue
+            rel = f.relative_to(folder).as_posix()
+            if rel not in dev and f.name not in dev:
+                errs.append(f'failed ctl result {folder.relative_to(root).as_posix()}/{rel} is not named in ## Deviations')
+    return errs
+
+
 def review_rounds(text):
     """(text before the first round, [(heading line, body)] in file order) of a review.md."""
     heads = list(ROUND.finditer(text or ''))
@@ -239,6 +271,8 @@ def problems(rows, read, folders=()):
         report = read(f'{S.jobs_dir}/{jid}/report.md')
         if report is not None:
             errs += [f'{jid}: report: {e}' for e in report_problems(jid, report)]
+            if S.failed_results and S.root is not None:
+                errs += [f'{jid}: report: {e}' for e in failed_results_problems(jid, report, S.root, S.failed_results)]
         review = read(f'{S.jobs_dir}/{jid}/review.md')
         if review is not None:
             if not DATED.search('\n'.join(review.split('\n')[:5])):
