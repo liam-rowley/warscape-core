@@ -237,7 +237,7 @@ if [[ "$WHAT" == smoke ]]; then
   #    launch before the peek), and a peek on the first engine site of the game being built (W37: from its generated tables; the stand-in
   #    exe refuses every site) is refused with its reason. A game with no engine sites checks the stale request only.
   #    The host waits for the peek's answer; the peek is written only once the ctl thread logged, so after the process was created.
-  SITE="$(grep -m1 -o '^ *{ "[^"]*"' "$ADIR/generated/tables.h" | cut -d'"' -f2 || true)"
+  SITE="$(sed -n '/kSites\[/,/^};/p' "$ADIR/generated/tables.h" | grep -m1 -o '^ *{ "[^"]*"' | cut -d'"' -f2 || true)"
   if [[ -n "$SITE" ]]; then WAITFOR='ctl\peek1.done'; else WAITFOR='ctl\old1.done'; echo "build.sh smoke: this game has no engine sites: step 8 checks the stale request only"; fi
   mkdir -p "$G/ctl"; printf 'exit\n' > "$G/ctl/old1.cmd"; touch -d '2020-01-02 03:04:05 UTC' "$G/ctl/old1.cmd"
   printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\n' > "$G/$INI"
