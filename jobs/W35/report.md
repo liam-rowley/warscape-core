@@ -137,3 +137,41 @@ are identical from another path.
 - No hook line is needed.
 - The release builder attaches `d3d9.map` and `d3d9.map.json`.
 - The watcher kit does not change.
+
+## Fix round 1
+Fixed by a fresh session (Claude-Session e4f8697d-5612-4e71-b8ef-a35835938710), 2026-11-04, on review round 1 ("merge after fixes"). The code fixes
+for 1-6 interleave in one file and its tests, so they are one commit.
+
+- **Merge of main** (`f538a54`): W16 and W33 had merged; W33 took C29, so W35's decision is now **C30** (the row and every `(W35, C29)` reference).
+  VERSION stays 0.35.0, the next after main's 0.34.0. `smoke_host.cpp` takes both `open` (W33) and `dllfault` (W35); `build.sh smoke` runs W33's
+  thread-order check and steps 9-10, then the DLL fault as step 11 (11 launches, 3 dumps). The smoke runs only in CI (wine); not run here.
+- **1. A narrower rule can be a write primitive** (`91649e1`): `covers` accepts only whole-word extensions of a prefix (`git diff` no longer covers
+  `git diffx`). The words a rule adds to its closest safe pattern may not hold a `WRITE_FLAGS` flag (`--output`, `--ext-diff`, `--textconv`,
+  `--config`, `--exec`, `--upload-pack`, `--git-dir`, `-c`, `-O`, `-o`, `-x` and kin; also `--flag=value` and `-cvalue`). New `[agent_settings]
+  exact_only = true` allows only the patterns themselves (default false; a non-bool refuses). A flag inside a safe pattern itself is still Liam's choice.
+- **2. Symlinks and junctions** (`91649e1`): the target is judged after `os.path.realpath`: `.claude` a symlink or junction (`Path.is_junction`), the
+  file or its `.bak` a link, the file or `.bak` with more than one hard link, or a resolved path outside `<real root>/.claude`, refuses. The `.bak` is now
+  written as a temporary file in the folder and `os.replace`d onto its name, so a link that appears there after the check is replaced, never written through.
+  In passing: the file is read and the `.bak` written as bytes, so a CRLF file keeps its line ends (`read_text` had turned them into LF, so the
+  CRLF branch never ran; a test now proves it).
+- **3. `--file` in any `.claude` folder** (`91649e1`): the resolved parent must be the repo's own `<root>/.claude`; an absolute or relative path to
+  another `.claude` folder refuses.
+- **4. Tests** (`91649e1`): ten new tests in `tests/test_agent_settings.py` (24 in all): whole-word prefixes, nine write/run-flag rules, `exact_only`,
+  a glob deny, a `.claude` outside the root, a `.claude` junction (a directory symlink off Windows), a symlinked settings file, a symlink at `.bak`, hard
+  links at the file and at `.bak`, CRLF. Run against the round-0 verb, 8 fail; the two symlink tests skip on this Windows PC (no symlink privilege)
+  and run on ubuntu CI. The junction and hard-link tests need no privilege and always run on Windows.
+- **5. A deny with a `*` inside** (`91649e1`): `glob_overlaps` reads it broadly: it blocks any rule of its tool whose command starts with the deny's
+  text before the first `*` (or, for a prefix rule, whose command that text starts with). `Bash(git * --force)` therefore blocks every `git` rule; Liam
+  decides those.
+- **6. `.bak` once per run** (`91649e1`): the `--file` help, the module docstring and `docs/PROXY_HARNESS.md` say each writing run replaces the `.bak`,
+  so two runs keep only the second original.
+- **Docs:** `docs/PROXY_HARNESS.md` "Guarded verbs" and the C30 row describe the new rules (`91649e1`). The report's round-0 claims ("never follows a
+  symlink", "writes only directly inside `.claude/`") hold now in the form above.
+- **Not asked, needed for green gates** (`5b84c27`): main is red on `doc_size` since W16 and W33 merged (CONSUMING.md 31,527 bytes, run 41893656670);
+  with W35's section it was 32,086. The three oldest pin-bump sections (0.24.0, 0.26.0, 0.27.0) move unchanged to `docs/CONSUMING_UPGRADES.md` behind a
+  pointer, as the earlier CONSUMING_OPTIONS.md move did; CONSUMING.md is 28.6 KB. Merging W35 turns main's doc_size green.
+- **Left:** a `watcher.status`-shows-a-process test for `vdisplay-aside` (the review's "later, not required"). One check-then-write race remains: a link
+  put at the file or `.bak` after the check is replaced (`os.replace` acts on the name), but `.claude` itself swapped for a junction between the check
+  and the write would take the temporary file and the replace with it. That needs a writer racing the verb inside the repo; not guarded further.
+- **Machines** (this checkout, Windows, 2026-11-04): `wsc gates` 13 ok, 2 warn (`ci_render`'s old W23 note; `tests` 809 passed, 5 skipped: no POSIX sh,
+  no capstone), 0 failed. `wsc policy --branch job/W35 --base origin/main` refuses only on the missing merge verdict and the `done` row.
