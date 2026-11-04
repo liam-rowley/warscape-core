@@ -1,3 +1,16 @@
+## Round 2 (2026-11-04, branch job/W30 at df38cb1)
+
+**Verdict: merge.**
+
+Round 1 answered: the `RUN_CITE` blocker is fixed (`warscape/jobq.py:153` now ends on `\w`, test `test_citation_followed_by_punctuation` covers `.`, `)`, `,`, `:`), the blank line is
+fixed, and `VERSION` is 0.25.0 against `origin/main` 0.24.0. Local `wsc gates`: 14 ok, 1 warn (skipped POSIX/capstone tests), 0 failed. CI `gates (ubuntu-latest)` and
+`gates (windows-latest)` are green at df38cb1; `harness-windows` was still running when I read it (auto-merge waits on it). The yaw fix (`angle_diff`, yaw only, pitch plain `abs`) and the off-by-default
+`failed_results` rule match the brief; the call site is one line and `report_problems` is unchanged. Risk-first read: `failed_results_problems` (reads files under a cited path;
+the `root not in folder.parents` guard blocks `..` escapes). No findings.
+
+### Later
+- If another job takes 0.25.0 first, the later one must bump `VERSION` (`core_pin` gate).
+
 ## Round 1 (2026-11-04, branch job/W30 at 85d0040)
 
 **Verdict: merge after fixes.**
