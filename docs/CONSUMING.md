@@ -152,12 +152,15 @@ models = ["sonnet", "opus"]        # the Model line of a brief; models after the
 legacy = "jobs/legacy.json"        # {"round_rules": [ids], "brief_hooks": [ids]}: jobs written before a rule existed, exempt from that rule only
 ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows name a job the brief must cover
 failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
+claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
 decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
-session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off
+session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
+decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
+thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
 plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
 inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
@@ -236,7 +239,7 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   `wsc jobs check`, with `ctx.rows`, `ctx.read(path)` and `ctx.briefs()` (`(jid, row, text)` per brief, minus the legacy file's `brief_hooks` ids); an `error`
   Result's details are queue problems, a `warn` Result's print, a non-empty summary goes on the `jobs check` line. `policy`: `wsc policy` only, run from the
   **base tree** (W23): `ctx.root` and `ctx.config` are the base's rule inputs in a temporary folder, not a repository; `ctx.facts` has branch, kind, jid,
-  changed, merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
+  changed, `added_decision_rows` ([{id, text}], W27), merge_base, `base` and `head` (shas), `base_ref` and `repo` (the clone: run git there). Read the head as data with `from warscape.policy import show`,
   `show(sha, path, cwd=repo)`; never `'HEAD'`, never git in `ctx.root`, never run the head's files. An `error` Result's details are policy errors. `view`: `wsc jobs view`,
   with `ctx.rows`; the Result's `html` is drawn as is at the top of the page, else its escaped summary and details. A crash is an `error`.
 - A module is a tool like any script (header and a `tools` row). A listed folder that does not exist, a clashing or malformed `NAME`, an unknown stage, a missing
@@ -259,6 +262,14 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside dated job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
+
+## Review integrity (0.31.0, core W27, C28)
+`wsc policy` reads a job branch's commits (by sha) for rules A-F, listed in the docstring of `warscape/policy.py`: reviewer code under `merge` (warning),
+a fresh session per round, append-only rounds, cited evidence (a missing `runs/` folder refuses; an unmerged branch or unpushed commit warns), a thin
+`merge` (warning), decision rows that cite the job (opt-in). Warnings print as `policy: warning:` lines and never refuse. `wsc jobs review` and the
+autopilot claim the round on origin first (`refs/claims/*`; the pusher needs no extra rights). A report beside `jobs/<id>/handback.md` needs `## Orchestrator
+additions`. A game: set `decisions_cite_job = true` in its pin bump if its decisions rows should cite their job, and stub `print_claims` and `take_claim`
+in any test that runs `jobs review` against a real origin.
 
 ## Moving to base-judged policy (0.26.0, core W23, C24)
 In the pin-bump commit itself, because the render guard and the new facts fail otherwise (napoleon: J78):

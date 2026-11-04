@@ -6,6 +6,24 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
               carry <id>/report.md and <id>/review.md whose verdict line says exactly "merge"; row <id> must be `done`; no session (the
               `[policy] session_trailer` commit trailer) that wrote the report may write the review (never review your own job), and
               every commit touching the report or the review must carry that trailer (fails closed).
+              Review integrity (core W27), read from the branch's commits by sha:
+                A  (warning) a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict. A round's commits:
+                   the review.md commits whose review.md holds round N as its newest, any other commit by a session of those, and a commit by nobody
+                   known (no trailer, or a session neither the builder's nor a round's) after the first review commit, which goes to the round of
+                   the next review commit (the newest round when none follows). The builder's sessions are every report.md writer (fix sessions too).
+                B  each round's sessions are disjoint from the builder's and from every earlier round's.
+                C  review rounds are append only: each base round is unchanged at the head, and on every commit an earlier round stays
+                   byte-identical once a newer round exists (a rewrite then a restore is refused); before that only its author edits it.
+                D  in report.md and review.md at the head: a repo-relative `<path>/runs/<name>` (RUN_PATH: not inside a URL or an absolute path)
+                   must exist in the head or the base tree (error); a `job/<X><n>`, `brief/<X><n>` or `origin/<ref>` (BRANCH_CITE, ORIGIN_CITE;
+                   not the branch itself, origin/main, origin/HEAD or the base) must be an ancestor of the base or a tag's target, or (squash
+                   merges) a job row `done` / a brief on the base: else a warning (unmerged, or not in this clone); a commit sha (SHA_WORD: 7-40 hex
+                   in backticks after "commit(s)" or "sha(s)", a list of them; SHA_AT: after `@`) must be reachable from the base or the head or be a
+                   tag's target, else a warning.
+                E  (warning) a `merge` on more than `[policy] thin_merge_lines` changed lines or `thin_merge_files` files outside the jobs folder and
+                   the registries whose newest round cites no evidence (EVIDENCE: a run id, an actions URL, `run <digits>`, a test name, a runs/ path).
+                F  with `[policy] decisions_cite_job`, a decisions row added on job/<id> contains <id>.
+              Rules A and D's branch cites warn, not refuse: the W27 scan of the merged job branches (its report) passed the brief's kill criterion.
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
   plan/*      planning: the `[policy] plan` globs. No code.
   meta/*      repo infrastructure: the `[policy] meta` globs.
@@ -13,7 +31,8 @@ Anything else is refused. Globs match by path segment (`*` and `?` inside one se
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
 YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. A repo's own rules (napoleon's rule 79,
 the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the decisions check: an `error`
-Result's details are policy errors.
+Result's details are policy errors. Their facts carry `added_decision_rows` ([{id, text}], W27). Warnings print as `policy: warning: ...` lines
+before the verdict line and never change the exit code.
 
 A pull request is judged with its base's rules (core W23, C24). The verb's parent (warscape/policy_base.py `judge`) writes the base's rule
 inputs into a fresh temporary folder outside every repository and runs the base's code there in a child process (`wsc policy --judge`,
