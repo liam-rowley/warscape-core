@@ -25,11 +25,12 @@ Runtime& Rt() { static Runtime r; return r; }
 
 bool StartThread(LPTHREAD_START_ROUTINE fn, const char* name) {
     if (Rt().inDllMain) { LOGE("thread: %s refused: no proxy thread starts inside DllMain (start it at the first export call)", name); return false; }
-    DWORD tid = 0;
-    HANDLE h = CreateThread(nullptr, 0, fn, nullptr, 0, &tid);
+    DWORD tid = 0;   // created suspended, so the "started" line comes before anything the thread logs
+    HANDLE h = CreateThread(nullptr, 0, fn, nullptr, CREATE_SUSPENDED, &tid);
     if (!h) { LOGE("thread: %s did not start (CreateThread error %lu)", name, GetLastError()); return false; }
-    CloseHandle(h);
     LOGI("thread: %s started (tid %lu)", name, tid);
+    ResumeThread(h);
+    CloseHandle(h);
     return true;
 }
 

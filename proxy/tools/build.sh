@@ -296,7 +296,7 @@ if [[ "$WHAT" == smoke ]]; then
   SITE="$(sed -n '/kSites\[/,/^};/p' "$ADIR/generated/tables.h" | grep -m1 -o '^ *{ "[^"]*"' | cut -d'"' -f2 || true)"
   if [[ -n "$SITE" ]]; then WAITFOR='ctl\peek1.done'; else WAITFOR='ctl\old1.done'; echo "build.sh smoke: this game has no engine sites: step 8 checks the stale request only"; fi
   mkdir -p "$G/ctl"; printf 'exit\n' > "$G/ctl/old1.cmd"; touch -d '2020-01-02 03:04:05 UTC' "$G/ctl/old1.cmd"
-  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\n' > "$G/$INI"
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nctl=1\r\nctl_dir=ctl\r\nstate_json=1\r\n' > "$G/$INI"
   run wait "$WAITFOR" > "$OUT/smoke/ctl_run.txt" 2>&1 &
   RUN=$!
   for _ in $(seq 1 300); do grep -q "ctl: watching" "$G/$MOD/logs/proxy.log" 2>/dev/null && break; sleep 0.2; done
@@ -307,6 +307,30 @@ if [[ "$WHAT" == smoke ]]; then
   if grep -q "exit requested" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: the stale exit request ran"; exit 1; fi
   grep -q '"status": "refused", "reason": "stale: written' "$G/ctl/old1.done" || { echo "build.sh smoke: old1.done is not a stale refusal"; cat "$G/ctl/old1.done"; exit 1; }
   [[ -z "$SITE" ]] || grep -q '"status": "refused", "reason": "sites not accepted by the patch engine' "$G/ctl/peek1.done" || { echo "build.sh smoke: peek1.done is not the sites refusal"; cat "$G/ctl/peek1.done"; exit 1; }
-  echo "build.sh smoke: passed (8 launches under wine, 2 dumps)"
+  #    W33 (C24): no dev thread starts in DllMain: both start after the first Direct3DCreate9, and the ctl thread watches after its start line
+  at() { grep -n -m1 -F "$1" "$G/$MOD/logs/proxy.log" | cut -d: -f1; }
+  CREATE="$(at 'Direct3DCreate9(sdk=32)')"; T_STATE="$(at 'thread: dev.state started')"; T_CTL="$(at 'thread: dev.ctl started')"; WATCH="$(at 'ctl: watching')"
+  if [[ -z "$CREATE" || -z "$T_STATE" || -z "$T_CTL" || -z "$WATCH" ]] || (( T_STATE < CREATE || T_CTL < CREATE || WATCH < T_CTL )); then
+    echo "build.sh smoke: thread order: Direct3DCreate9 line ${CREATE:-none}, dev.state ${T_STATE:-none}, dev.ctl ${T_CTL:-none}, ctl: watching ${WATCH:-none}"
+    cat "$G/$MOD/logs/proxy.log"; exit 1
+  fi
+  check "threads at the first Direct3DCreate9: state=1 ctl=1"
+  nothread() { if grep -q "thread: " "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: $1: a proxy thread started"; cat "$G/$MOD/logs/proxy.log"; exit 1; fi; }
+  # 9) proxy.file_rules (W33): the release file rules with every dev key off: the rules load, no dev side, no thread; the host opens the
+  #    redirected path through its own import table and must read the target's text
+  rm -rf "$G/ctl"; mkdir -p "$G/data"
+  printf 'vanilla\r\n' > "$G/data/smoke_in.txt"; printf 'redirected by proxy.file_rules\r\n' > "$G/$MOD/smoke_out.txt"
+  printf 'redirect data\\smoke_in.txt -> %s\\smoke_out.txt\r\n' "$MOD" > "$G/rules.txt"
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
+  run open 'data\smoke_in.txt' > "$OUT/smoke/open_run.txt" 2>&1 || { echo "build.sh smoke: the proxy.file_rules launch failed"; cat "$OUT/smoke/open_run.txt"; exit 1; }
+  check "redirect: 1 rules from"; check "(proxy.file_rules)"; check "proxy.file_rules line 1"; check "process detach"
+  if grep -q "dev: timeline=" "$G/$MOD/logs/proxy.log"; then echo "build.sh smoke: proxy.file_rules turned the dev side on"; exit 1; fi
+  nothread "proxy.file_rules alone"
+  grep -q "smoke: open data.smoke_in.txt: redirected by proxy.file_rules" "$OUT/smoke/open_run.txt" || { echo "build.sh smoke: the redirect did not serve smoke_out.txt"; cat "$OUT/smoke/open_run.txt"; cat "$G/$MOD/logs/proxy.log"; exit 1; }
+  # 10) dev keys that need no thread (a hook and a rule file): the dev side on, no thread, a clean FreeLibrary with no proxy thread in the DLL
+  printf '[proxy]\r\nbackend=system\r\nexe_guard=0\r\n[dev]\r\nskip_intro=1\r\nfile_rules=rules.txt\r\n' > "$G/$INI"
+  run; check "threads at the first Direct3DCreate9: state=0 ctl=0"; check "process detach (FreeLibrary)"
+  nothread "skip_intro and dev.file_rules"
+  echo "build.sh smoke: passed (10 launches under wine, 2 dumps)"
   summary "- smoke: self_hash in proxy.log matches d3d9.dll ($SH_MS ms under wine)"
 fi
