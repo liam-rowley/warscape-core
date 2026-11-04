@@ -139,7 +139,7 @@ def check(ctx, reg):
     for r in rows:
         st = r.get('status', '')
         if st == 'live' and r.get('path') not in files:
-            errs.append(f'{reg.rel_path}: {r.get("id")}: live row whose file {r.get("path")!r} does not exist (git rm leftover: supersede it or remove the row)')
+            errs.append(f'{reg.rel_path}: {r.get("id")}: live row whose file {r.get("path")!r} does not exist (git rm leftover: supersede it, or `wsc reg remove tools {r.get("id")}`)')
         if st.startswith('superseded:'):
             tgt = st.split(':', 1)[1]
             if tgt not in ids:
@@ -149,7 +149,81 @@ def check(ctx, reg):
     days = ctx.config['tools']['retire_after_days']
     if days:
         cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+        derived = last_uses(ctx)
         for r in rows:
-            if r.get('status') == 'live' and r.get('last_used', '9999') < cutoff:
-                warns.append(f'{r.get("id")}: live but last used {r["last_used"]} (over {days} days): retire it (status superseded:<id>) or record a use')
+            if r.get('status') != 'live':
+                continue
+            date, src = r.get('last_used', '9999'), '(row)'
+            if r.get('id') in derived and derived[r['id']][0] > date:
+                date, src = derived[r['id']][0], f'({derived[r["id"]][1]})'
+            if date < cutoff:
+                warns.append(f'{r.get("id")}: live but last used {date} {src} (over {days} days): retire it (status superseded:<id>, or '
+                             f'`wsc reg remove tools {r.get("id")}` after deleting the file), cite it in the next job report that uses it, '
+                             f'or record a use (`wsc reg set tools {r.get("id")} last_used=<date>`)')
     return errs, warns
+
+
+# A cited path is a whole path: not inside a longer name before it (a `core/` prefix still counts: a game report citing the core's
+# `core/harness/job.sh`), and not continued after it (a sentence's closing `.` or `-` is not a continuation; `.bak` is).
+_BEFORE = r'(?<![A-Za-z0-9_.\-/])(?:core/)?'
+_AFTER = r'(?![A-Za-z0-9_]|[.\-/][A-Za-z0-9_])'
+
+
+def cite_pattern(row):
+    """The regex that finds a citation of tool `row` in a job report: its path as a whole path, or, for a verb, `wsc <verb>`,
+    `wsc.py <verb>` or its id `wsc.<verb>` as a word."""
+    alts = [_BEFORE + re.escape(row['path']) + _AFTER] if row.get('path') else []
+    if row.get('verb'):
+        v = re.escape(row['verb'])
+        alts.append(rf'\bwsc(?:\.py)?[ \t]+{v}(?![\w-])')
+        alts.append(rf'(?<![\w.-])wsc\.{v}(?![\w-])')
+    return re.compile('|'.join(alts)) if alts else None
+
+
+def done_job_date(review):
+    """The date of a done job: the one in the newest `## Round N (YYYY-MM-DD, ...)` heading of its review.md, else (a legacy review)
+    the first YYYY-MM-DD in its first 5 lines, else None."""
+    from . import jobq
+    best = None
+    for head, _ in jobq.review_rounds(review or '')[1]:
+        m = jobq.ROUND_HEAD.match(head)
+        if m and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), jobq.DATED.search(head).group(0))
+    if best:
+        return best[1]
+    m = jobq.DATED.search('\n'.join((review or '').split('\n')[:5]))
+    return m.group(0) if m else None
+
+
+def last_uses(ctx):
+    """{tool id: (date, report path)}: for each tool, the newest merged (`done`) job whose report.md cites it (`cite_pattern`), dated by
+    `done_job_date` of its review.md, read from the working tree (never git history: the CI checkout is shallow). Nothing when the repo
+    declares no `jobs` registry. The retirement check takes the later of this and the row's `last_used` (the floor: the date the row was
+    added, or a use recorded by hand). Cached on `ctx` (find, reg check and the gates share one per process)."""
+    cached = getattr(ctx, '_last_uses', None)
+    if cached is not None:
+        return cached
+    out = {}
+    if 'jobs' in ctx.config['registries']:
+        from .registry import load_from_config
+        regs = load_from_config(ctx.config, ctx.root)
+        jobs_dir = ctx.config['jobs']['dir']
+        pats = [(r['id'], p) for r in regs['tools'].rows if (p := cite_pattern(r))] if 'tools' in regs else []
+
+        def read(rel):
+            try:
+                return (ctx.root / rel).read_text(encoding='utf-8')
+            except OSError:
+                return None
+        for job in regs['jobs'].rows:
+            if job.get('status') != 'done':
+                continue
+            base = f'{jobs_dir}/{job.get("id")}'
+            date, report = done_job_date(read(f'{base}/review.md')), read(f'{base}/report.md')
+            if not date or not report:
+                continue
+            for tid, pat in pats:
+                if (tid not in out or date > out[tid][0]) and pat.search(report):
+                    out[tid] = (date, f'{base}/report.md')
+    ctx._last_uses = out
+    return out

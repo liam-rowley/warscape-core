@@ -321,6 +321,40 @@ class Registry:
         self.add(row, replace=True)
         return row
 
+    def remove(self, ids):
+        """Drop the rows with these ids in memory and return them (in the order given); `save()` writes the change (in `dir` storage
+        it deletes their files). An unknown id raises RegistryError naming the registry, and nothing is dropped. `wsc reg remove`
+        checks first that nothing points at them."""
+        have = self.by_id()
+        bad = [i for i in ids if i not in have]
+        if bad:
+            raise RegistryError('; '.join(f'{self.name}: no row with id {i!r}' for i in bad))
+        gone = set(ids)
+        self.rows = [r for r in self.rows if r.get('id') not in gone]
+        return [have[i] for i in dict.fromkeys(ids)]
+
+    def row_file(self, rid):
+        """The repo-relative file that holds row `rid` (its own file in `dir` storage, else the JSONL)."""
+        if self.storage == 'dir':
+            try:
+                return f'{self.rel_path}/{id_to_file(rid)}'
+            except RegistryError:
+                pass
+        return self.rel_path
+
+    def refs_to(self, target, ids):
+        """[(row id, field, value)] for each value of an `x-ref: <target>` property (directly or on `items`) that is in `ids`."""
+        out = []
+        for field, ps in self.schema.get('properties', {}).items():
+            if not isinstance(ps, dict) or (ps.get('x-ref') or (ps.get('items') or {}).get('x-ref')) != target:
+                continue
+            for r in self.rows:
+                v = r.get(field)
+                for x in (v if isinstance(v, list) else [v] if v is not None else []):
+                    if x in ids:
+                        out.append((r.get('id'), field, x))
+        return out
+
     # ------------------------------------------------------------------ view
     def render(self):
         view = self.schema.get('x-view', {})

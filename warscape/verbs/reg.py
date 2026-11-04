@@ -1,6 +1,6 @@
 """
-Purpose: Change, check and render registries (rows + JSON Schema + generated Markdown view): add a row, set fields, check everything, re-render views, move a registry between JSONL and one-file-per-row storage.
-Usage: wsc reg add <reg> key=value key:=<json> ... | wsc reg add tools <path>... [--id ID] [--status S] [--missing] | wsc reg set <reg> <id> key=value key:=null ... | wsc reg check [<reg>...] | wsc reg render [<reg>...] [--out DIR] | wsc reg migrate <reg> --to dir|jsonl
+Purpose: Change, check and render registries (rows + JSON Schema + generated Markdown view): add a row, set fields, remove rows nothing points at, check everything, re-render views, move a registry between JSONL and one-file-per-row storage.
+Usage: wsc reg add <reg> key=value key:=<json> ... | wsc reg add tools <path>... [--id ID] [--status S] [--missing] | wsc reg set <reg> <id> key=value key:=null ... | wsc reg remove <reg> <id>... | wsc reg check [<reg>...] | wsc reg render [<reg>...] [--out DIR] | wsc reg migrate <reg> --to dir|jsonl
 When: whenever a registry fact changes (a new tool, scenario, asset, engine site, fact ...); `check` runs in the gates; `render` after a hand edit of a row file or a merge; `migrate` once, to switch a registry's storage.
 Verb: reg
 """
@@ -16,7 +16,7 @@ HELP = 'add, set, check or render registry rows'
 
 
 def add_arguments(p):
-    sub = p.add_subparsers(dest='action', required=True, metavar='{add,set,check,render,migrate}')
+    sub = p.add_subparsers(dest='action', required=True, metavar='{add,set,remove,check,render,migrate}')
     a = sub.add_parser('add', help='add a row (key=value for strings, key:=<json> for anything else); for tools, give file paths')
     a.add_argument('registry')
     a.add_argument('items', nargs='*', help='key=value / key:=json pairs, or (tools) file paths')
@@ -28,6 +28,9 @@ def add_arguments(p):
     s.add_argument('registry')
     s.add_argument('id')
     s.add_argument('items', nargs='+')
+    d = sub.add_parser('remove', help='remove rows (in dir storage, their files); refused, with nothing written, while anything points at them')
+    d.add_argument('registry')
+    d.add_argument('ids', nargs='+', metavar='id', help='row ids; give rows that only point at each other together')
     c = sub.add_parser('check', help='check registries (default: all)')
     c.add_argument('registries', nargs='*')
     r = sub.add_parser('render', help='rewrite the rows in canonical form and regenerate the Markdown views (default: all)')
@@ -114,11 +117,66 @@ def migrate(ctx, name, to):
     return f'migrated {name}: {len(new.rows)} rows from {old.rel_path} to {new.rel_path}; {CONFIG_NAME} [storage] dir = {names}'
 
 
+def _problems(ctx, regs):
+    """Every registry's check plus the tools coverage check: the backstop of `remove` compares this before and after."""
+    out = []
+    for r in regs.values():
+        out += r.check(regs)
+        if r.schema.get('x-source') == 'tool-headers':
+            out += tools.check(ctx, r)[0]
+    return out
+
+
+def referrers(ctx, regs, reg, gone):
+    """Lines `<file>: <row>: <field> ...`, one per thing that still points at the removed rows `gone` (already out of `reg.rows`)."""
+    ids = {r.get('id') for r in gone}
+    lines = [f'{r.row_file(rid)}: {rid}: {field} {x}' for r in regs.values() for rid, field, x in r.refs_to(reg.name, ids)]
+    if reg.schema.get('x-source') == 'tool-headers':
+        for r in reg.rows:
+            st = str(r.get('status', ''))
+            if st.startswith('superseded:') and st.split(':', 1)[1] in ids:
+                lines.append(f'{reg.row_file(r.get("id"))}: {r.get("id")}: status {st}')
+        files = set(ctx.files())
+        lines += [f'{r["path"]}: {r.get("id")}: path: the tool file is still in the repo (removing its row only fails the tools check): '
+                  f'delete the file first, or supersede the row' for r in gone if r.get('path') in files]
+    if reg.name == 'jobs':
+        jd = ctx.config['jobs']['dir']
+        lines += [f'{jd}/{r.get("id")}/: {r.get("id")}: the job folder exists (`jobs check` fails on a folder with no row); the folder is '
+                  f'history: removing it is a meta/ decision' for r in gone if (ctx.root / jd / str(r.get('id'))).is_dir()]
+    return lines
+
+
+def remove(ctx, regs, name, ids):
+    """(exit code, lines) of `reg remove`: the rows go only when nothing points at them; nothing is written on a refusal."""
+    reg = _pick(regs, [name])[0]
+    if reg.parse_errors:
+        raise RegistryError('fix these first:\n' + '\n'.join(reg.parse_errors))
+    before = _problems(ctx, regs)
+    try:
+        gone = reg.remove(ids)
+    except RegistryError as e:
+        return 1, [f'refused: {e} (nothing written)']
+    lines = referrers(ctx, regs, reg, gone)
+    if not lines:   # backstop: a reference kind the named rules miss shows up as a new problem (the rewrite itself is not one)
+        noise = (f'{reg.rel_path}: not in canonical form', f'{reg.rel_view}: stale or missing')
+        lines = [f'new problem after the removal: {e}' for e in _problems(ctx, regs) if e not in before and not e.startswith(noise)]
+    if lines:
+        return 1, [f'refused: {len(lines)} reference{"s" if len(lines) != 1 else ""} to {name} {", ".join(ids)} (nothing written):'] + \
+            [f'  {l}' for l in lines]
+    reg.save()
+    reg.write_view()
+    return 0, [f'removed {name}:{", ".join(dict.fromkeys(ids))}']
+
+
 def run(args, ctx):
     if args.action == 'migrate':
         print(migrate(ctx, args.registry, args.to))
         return 0
     regs = load_all(ctx)
+    if args.action == 'remove':
+        rc, lines = remove(ctx, regs, args.registry, args.ids)
+        print('\n'.join(lines))
+        return rc
     if args.action in ('add', 'set'):
         reg = _pick(regs, [args.registry])[0]
         if args.action == 'add' and reg.schema.get('x-source') == 'tool-headers':
