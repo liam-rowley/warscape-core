@@ -156,73 +156,45 @@ class LastUse(unittest.TestCase):
     def job(self, jid, status, report, review):
         row = {'id': jid, 'description': 'd', 'title': 't', 'phase': 1, 'status': status, 'model': 'sonnet', 'needs_pc': False,
                'depends_on': [], 'brief': f'jobs/{jid}/brief.md', 'report': f'jobs/{jid}/report.md', 'review': f'jobs/{jid}/review.md'}
-        self.repo.write(f'registries/jobs/{jid}.json', json.dumps(row, indent=2) + '
-')
-        self.repo.write(f'jobs/{jid}/brief.md', f'# {jid}
-')
+        self.repo.write(f'registries/jobs/{jid}.json', json.dumps(row, indent=2) + '\n')
+        self.repo.write(f'jobs/{jid}/brief.md', f'# {jid}\n')
         self.repo.write(f'jobs/{jid}/report.md', report)
         if review is not None:
             self.repo.write(f'jobs/{jid}/review.md', review)
 
     @staticmethod
     def rounds(*dates):
-        return '# review
-
-' + ''.join(f'## Round {i} ({d}, branch `job/W1` at `abc1234`)
-Verdict: fix
-
-' for i, d in enumerate(dates, 1))
+        return '# review\n\n' + ''.join(f'## Round {i} ({d}, branch `job/W1` at `abc1234`)\nVerdict: fix\n\n' for i, d in enumerate(dates, 1))
 
     def uses(self):
         return tools.last_uses(Ctx.load(self.repo.root))
 
     def test_a_done_report_citing_a_path_dates_the_tool_by_its_newest_round(self):
-        self.job('W1', 'done', 'Ran `core/harness/job.sh run` twice.
-', self.rounds(ago(9), ago(7)))
+        self.job('W1', 'done', 'Ran `core/harness/job.sh run` twice.\n', self.rounds(ago(9), ago(7)))
         self.assertEqual(self.uses()['harness.job'], (ago(7), 'jobs/W1/report.md'))
 
     def test_a_verb_is_cited_as_wsc_verb_or_wsc_py_verb(self):
-        self.job('W1', 'done', 'Then `wsc reg check` passed.
-', self.rounds(ago(9)))
+        self.job('W1', 'done', 'Then `wsc reg check` passed.\n', self.rounds(ago(9)))
         self.assertEqual(self.uses()['wsc.reg'], (ago(9), 'jobs/W1/report.md'))
-        self.job('W2', 'done', 'python3 core/wsc.py reg set jobs W2
-', self.rounds(ago(8)))
+        self.job('W2', 'done', 'python3 core/wsc.py reg set jobs W2\n', self.rounds(ago(8)))
         self.assertEqual(self.uses()['wsc.reg'], (ago(8), 'jobs/W2/report.md'))
-        self.job('W3', 'done', 'wsc regular, wsc.py registry, wsc.regex
-', self.rounds(ago(1)))
+        self.job('W3', 'done', 'wsc regular, wsc.py registry, wsc.regex\n', self.rounds(ago(1)))
         self.assertEqual(self.uses()['wsc.reg'], (ago(8), 'jobs/W2/report.md'))
 
     def test_a_path_inside_a_longer_path_does_not_cite(self):
-        self.job('W1', 'done', 'See xharness/job.sh, harness/job.sh.bak, a/harness/job.sh and harness/job.shx.
-', self.rounds(ago(3)))
+        self.job('W1', 'done', 'See xharness/job.sh, harness/job.sh.bak, a/harness/job.sh and harness/job.shx.\n', self.rounds(ago(3)))
         self.assertNotIn('harness.job', self.uses())
-        self.job('W2', 'done', 'It ends with harness/job.sh.
-', self.rounds(ago(4)))
+        self.job('W2', 'done', 'It ends with harness/job.sh.\n', self.rounds(ago(4)))
         self.assertEqual(self.uses()['harness.job'], (ago(4), 'jobs/W2/report.md'))
 
     def test_a_job_that_is_not_done_does_not_count(self):
-        self.job('W1', 'review', 'harness/job.sh
-', None)
-        self.job('W2', 'fix', 'harness/job.sh
-', self.rounds(ago(2)))
+        self.job('W1', 'review', 'harness/job.sh\n', None)
+        self.job('W2', 'fix', 'harness/job.sh\n', self.rounds(ago(2)))
         self.assertEqual(self.uses(), {})
 
     def test_a_legacy_review_dated_in_its_first_lines_counts_and_an_undated_one_is_skipped(self):
-        self.job('W1', 'done', 'tools/other.py
-', f'# W1 review
-
-Reviewed {ago(20)} by a fresh session.
-')
-        self.job('W2', 'done', 'tools/idle.py
-', '# W2 review
-
-no date
-
-
-
-
-late 2026-01-01
-')
+        self.job('W1', 'done', 'tools/other.py\n', f'# W1 review\n\nReviewed {ago(20)} by a fresh session.\n')
+        self.job('W2', 'done', 'tools/idle.py\n', '# W2 review\n\nno date\n\n\n\n\nlate 2026-01-01\n')
         self.assertEqual(self.uses(), {'tools.other': (ago(20), 'jobs/W1/report.md')})
 
     def test_no_jobs_registry_gives_nothing(self):
@@ -231,25 +203,18 @@ late 2026-01-01
         self.assertEqual(tools.last_uses(Ctx.load(repo.root)), {})
 
     def test_the_window_uses_the_derived_date_and_names_its_source(self):
-        self.job('W1', 'done', 'harness/job.sh
-', self.rounds(ago(5)))
-        self.repo.write('wsc.toml', self.repo.read('wsc.toml') + '
-[tools]
-retire_after_days = 90
-')
+        self.job('W1', 'done', 'harness/job.sh\n', self.rounds(ago(5)))
+        self.repo.write('wsc.toml', self.repo.read('wsc.toml') + '\n[tools]\nretire_after_days = 90\n')
         ctx = Ctx.load(self.repo.root)
         errs, warns = tools.check(ctx, load_all(ctx)['tools'])
         self.assertEqual(errs, [])
         self.assertFalse(any(w.startswith('harness.job:') for w in warns), warns)
-        self.assertIn('tools.idle: live but last used 2020-01-01 (row) (over 90 days)', '
-'.join(warns))
+        self.assertIn('tools.idle: live but last used 2020-01-01 (row) (over 90 days)', '\n'.join(warns))
         self.assertEqual(len(warns), 3, warns)
-        self.job('W2', 'done', 'tools/idle.py
-', self.rounds(ago(200)))
+        self.job('W2', 'done', 'tools/idle.py\n', self.rounds(ago(200)))
         ctx = Ctx.load(self.repo.root)
         _, warns = tools.check(ctx, load_all(ctx)['tools'])
-        self.assertIn(f'tools.idle: live but last used {ago(200)} (jobs/W2/report.md) (over 90 days)', '
-'.join(warns))
+        self.assertIn(f'tools.idle: live but last used {ago(200)} (jobs/W2/report.md) (over 90 days)', '\n'.join(warns))
 
 
 if __name__ == '__main__':
