@@ -1,6 +1,8 @@
-## Round 1 (2026-11-04, branch job/W16 at 1d4b0ca, merged with origin/main 6e743da)
+## Round 1 (2026-11-04, branch job/W16 at 1d4b0ca)
 
 **Verdict: merge.**
+
+Reviewed at 1d4b0ca; origin/main (6e743da) is merged into the branch in this round's commit.
 
 Machines: `python3 wsc.py gates` (full, after merging main) 12 ok, 3 warn (hooks path, `policy.yml.in` bootstrap trigger, skipped tests), 0 failed. CI on `1d4b0ca`: `proxy` and `harness-windows` green. `git diff --stat origin/main -- proxy/src` is empty.
 
