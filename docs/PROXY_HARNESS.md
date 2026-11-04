@@ -21,6 +21,8 @@ instead of keeping its own, and a host test that runs a shell script takes its b
 `$WSC_REQUIRE_BASH`).
 A pending virtual-display restore (`vdisplay_restore.json`) whose saved position can no longer apply restores the saved mode at the display's current origin
 (watcher 1.3.0, 0.14.0, W5); a missing virtual display drops the record to `_to_deletedisplay_restore_<utc>.json.dropped` (D38 of the first consumer).
+A headless launch whose game writes `refused` and exits before the watcher looks now fails with the proxy's own detail, not "not running after
+the start" (watcher 1.4.1, 0.30.1, W38); update the PC's watcher with `update kit=`.
 
 **The UI pin file** (`[proxy] ui_pins`, else `viewer/pins.json`; the `ui_pins` input) needs `rmlui`, `freetype`, `lua`, `stb_image` and
 `stb_image_write` (the PNG dump, since 0.10.0); copy a missing entry from the null game's `proxy/tests/null_game/viewer/pins.json`.
