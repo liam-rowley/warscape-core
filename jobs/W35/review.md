@@ -1,3 +1,25 @@
+## Round 2 (2026-11-04, branch job/W35 at d0575c8)
+
+**Verdict: merge.**
+
+Machines: CI on d0575c8 all 9 checks passed or skipped; `tests.test_agent_settings` 24 tests OK (2 symlink skips on this Windows PC; they run on ubuntu CI);
+main has not moved since the merge base (60ba80e), so no merge of main was needed. Main's own `doc_size` red (run 41893656670) is fixed by this branch
+(CONSUMING.md back under 30 KB, the three oldest pin bumps moved unchanged to `CONSUMING_UPGRADES.md`).
+
+Round 1 items against `## Fix round 1` and the code (`warscape/verbs/agent_settings.py`):
+1. Fixed: `covers` takes whole-word extensions only; `WRITE_FLAGS` refused among added words. Probed: `git diff --output=x`, `git diffx`, `-cfoo=1`,
+   `--ext-diff` refused; `--stat`, `--cached` allowed. `exact_only` added.
+2. Fixed: `_target` resolves with `realpath`, refuses a link or junction at `.claude`, the file and the `.bak`, and hard links; the `.bak` goes through a
+   temp file and `os.replace`.
+3. Fixed: the resolved parent must be the repo's own `<root>/.claude`.
+4. Fixed: ten new tests cover each refusal (junction and hard-link tests run on Windows).
+5. Fixed: `glob_overlaps` reads a deny with an inner `*` broadly.
+6. Fixed: the `.bak` once-per-run rule is in the help, the docstring and `docs/PROXY_HARNESS.md`.
+
+### Later (not required)
+- One race remains, named in the report: `.claude` swapped for a junction between the check and the write needs a writer racing the verb inside the repo.
+- A `vdisplay-aside` test where `watcher.status` shows a process.
+
 ## Round 1 (2026-11-04, branch job/W35 at 758f039)
 
 **Verdict: merge after fixes.**
