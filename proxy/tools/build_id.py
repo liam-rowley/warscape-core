@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The proxy DLL's build id: a hash of the DLL inputs' content at a commit, the one implementation (J45).
 
-purpose: print the 12-hex build id of the DLL inputs (their git object ids at a revision, each under a fixed role name), plus -dirty when an input differs from HEAD
-usage: python3 proxy/tools/build_id.py [--root <game repo>] [--rev HEAD] [--no-dirty] [--inputs]   (--inputs: print each role, path and object id instead; default root: proxy/tools/layout.py game-root)
-when: build.sh calls it for every DLL build; tools/pr_policy.py imports it for rule 79; run it by hand to see which id a DLL or a ledger line should carry
+purpose: print the 12-hex build id of the DLL inputs (their git object ids at a revision, each under a fixed role name), plus -dirty when an input differs from HEAD; list the core sources the DLL compiles (tracked only)
+usage: python3 proxy/tools/build_id.py [--root <game repo>] [--rev HEAD] [--no-dirty] [--inputs | --sources]   (--inputs: print each role, path and object id instead; --sources: the tracked top-level *.cpp of the core sources folder, byte-sorted, one per line, exit 2 naming any untracked or ignored source file under it or the adapter folder; default root: proxy/tools/layout.py game-root)
+when: build.sh calls it for every DLL build (the id, then --sources for dll, all and repro); tools/pr_policy.py imports it for rule 79; run it by hand to see which id a DLL or a ledger line should carry
 not-a-verb: a build helper shared by build.sh and the policy check, not a registry operation
 
 Why content and not a commit: the id used to be the last commit that touched the inputs (J1 review finding 2: not HEAD, so a report
@@ -16,6 +16,11 @@ Where an input lives (J12): each role names its places, looked up in order at th
 to warscape-core), then inside each submodule at the commit the revision's gitlink pins (after the move: the core's proxy/src and
 proxy/tools, read with `git -C <submodule> rev-parse <gitlink>:<path>`, since `git rev-parse HEAD:core/...` does not reach into a
 submodule). The proxy/core tree moves to proxy/src unchanged, so the core role keeps its object id and the DLL its build id.
+
+What the DLL compiles (W24, C24): the id hashes committed content, so build.sh compiles the tracked files only (`--sources`, read from
+`git -C <folder> ls-files`, the index of the repository that holds the folder, a submodule's own). An untracked or ignored source file
+under the core sources or the adapter folder refuses the build instead of a -dirty id: it is a forgotten `git add` (the DLL silently lacks
+it) or a stray copy, and an untracked header can shadow a tracked one through -I. A staged new file is listed, and the id is -dirty.
 """
 import argparse
 import hashlib
@@ -112,15 +117,57 @@ def build_id(root=None, rev='HEAD', dirty=True):
     return bid
 
 
+SOURCE_SUFFIXES = ('.c', '.cpp', '.h', '.hpp', '.inc', '.def')
+
+
+def _ls(folder, *args):
+    p = _git(folder, '-c', 'core.quotepath=off', 'ls-files', '-z', *args)
+    return [n for n in p.stdout.split('\0') if n] if p.returncode == 0 else []
+
+
+def sources(src, adapter=None):
+    """(names, note): the tracked top-level *.cpp names of the core sources folder `src`, byte-sorted (the order `LC_ALL=C ls` gives), from
+    the index of the repository that holds it; note says when `src` is outside git (every *.cpp, the glob). ValueError names every untracked
+    or ignored file with a source suffix under `src` or `adapter`, with the fix."""
+    src = Path(src)
+    if _git(src, 'rev-parse', '--git-dir').returncode != 0:
+        names = sorted((p.name for p in src.glob('*.cpp') if p.is_file()), key=lambda n: n.encode())
+        return names, f'build_id: {src.as_posix()} is not in a git checkout: every *.cpp is listed (no tracked list)'
+    bad = []
+    for folder in (src, Path(adapter) if adapter else None):
+        if folder is None or not folder.is_dir() or _git(folder, 'rev-parse', '--git-dir').returncode != 0:
+            continue
+        everything, untracked = _ls(folder, '--others'), set(_ls(folder, '--others', '--exclude-standard'))
+        for rel in sorted(everything, key=lambda n: n.encode()):
+            if Path(rel).suffix in SOURCE_SUFFIXES:
+                bad.append(f'build_id: {"untracked" if rel in untracked else "ignored"} source {(folder / rel).as_posix()}')
+    names = sorted((n for n in _ls(src) if '/' not in n and n.endswith('.cpp')), key=lambda n: n.encode())
+    bad += [f'build_id: {(src / n).as_posix()}: a source name with white space cannot be compiled by name' for n in names if any(c.isspace() for c in n)]
+    if bad:
+        raise ValueError('\n'.join(bad + ['build_id: the DLL compiles tracked sources only (docs/PROXY_BUILD.md): git add each file (a staged file is '
+                                          'compiled and the id says -dirty), or move it out of the core sources and adapter folders']))
+    return names, ''
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--root', help='the game repo checkout (default: proxy/tools/layout.py game-root)')
     ap.add_argument('--rev', default='HEAD', help='the revision whose inputs are hashed')
     ap.add_argument('--no-dirty', action='store_true', help='never append -dirty (the committed id only)')
     ap.add_argument('--inputs', action='store_true', help='print role, path and object id per input')
+    ap.add_argument('--sources', action='store_true', help='print the tracked top-level *.cpp of the core sources folder (exit 2 on an untracked source)')
     a = ap.parse_args(argv)
     try:
-        if a.inputs:
+        if a.sources:
+            try:
+                adapter = layout.proxy_adapter(Path(a.root) if a.root else layout.game_root())
+            except layout.LayoutError as e:
+                raise ValueError(f'build_id: {e}') from None
+            names, note = sources(layout.proxy_src(), adapter)
+            if note:
+                print(note, file=sys.stderr)
+            print('\n'.join(names))
+        elif a.inputs:
             for role, path, oid in object_ids(a.root, a.rev):
                 print(f'{role}\t{path}\t{oid}')
         else:

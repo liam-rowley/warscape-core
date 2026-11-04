@@ -23,6 +23,17 @@ else
   BUILD_ID="$(python3 "$OWN/proxy/tools/build_id.py")" || { echo "build.sh: no build id (above)"; exit 4; }
 fi
 [[ "$WHAT" == id ]] && { echo "$BUILD_ID"; exit 0; }   # the id this checkout's DLL would carry (tests: build.sh and rule 79 agree)
+# W24 (C24): the DLL compiles the tracked top-level *.cpp of the core sources (build_id.py --sources, byte-sorted, the link order of
+# `LC_ALL=C ls`); an untracked or ignored source under the core sources or the adapter refuses the build here (exit 2), before
+# gen_tables.py and the fetchers, with no compiler. Inside --docker the host's list comes in as WSP_SOURCES (as WSP_BUILD_ID: the
+# container cannot read a worktree's .git).
+SOURCES=""
+if [[ "$WHAT" == dll || "$WHAT" == all || "$WHAT" == repro ]]; then
+  if [[ -n "${WSP_SOURCES:-}" ]]; then SOURCES="$WSP_SOURCES"
+  else SOURCES="$(python3 "$OWN/proxy/tools/build_id.py" --sources | tr '\n' ' ')" || { echo "build.sh: refused: the DLL compiles tracked sources only (above)"; exit 2; }
+  fi
+  [[ -n "${SOURCES// /}" ]] || { echo "build.sh: no tracked *.cpp in $SRC"; exit 2; }
+fi
 
 if [[ $DOCKER == 1 ]]; then
   docker info >/dev/null 2>&1 || { echo "build.sh --docker: Docker is not answering: start Docker Desktop (Linux containers); fallback: the CI artifact (proxy/README.md \"Build\")"; exit 2; }
@@ -43,7 +54,7 @@ if [[ $DOCKER == 1 ]]; then
   MNT="$ROOT"; command -v cygpath >/dev/null && MNT="$(cygpath -w "$ROOT")"   # Git Bash: docker wants C:\...
   echo "build.sh --docker: $WHAT in $IMAGE, build $BUILD_ID"
   # MSYS_NO_PATHCONV: Git Bash would rewrite /src and the -v argument into Windows paths
-  MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_GAME_ROOT=/src -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "$IMAGE" bash -c \
+  MSYS_NO_PATHCONV=1 docker run --rm -v "$MNT:/src" -w /src -e WSP_BUILD_ID="$BUILD_ID" -e WSP_SOURCES="$SOURCES" -e WSP_GAME_ROOT=/src -e WSP_PROXY_ADAPTER="/src/$(rel "$ADIR")" "$IMAGE" bash -c \
     "set -e; $PRE; apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $APT >/dev/null
      $(rel "$OWN")/proxy/tools/build.sh $WHAT"
   exit $?
@@ -139,7 +150,8 @@ ui_lua_obj() {
 
 build_dll() {
   local S="$1" A="$2" O="$3" L="$3.lua"; mkdir -p "$L"
-  local CC="${CXX/g++/gcc}"
+  local CC="${CXX/g++/gcc}" SRCS=() n
+  for n in $SOURCES; do [[ "$n" == ui_lua.cpp ]] || SRCS+=("$S/$n"); done   # ui_lua.cpp goes in through ui_lua_obj (its Lua made local)
   for c in $LUA_CORE; do
     "$CC" -std=gnu99 -O2 -w -ffile-prefix-map="$LUA_SRC/"=lua/ -c -o "$L/$c.o" "$LUA_SRC/$c.c"
   done
@@ -151,7 +163,7 @@ build_dll() {
   # one commit (review of J1, 2026-10-28). `build.sh repro` proves it stays fixed.
   "$CXX" -std=c++17 -O2 -s -shared -Wall -Wextra -Werror -DWSP_BUILD_ID="\"$BUILD_ID\"" -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
     -ffile-prefix-map="$S/"=core/ -ffile-prefix-map="$A/"=adapter/ -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp -Wl,--disable-auto-image-base -Wl,--enable-stdcall-fixup \
-    -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" -o "$O" $(LC_ALL=C ls "$S"/*.cpp | grep -v '/ui_lua\.cpp$') "$A/adapter.cpp" \
+    -I"$S" -I"$LUA_SRC" "${UI_DEFS[@]}" -isystem "$UI_SRC/rmlui/Include" -isystem "$UI_SRC/stb" -o "$O" "${SRCS[@]}" "$A/adapter.cpp" \
     "$L"/*.o $(LC_ALL=C ls "$U"/rml/*.o "$U"/ft/*.o) "$S/d3d9.def" -ldbghelp -ladvapi32
 }
 
