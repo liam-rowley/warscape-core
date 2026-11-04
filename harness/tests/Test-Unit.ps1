@@ -777,5 +777,13 @@ Test-Case 'headless wait (W38): a game that writes refused after the loop read i
     Assert-Match (Headless-Wait 5 $o $since) 'the game exited before reporting on_virtual' 'a refusal for another pid: the generic line'
     Remove-Item -LiteralPath (GamePath $A.headless.status_file) -Force -ErrorAction SilentlyContinue
 }
+Test-Case 'kill (W38): a game that exited just before the kill is logged as gone, not a watcher error' {
+    $gone = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'exit' -PassThru -WindowStyle Hidden; $gone.WaitForExit()
+    $script:W38Gone = $gone.Id
+    function Get-GameProcs { return @([pscustomobject]@{ Id = $script:W38Gone; ProcessName = 'Game' }) }
+    $o = New-Object Collections.Generic.List[string]
+    Assert-True (Kill-Game 'unit test' $o) 'no zombie, no throw'
+    Assert-Match ($o -join "`n") "taskkill /F /T /PID $($script:W38Gone) \(Game\)" 'the taskkill outcome is logged'
+}
 Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 exit (Finish-Tests 'unit')

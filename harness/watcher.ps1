@@ -327,7 +327,9 @@ function Kill-Game([string]$why, $out) {
     if (-not $targets.Count) { $out.Add('nothing to kill: no game process'); return $true }
     foreach ($p in $targets) {
         if ((IntSet 'test_fake_zombie') -eq 1) { $out.Add("TEST: test_fake_zombie=1, not killing $($p.ProcessName) pid $($p.Id)"); continue }
-        $r = & taskkill.exe /F /T /PID $p.Id 2>&1 | Out-String
+        # W38: a game that exits on its own just before this makes taskkill print "not found" on stderr, which under Stop is a terminating
+        # error in Windows PowerShell 5.1 ("watcher error"); it is an outcome to log, and the wait below sees the process gone
+        $r = & { $ErrorActionPreference = 'Continue'; & taskkill.exe /F /T /PID $p.Id 2>&1 | Out-String }
         $out.Add("taskkill /F /T /PID $($p.Id) ($($p.ProcessName)): $($r.Trim())")
     }
     $deadline = (Get-Date).AddSeconds((IntSet 'zombie_wait_s'))
