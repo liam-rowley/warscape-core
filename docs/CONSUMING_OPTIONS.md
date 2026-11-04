@@ -22,3 +22,20 @@ Costs of the recommendation, and what covers them:
   `core/` is empty.
 - **Agent sessions** attach `liam-rowley/warscape-core` (read) next to the game repo; one extra `add_repo`.
 
+## Registry storage and views (0.6.0, opt-in)
+Moved here from [CONSUMING.md](CONSUMING.md) on 2026-11-04 (W28, the 30 KB cap).
+
+Two `wsc.toml` tables, both off by default (a repo that sets neither keeps one JSONL per registry and committed views):
+```toml
+[storage]
+dir = ["jobs", "tools"]     # these keep one file per row: registries/<name>/<id_to_file(id)>.json
+[views]
+commit = false              # views go to the git-ignored dir (default "_scratch/registries"); a committed registries/<name>.md fails
+```
+- **Why:** two branches in flight that each add a row to one JSONL, or re-render one committed view, conflict on GitHub (it ignores
+  `merge=union` on pull-request merges), so auto-merge stalls until someone merges `main` by hand. One file per row and uncommitted
+  views remove both causes (napoleon J55).
+- **Switching:** `python3 core/wsc.py reg migrate <name> --to dir` moves the rows and rewrites `[storage] dir`; `--to jsonl` goes back.
+  With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
+  registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
+  either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).

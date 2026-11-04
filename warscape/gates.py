@@ -299,8 +299,9 @@ def gate_doc_paths(ctx):
     errs = checks.stale_doc_paths(docs, paths, ctx.config['docs']['path_ignore'])
     toks = sorted({e.rsplit(': ', 1)[1].rstrip('/') for e in errs})
     try:   # one git call for every miss: build output and _scratch/ are git-ignored on purpose
-        p = subprocess.run(['git', '-C', str(ctx.root), 'check-ignore', '--stdin'], input='\n'.join(toks) + '\n', env=git_env(), capture_output=True, text=True)
-        ignored = set(p.stdout.split('\n')) if p.returncode in (0, 1) else set()
+        p = subprocess.run(['git', '-C', str(ctx.root), 'check-ignore', '--stdin', '-z'], input='\0'.join(toks).encode('utf-8') + b'\0', env=git_env(),
+                           capture_output=True)   # bytes, NUL-separated: text mode on Windows would send each name with a CR
+        ignored = set(p.stdout.decode('utf-8', 'replace').split('\0')) if p.returncode in (0, 1) else set()
     except OSError:
         ignored = set()
     errs = [e for e in errs if (t := e.rsplit(': ', 1)[1].rstrip('/')) not in ignored and not t.startswith('../')]

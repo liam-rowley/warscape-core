@@ -104,20 +104,7 @@ jobs:
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 
 ## Registry storage and views (0.6.0, opt-in)
-Two `wsc.toml` tables, both off by default (a repo that sets neither keeps one JSONL per registry and committed views):
-```toml
-[storage]
-dir = ["jobs", "tools"]     # these keep one file per row: registries/<name>/<id_to_file(id)>.json
-[views]
-commit = false              # views go to the git-ignored dir (default "_scratch/registries"); a committed registries/<name>.md fails
-```
-- **Why:** two branches in flight that each add a row to one JSONL, or re-render one committed view, conflict on GitHub (it ignores
-  `merge=union` on pull-request merges), so auto-merge stalls until someone merges `main` by hand. One file per row and uncommitted
-  views remove both causes (napoleon J55).
-- **Switching:** `python3 core/wsc.py reg migrate <name> --to dir` moves the rows and rewrites `[storage] dir`; `--to jsonl` goes back.
-  With `commit = false`, `git rm` the committed `registries/*.md`, git-ignore the views dir, and drop `merge=union` for the moved
-  registries. Read rows through `warscape.registry` (`load_all`, `Registry.rows`), never by opening the file, so a reader follows
-  either storage. The file-name rule is `id_to_file` (percent-encoding; docstring in `warscape/registry.py`).
+Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`.
 
 ## Extending a core schema (0.17.0)
 A game that needs a field a core schema lacks does not copy the schema (its copy would miss every later core change): its own schema
@@ -168,6 +155,9 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   `registries/jobs.md` changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
+- **The `jobs view` page** loads marked 12.0.2 from cdnjs with its Subresource Integrity hash (`jobq.MARKED_SRI`), shows raw HTML in a brief, report or
+  review as text (marked's `html` renderer escapes it), and carries a Content-Security-Policy: scripts from that one URL and the page's inline script by hash,
+  styles by hash, `connect-src 'self'` (W28). A new marked version is a new URL, hash and test.
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
   `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
@@ -275,6 +265,14 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
 4. **Behaviour.** CI judges the pull request's head against the base tip, so a branch behind `main` on the decisions file must merge `main`. Globs
    match by path segment: `registries/*` no longer covers `registries/<name>/<row>.json`. Until the bump merges, the game's pull requests are judged
    as before, with the note.
+
+## Gate changes in 0.34.0 (W28, C28): the steps at the pin bump
+- **`[gates] skip`** takes `"<gate>:<decision id>"` only; a bare name is a config error. Add a decisions row first, then skip under its id. Each skip prints a warning line.
+- **`verified_dates`** no longer takes `3-10`, "session", `.md)` or `v2` as a date: fix each flagged line with its true date or run id (`git log`, the report).
+- **`json`** refuses a key twice in one object, in every `.json`/`.jsonl` and in every registry row: fix the data, never relax the check.
+- **`doc_paths`** (warning) lists backticked paths in living docs that are not in the repo: point a renamed one at its new path, drop a gone one, mark a
+  historical one `(was <path>)`, and list tokens that are not paths (branch prefixes such as `plan/`) in `[docs] path_ignore`.
+- **`gen_tables.py`** reads `engine_sites` and `config_keys` through the registry loader, so the game's whole `wsc.toml` must load with this core.
 
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher
