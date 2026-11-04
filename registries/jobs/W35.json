@@ -3,11 +3,12 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) automation 7 (rest). Keep the linker map per build id as a CI artifact and add a verb that symbolises a minidump against it, so frames are named in the cloud rather than on the PC. Guarded verbs for the one-off permissions sessions keep asking for (moving vdisplay_restore.json aside, the settings edits), each checking the state it changes. After W24.",
   "title": "Crash dump symbolisation and guarded verbs for recurring permission asks",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "opus",
   "needs_pc": false,
   "depends_on": [
     "W24"
   ],
-  "brief": "jobs/W35/brief.md"
+  "brief": "jobs/W35/brief.md",
+  "report": "jobs/W35/report.md"
 }
