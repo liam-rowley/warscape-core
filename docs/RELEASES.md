@@ -1,4 +1,4 @@
-# Releases: tags by workflow (0.35.0, core W29, C27)
+# Releases: tags by workflow (0.36.0, core W29, C27)
 
 The core's release tags are a function of a green `main`. Nobody tags by hand: not Liam, not an agent, not the orchestrator. The workflow is
 `ci/release.yml.in` (rendered to `.github/workflows/release.yml`), the code is `warscape/release.py` and `wsc release` (warscape/verbs/release.py).

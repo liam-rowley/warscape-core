@@ -1,6 +1,7 @@
-# Consuming the core: one-time upgrade steps
+# Upgrade notes: moving a game's pin past a version
 
-What a game does once, in the pin-bump commit that crosses a given core version. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 (core W29 merge) to keep that doc under the 30 KB cap; CONSUMING.md keeps a one-line pointer under the same heading.
+What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
+under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
 ## Hooks and gate keys added in 0.24.0 (C23)
 

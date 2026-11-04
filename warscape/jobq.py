@@ -9,6 +9,9 @@ generic ones). Tests that want a different configuration call `configure_from(cf
 Rules in short (details in docs/REVIEW.md of the repo that uses them): rows are checked against `jobs/<id>/` files; a job is built on branch
 `job/<id>`, briefed on `brief/<id>`; review.md holds `## Round N (YYYY-MM-DD, branch job/<id> at <sha>)` sections, newest first, at most 3, one
 verdict each; the reviewer sets the row (merge -> done, otherwise fix, or blocked after round 3); `--serve --auto` starts ready reviews and fixes.
+Review claims (core W27): `jobs review` and the autopilot claim round n with the remote ref refs/claims/<id>/round-<n> (warscape/claims.py)
+before a reviewer starts; a refused claim names its holder. A job may carry jobs/<id>/handback.md (the builder subagent's own words); its
+report.md then has a "## Orchestrator additions" section.
 `claude agents --json` (Claude Code 2.1.316, read on the PC 2026-10-31, napoleon J52): lists background sessions with `state` "working", "blocked"
 (waiting for input) or "done" (finished sessions stay listed until removed); interactive sessions carry no state. Live = working or blocked.
 """
@@ -289,6 +292,8 @@ def problems(rows, read, folders=()):
         report = read(f'{S.jobs_dir}/{jid}/report.md')
         if report is not None:
             errs += [f'{jid}: report: {e}' for e in report_problems(jid, report)]
+            if read(f'{S.jobs_dir}/{jid}/handback.md') is not None and not re.search(r'^## Orchestrator additions\b', report, re.M):
+                errs.append(f'{jid}: report.md sits beside a handback: say what the orchestrator added (a "## Orchestrator additions" section)')
             if S.failed_results and S.root is not None:
                 errs += [f'{jid}: report: {e}' for e in failed_results_problems(jid, report, S.root, S.failed_results)]
         review = read(f'{S.jobs_dir}/{jid}/review.md')
@@ -330,10 +335,11 @@ BRANCH_ACTIONS = ('review', 'fix')   # ready from the job branch's own row (the 
 
 
 class Branch(NamedTuple):
-    """What branch_rows reads from one origin/job/<id>: its row, the rounds in its review.md, its head sha."""
+    """What branch_rows reads from one origin/job/<id>: its row, the rounds in its review.md, its head sha, whether it has a handback.md."""
     row: Optional[dict]
     rounds: int = 0
     head: Optional[str] = None
+    handback: bool = False
 
 
 def branch_state(v):
@@ -356,7 +362,8 @@ def not_ready(action, jid, by, branches, on_branch=None):
             return f'{jid} has no job/{jid} branch on origin'
         if jid not in (on_branch or {}) and r.get('status') == 'done':   # branch_rows skips the branches of done jobs (J56)
             return f'{jid} is done on main'
-        row, rounds, _ = branch_state((on_branch or {}).get(jid))
+        b = branch_state((on_branch or {}).get(jid))
+        row, rounds = b.row, b.rounds
         if not row:
             return f'job/{jid} has no {jid} row'
         if row.get('status') != action:
@@ -642,9 +649,33 @@ def branch_rows(root, branches, offline, reg_dir, only=None, done=(), run=subpro
     heads = dict(l.split(' ', 1) for l in (p.stdout or '').splitlines() if ' ' in l) if p.returncode == 0 else {}
     rows = {j: branch_row_spec(f'origin/job/{j}', j, reg_dir) for j in ids}
     reviews = {j: f'origin/job/{j}:{S.jobs_dir}/{j}/review.md' for j in ids}
-    got = _blobs(root, [s for j in ids for s, _ in rows[j]] + [reviews[j] for j in ids], run)
+    hands = {j: f'origin/job/{j}:{S.jobs_dir}/{j}/handback.md' for j in ids}
+    got = _blobs(root, [s for j in ids for s, _ in rows[j]] + [reviews[j] for j in ids] + [hands[j] for j in ids], run)
     row = lambda j: next((parse(got[s]) for s, parse in rows[j] if got.get(s) is not None), None)
-    return {j: Branch(row(j), round_count(got.get(reviews[j])), heads.get(j)) for j in ids}
+    return {j: Branch(row(j), round_count(got.get(reviews[j])), heads.get(j), got.get(hands[j]) is not None) for j in ids}
+
+
+def take_claim(root, jid, n, head, session, hours):
+    """claims.take for `jobs review` and the autopilot (a seam the tests replace): (held, claim); raises claims.ClaimError."""
+    from . import claims
+    return claims.take(root, jid, n, head, session, hours)
+
+
+def print_claims(root, offline, branches, rounds=None, release=False):
+    """Print one line per live review claim (`jobs next|review|view`; nothing offline). With `release`, first delete the claims whose round
+    the branch already has (`rounds`: {id: rounds}; None: only those whose job/<id> branch is gone). An unreadable remote is one line."""
+    if offline:
+        return
+    from . import claims as C
+    try:
+        got = C.read(root)
+    except C.ClaimError as e:
+        print(f'Review claims: unknown ({e})')
+        return
+    gone = C.release(root, [c for c in got if rounds is not None or f'job/{c.jid}' not in branches], rounds or {}, branches) if release else []
+    for c in got:
+        if c not in gone:
+            print(f'Review claim: {c.jid} round {c.round} by {c.session} ({C.age(c)} ago, {C.ref(c.jid, c.round)})')
 
 
 # ------------------------------------------------------------------ launch (the view's buttons)
@@ -968,12 +999,13 @@ class JobServer(ThreadingHTTPServer):
     log = True   # one stderr line per request
 
     def __init__(self, snapshot, agents, launch, which=shutil.which, port=0, dry_run=False, root=None, log_path=None, ctx=None,
-                 main_line=None, clock=time.monotonic):
+                 main_line=None, clock=time.monotonic, claim=None):
         super().__init__(('127.0.0.1', port), _Handler)
         self.snapshot, self.agents, self.launch, self.which, self.dry_run, self.root = snapshot, agents, launch, which, dry_run, root
         self.log_path = log_path
         self.ctx = ctx
         self.main_line, self.clock, self._main = main_line, clock, None   # main's CI line: `main_line()` -> html, memoised for 60 s (W22)
+        self.claim = claim   # (id, round, head, session) -> (held, claims.Claim): the review claim (W27); None claims nothing
         self.token = secrets.token_urlsafe(32)
         self.host = f'127.0.0.1:{self.server_address[1]}'
         self.url = f'http://{self.host}/'
@@ -997,8 +1029,9 @@ class JobServer(ThreadingHTTPServer):
     def start(self, jid, action, by, branches, on_branch, family=False, agents=None):
         """The one launch path (buttons and --auto): (code, message, extra). Readiness 409; a live session of the same name 429 (with
         `family`, any live J<n>-* session: a build or fix that pushed status=review but has not ended must not race its reviewer);
-        an agent list that cannot be read 503 (fail closed); claude missing 503; then the launch (no count cap). `agents`: a
-        list already read this tick, else it is read here."""
+        an agent list that cannot be read 503 (fail closed); claude missing 503; for a review, the round's claim (W27): held by another
+        session 409 naming it, unprovable 503; then the launch (no count cap). A dry run claims nothing. `agents`: a list already read this
+        tick, else it is read here."""
         why = not_ready(action, jid, by, branches, on_branch)
         if why:
             return 409, f'refused: {why}', {}
@@ -1018,6 +1051,14 @@ class JobServer(ThreadingHTTPServer):
             argv = launch_argv(claude, jid, action, by[jid])
             if self.dry_run:
                 return 200, 'dry run, would start: ' + command_line(argv), {'argv': argv}
+            if action == 'review' and self.claim:
+                b = branch_state((on_branch or {}).get(jid))
+                try:
+                    held, c = self.claim(jid, b.rounds + 1, b.head, name)
+                except Exception as x:
+                    return 503, f'refused: cannot claim round {b.rounds + 1} of {jid} ({x})', {}
+                if not held:
+                    return 409, f'refused: round {b.rounds + 1} of {jid} is claimed by {c.session}', {}
             try:
                 sid = self.launch(argv)
             except Exception as x:
@@ -1142,7 +1183,7 @@ def brief_steps(r, root, lead='needs a brief (nothing queued is ready)'):
             + ''.join(f'\nThe brief must cover {o}' for o in owed))
 
 
-def review_steps(jid, done_rounds=0):
+def review_steps(jid, done_rounds=0, handback=False):
     n = done_rounds + 1
     jd, T = S.jobs_dir, S.text
     after = (f'then set the row and commit the review and the row (do not push yet): merge -> status=done review={jd}/{jid}/review.md, then '
@@ -1152,15 +1193,19 @@ def review_steps(jid, done_rounds=0):
              f'otherwise push, leave the draft pull request open (never gh pr ready) and set '
              + (f'status=fix review={jd}/{jid}/review.md (a fix session answers it, then round {n + 1})' if n < MAX_ROUNDS else
                 f'status=blocked blocked_by="{BLOCKED_BY_ROUNDS}" review={jd}/{jid}/review.md (round {MAX_ROUNDS} is the last: {T["owner"]} decides)'))
-    return (f'{jid}: review branch job/{jid} (git checkout job/{jid}) following {T["review_doc"]}. You must not have built it or fixed it: '
-            f'CI\'s policy check refuses a review.md written in a session that wrote report.md.\n'
-            f'This is round {n}: write "## Round {n} (YYYY-MM-DD, branch job/{jid} at <sha>)" with its one verdict line at the TOP of '
-            f'{jd}/{jid}/review.md' + (', above the earlier rounds (read them first; never edit them)' if done_rounds else '') + f'; {after}.')
+    return (f'{jid}: review branch job/{jid} (git checkout job/{jid}) following {T["review_doc"]}. You must not have built it, fixed it or '
+            f'reviewed an earlier round: CI\'s policy check refuses a round written in a session that wrote report.md or an earlier round.\n'
+            + (f'Read {jd}/{jid}/handback.md after the report: the builder\'s own words; the report says what the orchestrator added.\n' if handback else '')
+            + f'This is round {n}: write "## Round {n} (YYYY-MM-DD, branch job/{jid} at <sha>)" with its one verdict line at the TOP of '
+            f'{jd}/{jid}/review.md' + (', above the earlier rounds (read them first; never edit them: policy checks every commit)' if done_rounds else '')
+            + '. If you change any file outside the job folder and its row, the verdict is `merge after fixes` (a fresh round reviews it)'
+            + f'; {after}.')
 
 
-def fix_steps(jid, n, title=''):
+def fix_steps(jid, n, title='', handback=False):
     jd = S.jobs_dir
     return (f'{jid}: fix round {n} on branch job/{jid} (git checkout job/{jid}). Read "## Round {n}" at the top of {jd}/{jid}/review.md '
+            + (f'(and {jd}/{jid}/handback.md, the builder\'s own words) ' if handback else '') +
             f'and address its blockers and should-fix items, one commit each where you can, with a test where the code allows.\n'
             f'Then append "## Fix round {n}" to the end of {jd}/{jid}/report.md: for each finding what you changed (commit sha), what you '
             f'left and why. Run {S.text["wsc"]} gates and {policy_cmd("job/" + jid)} (only '

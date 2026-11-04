@@ -160,6 +160,66 @@ class CoreMode(Branches, unittest.TestCase):
     def toml(self, ref='main'):
         return self.text('wsc.toml', ref)
 
+    # ------------------------------------------------------------ W27: the audit's repros through the CLI, as CI runs it
+    def w27_job(self, review_steps, report='# W900 report: a test job\n'):
+        """job/W900: the builder S1 writes the report, then each (session, files) step commits; a files dict holding the review sets the row done."""
+        git(self.d, 'checkout', '-q', '-f', '-B', 'job/W900', 'main')
+        self.commit({'jobs/W900/report.md': report, 'lib/built.py': 'x = 1\n'}, trailer='S1')
+        row = {'id': 'W900', 'title': 'A test job', 'status': 'done', 'brief': 'jobs/W900/brief.md', 'report': 'jobs/W900/report.md',
+               'review': 'jobs/W900/review.md'}
+        for who, fs in review_steps:
+            if 'jobs/W900/review.md' in fs:
+                fs = {**fs, 'registries/jobs/W900.json': json.dumps(row, indent=2) + '\n'}
+            self.commit(fs, trailer=who)
+        self.back()
+        return self.ci('job/W900')
+
+    @staticmethod
+    def w27_round(n, v, extra=''):
+        return f'## Round {n} (2026-11-04, branch job/W900 at abc123{n})\n\n**Verdict: {v}.**\n{extra}\n'
+
+    def test_w27_a_reviewer_code_commit_under_merge_warns(self):
+        rc, out, err = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n'})])
+        self.assertEqual(rc, 0, out + err)   # a warning: the scan of the merged job branches (the brief's kill criterion)
+        self.assertIn('policy: warning: round 1 of jobs/W900/review.md says merge', out)
+        self.assertIn('lib/reviewer.py', out)
+        self.assertIn('write the verdict `merge after fixes`; a fresh round reviews your change', out)
+
+    def test_w27_b_round_2_by_the_round_1_session_is_refused(self):
+        r1 = self.w27_round(1, 'merge after fixes')
+        res = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + r1}),
+                            ('F1', {'jobs/W900/report.md': '# W900 report: a test job\n\n## Fix round 1\nDone.\n'}),
+                            ('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(2, 'merge') + r1})])
+        self.assertRefused(res, 'round 2 was written by a session that wrote round 1 (R1): a fresh session per round', JUDGED)
+
+    def test_w27_c_a_rewritten_round_1_is_refused_even_after_a_restore(self):
+        r1 = self.w27_round(1, 'merge after fixes')
+        res = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + r1}),
+                            ('F1', {'jobs/W900/report.md': '# W900 report: a test job\n\n## Fix round 1\nDone.\n'}),
+                            ('R2', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(2, 'merge') + self.w27_round(1, 'merge')}),
+                            ('R2', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(2, 'merge') + r1})])
+        self.assertRefused(res, 'append only', 'round 1', JUDGED)
+
+    def test_w27_d_a_missing_run_folder_and_an_unmerged_branch_are_refused(self):
+        git(self.d, 'branch', '-f', 'job/W901', 'main')
+        git(self.d, 'checkout', '-q', '-f', 'job/W901')
+        self.commit({'lib/unmerged.py': 'z = 3\n'})
+        self.back()
+        git(self.d, 'update-ref', 'refs/remotes/origin/job/W901', 'job/W901')
+        rep = '# W900 report: a test job\n\nEvidence: `harness/runs/20261104_gone` and job/W901.\n'
+        res = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge')})], report=rep)
+        self.assertRefused(res, 'harness/runs/20261104_gone', 'exists in neither', JUDGED)
+        self.assertIn('policy: warning: jobs/W900/report.md cites job/W901: evidence on an unmerged branch', res[1])
+
+    def test_w27_warnings_print_before_the_verdict_and_keep_the_exit_code(self):
+        rep = '# W900 report: a test job\n\nBuilt on commit `0badc0ffee1`.\n'
+        rc, out, err = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge')})], report=rep)
+        self.assertEqual(rc, 0, out + err)
+        lines = out.splitlines()
+        warn = [i for i, l in enumerate(lines) if l.startswith('policy: warning: ') and '0badc0ffee1' in l]
+        verdict = [i for i, l in enumerate(lines) if l.startswith('policy: job/W900: ok')]
+        self.assertTrue(warn and verdict and warn[0] < verdict[0], out)
+
     def test_bypass_1_a_bootstrap_entry_on_the_head_exempts_nothing(self):
         self.branch('foo', {'wsc.toml': self.toml().replace('[policy]\n', '[policy]\nbootstrap = ["foo"]\n'), 'warscape/extra.py': 'X = 1\n'})
         for res in (self.ci('foo'), self.local('foo')):
