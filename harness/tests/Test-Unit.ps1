@@ -397,6 +397,86 @@ Test-Case 'exe check: the sha1 against exe_identity.json beside the adapter; a m
     Assert-True ($ExeCache.key -ne $old) 'a changed exe is hashed again (size + mtime cache)'
     Remove-Quiet $idp; Remove-Quiet $exe
 }
+Test-Case 'exe_check at start (W25, H1): Resolve-ExeCheck takes the stricter of the ini and a fresh restart.carry; a stale carry is ignored' {
+    Assert-Eq (Resolve-ExeCheck 'warn' $null) 'warn' 'ini warn at start, no carry: honoured'
+    Assert-Eq (Resolve-ExeCheck 'refuse' $null) 'refuse' 'ini refuse'
+    Assert-Eq (Resolve-ExeCheck 'warn' @{ exe_check = 'refuse'; age_s = 5 }) 'refuse' 'carry refuse beats ini warn'
+    Assert-Eq (Resolve-ExeCheck 'refuse' @{ exe_check = 'warn'; age_s = 5 }) 'refuse' 'a carry never weakens the ini either'
+    Assert-Eq (Resolve-ExeCheck 'warn' @{ exe_check = 'warn'; age_s = 5 }) 'warn' 'both warn'
+    Assert-Eq (Resolve-ExeCheck 'warn' @{ exe_check = 'refuse'; age_s = 301 }) 'warn' 'a carry older than 5 minutes is ignored'
+    $cp = RootPath 'restart.carry'
+    Write-RestartCarry 'refuse'
+    $c = Read-RestartCarry
+    Assert-Eq $c.exe_check 'refuse' 'the carry reads back'
+    Assert-True ($c.age_s -lt 60) 'fresh'
+    Assert-True (-not (Test-Path -LiteralPath $cp)) 'and is removed once read'
+    Write-RestartCarry 'refuse'
+    (Get-Item -LiteralPath $cp).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(-10)
+    $c = Read-RestartCarry
+    Assert-Eq (Resolve-ExeCheck 'warn' $c) 'warn' 'a stale carry file is ignored'
+    Assert-True ($null -eq (Read-RestartCarry)) 'no carry file: $null'
+}
+Test-Case 'exe_check reload (W25, H1): a running refuse is never weakened by watcher.ini; other keys still apply; refuse->refuse and warn->refuse go through; logged once' {
+    $ini = RootPath 'watcher.ini'
+    $had = Test-Path -LiteralPath $ini; $old = $(if ($had) { [IO.File]::ReadAllText($ini) } else { '' })
+    try {
+        $S.exe_check = 'refuse'
+        $mark = $(if (Test-Path -LiteralPath $LogPath) { ([IO.File]::ReadAllText($LogPath)).Length } else { 0 })
+        [IO.File]::WriteAllText($ini, "exe_check=warn`r`nlock_stale_min=33`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'the reload keeps refuse'
+        Assert-Eq ([string]$S.lock_stale_min) '33' 'the other key of the same edit is applied'
+        Assert-Eq $ExeCheckRefused 'warn' 'the refused value is kept for the status file'
+        [IO.File]::WriteAllText($ini, "exe_check=warn`r`nlock_stale_min=34`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'still refuse'
+        $log = ([IO.File]::ReadAllText($LogPath)).Substring($mark)
+        Assert-Eq ([regex]::Matches($log, 'asks exe_check=warn; refused, a running watcher never weakens it').Count) 1 'logged once per distinct value'
+        Write-Status
+        $st = [IO.File]::ReadAllText($StatusPath, $Utf8) | ConvertFrom-Json
+        Assert-Eq $st.exe_check_refused 'warn' 'watcher.status carries exe_check_refused'
+        Assert-Eq $st.exe_check 'refuse' 'and the value in force'
+        [IO.File]::WriteAllText($ini, "exe_check=refuse`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'refuse -> refuse'
+        Assert-True ($null -eq $ExeCheckRefused) 'nothing refused any more'
+        $S.exe_check = 'warn'   # a watcher Liam started with warn
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'refuse' 'warn -> refuse goes through'
+        $S.exe_check = 'warn'
+        [IO.File]::WriteAllText($ini, "exe_check=warn`r`n", $Utf8)
+        Load-Settings -Reload
+        Assert-Eq $S.exe_check 'warn' 'warn -> warn stays warn'
+        Assert-Eq (Reload-ExeCheck 'refuse' 'WARN').value 'refuse' 'the comparison is case-insensitive, as the gate is'
+        Assert-Eq (Reload-ExeCheck 'refuse' 'bogus').value 'bogus' 'a value the gate refuses anyway is not a weakening'
+    } finally {
+        if ($had) { [IO.File]::WriteAllText($ini, $old, $Utf8) } else { Remove-Quiet $ini }
+        Load-Settings
+    }
+}
+Test-Case 'exe check cache (W25, H12): the launch gate hashes every launch; the status cache keys on size, mtime and creation time' {
+    $exe = Join-Path $A.game_dir $A.game_image
+    $idp = Exe-IdentityPath
+    [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ fake vanilla exe AAAA'))
+    $good = (Get-FileHash -LiteralPath $exe -Algorithm SHA1).Hash.ToLower()
+    [IO.File]::WriteAllText($idp, "{`"sha1`": `"$good`"}", $Utf8)
+    try {
+        $o = New-Object Collections.Generic.List[string]
+        Assert-True ($null -eq (Exe-Gate $o)) 'vanilla: launch goes ahead'
+        [void](Exe-Check)
+        Assert-Match $ExeCache.key ([regex]::Escape([string](Get-Item -LiteralPath $exe).CreationTimeUtc.Ticks)) 'the status cache key has the creation time'
+        $it = Get-Item -LiteralPath $exe; $mt = $it.LastWriteTimeUtc; $ct = $it.CreationTimeUtc
+        [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ fake patched exe BBBB'))   # same size
+        $it = Get-Item -LiteralPath $exe; $it.LastWriteTimeUtc = $mt; $it.CreationTimeUtc = $ct          # timestamps put back
+        $r = Exe-Gate $o
+        Assert-Match $r '^EXE CHECK: MISMATCH' 'the gate is not fooled by a same-size replacement with its timestamps restored'
+        [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ fake vanilla exe AAAA'))
+        [void](Exe-Check); $k = $ExeCache.key
+        (Get-Item -LiteralPath $exe).CreationTimeUtc = $ct.AddDays(-3)
+        [void](Exe-Check)
+        Assert-True ($ExeCache.key -ne $k) 'a new creation time is a new cache key'
+    } finally { Remove-Quiet $idp; Remove-Quiet $exe }
+}
 Test-Case 'guards: scripts that start/kill the game or write its config need an owner; read-only ones never do' {
     Assert-True ($null -ne (Script-TouchesGame 'taskkill /f /im Game.exe')) 'taskkill'
     Assert-True ($null -ne (Script-TouchesGame 'start "" "C:\x\Game.exe"')) 'start'
