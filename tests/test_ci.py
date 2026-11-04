@@ -629,6 +629,18 @@ class CheckSettings(unittest.TestCase):
         rc, out = self.go(answers, CORE_WF, CORE_REQUIRED)
         self.assertEqual((rc, self.problems(out)), (0, []), out)
 
+    def test_the_release_workflow_adds_the_manual_line_and_no_problem(self):
+        answers = {**CORE_ANSWERS, 'repos/o/core': (0, json.dumps({'allow_auto_merge': True}), ''),
+                   'repos/o/core/rules/branches/main': (0, json.dumps(BASIC + [rule_checks(*CORE_REQUIRED)]), '')}
+        rel = 'name: release\njobs:\n  release:\n    runs-on: ubuntu-24.04\n'
+        rc, out = self.go(answers, {**CORE_WF, 'release.yml': rel}, CORE_REQUIRED)
+        self.assertEqual((rc, self.problems(out)), (0, []), out)
+        manual = [l for l in out.splitlines() if l.startswith('manual:')]
+        self.assertEqual(len(manual), 1, out)
+        for want in ('RELEASE_APP_CLIENT_ID', 'RELEASE_TOKEN', 'allow_auto_merge', 'refs/tags/v*', 'deletion'):
+            self.assertIn(want, manual[0])
+        self.assertNotIn('manual:', self.go(answers, CORE_WF, CORE_REQUIRED)[1])
+
     def test_the_game_explicit_only_notes_viewer(self):
         rc, out = self.go(GAME_ANSWERS, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
         self.assertEqual(rc, 0, out)

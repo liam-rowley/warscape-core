@@ -15,6 +15,8 @@ report.md then has a "## Orchestrator additions" section.
 `claude agents --json` (Claude Code 2.1.316, read on the PC 2026-10-31, napoleon J52): lists background sessions with `state` "working", "blocked"
 (waiting for input) or "done" (finished sessions stay listed until removed); interactive sessions carry no state. Live = working or blocked.
 """
+import base64
+import hashlib
 import html
 import json
 import os
@@ -32,6 +34,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from . import ci, gatemods
+from .checks import strict_loads
 from .policy import verdict
 from .repo import DEFAULTS, git_env
 
@@ -45,6 +48,7 @@ class Settings:
     reg_dir = 'registries'
     ledgers = ''
     failed_results = ''
+    semver_from = 0
     root = None
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
@@ -59,12 +63,13 @@ def configure_from(cfg, root=None, reg_dir='registries'):
     """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file."""
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
     S.failed_results, S.root = cfg.get('failed_results', ''), (Path(root) if root is not None else None)
+    S.semver_from = cfg.get('semver_from', 0)
     S.text = dict(cfg['text'])
     S.pc_state = cfg.get('pc_state', '')
     S.legacy_rounds = S.legacy_briefs = frozenset()
     if root is not None:
         if cfg['legacy']:
-            data = json.loads((Path(root) / cfg['legacy']).read_text(encoding='utf-8'))
+            data = strict_loads((Path(root) / cfg['legacy']).read_text(encoding='utf-8'))
             S.legacy_rounds, S.legacy_briefs = frozenset(data.get('round_rules', [])), frozenset(data.get('brief_hooks', []))
     return S
 
@@ -117,6 +122,11 @@ def num(jid):
     return int(jid[1:]) if re.fullmatch(r'[A-Z]\d+', jid or '') else 10 ** 9
 
 
+def semver_rule(jid):
+    """True when job `jid` falls under the semver rule (W29, C27): `[jobs] semver_from` is set and the job number is at or above it."""
+    return bool(getattr(S, 'semver_from', 0)) and num(jid) >= S.semver_from
+
+
 # ------------------------------------------------------------------ check
 def brief_problems(jid, row, text):
     """Shape every brief must have (the Model line rule and the Finish rule): Model line agreeing with the row (a reason when Opus), a call budget,
@@ -133,6 +143,14 @@ def brief_problems(jid, row, text):
             errs.append(f'Model line says {m.group(1)}, the row says {row.get("model")}')
         if m.group(1).lower() in S.models[1:] and not re.search(r'\breason\b', m.group(2), re.I):
             errs.append(f'{m.group(1).title()} without "reason:" on the Model line' + ref('ref_models', ' ({}: ' + m.group(1).title() + ' only with a stated reason)'))
+    if semver_rule(jid):   # W29 (C27): the Semver line agrees with the row, and the brief no longer owns VERSION
+        sv = re.search(r'^Semver:\s*(\w+)', text, re.M)
+        if not sv:
+            errs.append(f'no "Semver: <patch|minor|major|none>" line (from {S.prefix}{S.semver_from} on the release workflow owns VERSION, C27)')
+        elif sv.group(1).lower() != row.get('semver'):
+            errs.append(f'Semver line says {sv.group(1)}, the row says {row.get("semver")}')
+        if re.search(r'^## VERSION\b', text, re.M):
+            errs.append('a "## VERSION" section: the release workflow owns VERSION (C27); the Semver line replaces it')
     if not re.search(r'[Bb]udget\s+about\s+\d+\s+tool\s+calls', text):
         errs.append('no call budget ("Budget about <n> tool calls"' + ref('ref_models', ', {}') + ')')
     kill = re.search(r'^## Kill criteria\s*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
@@ -175,7 +193,7 @@ def failed_results_problems(jid, text, root, glob):
         seen.add(folder)
         for f in sorted(folder.glob(glob)):
             try:
-                if not f.is_file() or json.loads(f.read_text(encoding='utf-8')).get('status') != 'failed':
+                if not f.is_file() or strict_loads(f.read_text(encoding='utf-8')).get('status') != 'failed':
                     continue
             except (OSError, ValueError, AttributeError):
                 continue
@@ -269,6 +287,8 @@ def problems(rows, read, folders=()):
                 errs.append(f'{jid}: status {st} needs {f}={want}')
             if text is not None and not r.get(f):
                 errs.append(f'{jid}: {want} exists but the row has no {f}= (set it, with the status that goes with it)')
+        if semver_rule(jid) and st not in ('needs_brief', 'blocked') and not r.get('semver'):
+            errs.append(f'{jid}: status {st} needs semver=<patch|minor|major|none> (from {S.prefix}{S.semver_from} on, C27)')
         if st == 'needs_brief' and read(f'{S.jobs_dir}/{jid}/brief.md') is not None:
             errs.append(f'{jid}: has a brief but is still needs_brief (set status=queued brief={S.jobs_dir}/{jid}/brief.md)')
         brief = read(f'{S.jobs_dir}/{jid}/brief.md')
@@ -801,7 +821,7 @@ def _blobs(root, specs, run=subprocess.run):
 def branch_row_spec(ref, jid, reg_dir):
     """Where a job branch keeps job `jid`'s row: [(`<ref>:<path>`, text -> the row or None)], first match wins. Since J55 the row is its
     own file (`<reg_dir>/jobs/<id>.json`; the core's id_to_file of a plain id is the id); a branch cut before J55 has the JSONL."""
-    return [(f'{ref}:{reg_dir}/jobs/{jid}.json', lambda text: json.loads(text) if text else None),
+    return [(f'{ref}:{reg_dir}/jobs/{jid}.json', lambda text: strict_loads(text) if text else None),
             (f'{ref}:{reg_dir}/jobs.jsonl', lambda text: next((x for x in load_rows(text) if x.get('id') == jid), None))]
 
 
@@ -894,7 +914,7 @@ def waiting_rules(ledger_text, jid):
 
 
 def load_rows(text):
-    return [json.loads(l) for l in (text or '').splitlines() if l.strip()]
+    return [strict_loads(l) for l in (text or '').splitlines() if l.strip()]
 
 
 # ------------------------------------------------------------------ view
@@ -1002,12 +1022,34 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
     if auto:
         refresh += (f' <b>Autopilot on</b>{" (dry run)" if auto.get("dry_run") else ""}: starts ready reviews and fixes every '
                     f'{int(auto["interval"])} s; last ran {e(auto.get("last") or "not yet")} (log: <code>_scratch/jobs_auto.log</code>).')
-    return VIEW_PAGE.format(reg_jobs=e(S.reg_dir + '/jobs/'), jobs_dir=e(S.jobs_dir), generated=e(generated), head=head, counts=counts, lanes=lanes, total=len(rows), refresh=refresh,
-                            serve=json.dumps({'token': token} if token else None))
+    page = VIEW_PAGE.format(reg_jobs=e(S.reg_dir + '/jobs/'), jobs_dir=e(S.jobs_dir), generated=e(generated), head=head, counts=counts, lanes=lanes, total=len(rows), refresh=refresh,
+                            serve=json.dumps({'token': token} if token else None), marked_url=MARKED_URL, marked_sri=MARKED_SRI, csp=CSP_SLOT)
+    return page.replace(CSP_SLOT, e(view_csp(page)))
+
+
+# marked 12.0.2, pinned by Subresource Integrity (W28): a changed file at the URL is refused by the browser and the docs stay plain text.
+# Made once (2026-11-04) with: curl -sL <MARKED_URL> | openssl dgst -sha384 -binary | openssl base64 -A
+# (cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js gives the same hash). A new marked version needs a new URL, hash and test.
+MARKED_URL = 'https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js'
+MARKED_SRI = 'sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi'
+CSP_SLOT = 'CSP-SLOT-W28'
+INLINE = re.compile(r'<(script|style)>(.*?)</\1>', re.S)
+
+
+def view_csp(page):
+    """The view page's Content-Security-Policy (W28): nothing by default; scripts from the one pinned marked URL and the page's own inline
+    script, styles from its own inline style, both by sha256 of their exact text (the script holds the serve token, so the hash is per page);
+    fetch only to the serving origin (/launch)."""
+    h = {'script': [], 'style': []}
+    for tag, body in INLINE.findall(page):
+        h[tag].append("'sha256-" + base64.b64encode(hashlib.sha256(body.encode('utf-8')).digest()).decode() + "'")
+    return (f"default-src 'none'; script-src {MARKED_URL} {' '.join(h['script'])}; style-src {' '.join(h['style'])}; "
+            "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
 
 
 VIEW_PAGE = '''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{csp}">
 <title>Job Queue</title>
 <style>
 :root {{ --bg:#f7f6f3; --card:#fff; --ink:#1f1f1f; --muted:#6b6b6b; --line:#e2e0da; --accent:#2f5d8a;
@@ -1052,8 +1094,11 @@ input {{ width:100%; padding:8px 10px; border:1px solid var(--line); border-radi
 <input id="q" type="search" placeholder="Filter by id, title or description">
 {lanes}
 </main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="{marked_url}" integrity="{marked_sri}" crossorigin="anonymous"></script>
 <script>
+// raw HTML in a brief, report or review is shown as text, never run (W28): marked's html renderer returns it escaped
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+if (window.marked) marked.use({{ renderer: {{ html(t) {{ return esc(typeof t === 'string' ? t : t.text); }} }} }});
 document.getElementById('q').addEventListener('input', ev => {{
   const q = ev.target.value.toLowerCase();
   document.querySelectorAll('.card').forEach(c => c.hidden = q && !c.dataset.text.includes(q));

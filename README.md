@@ -65,11 +65,16 @@ merged at load; canonical key order is then the core's fields first, then the ga
 ## Gates
 
 `wsc gates` runs, deterministically and without network: `schemas`, `registries`, `tools` (header and row for every tool), `json`
-(strict JSON and JSONL), `windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
-`verified_dates` (a "verified" with no date or run id), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
+(strict JSON and JSONL: no NaN or Infinity, no key twice in one object; the registry loader, `jobq` and `gen_tables.py` read repo data the same way, W28),
+`windows_paths`, `doc_size` (living docs over `[docs] max_kb`, default 30 KB; dated records exempt),
+`verified_dates` (a "verified" with no date or run id: only an ISO date, a compact `20YYMMDD` run id or a `reports/`, `runs/` or `records/` path dates it, W28),
+`doc_paths` (a backticked repo path in a living doc that is not a tracked file or folder, from the root, the doc's folder or across `core/`; job folders,
+the decisions file, fenced blocks, `(was <path>)` and `(moved)` lines, `../` paths and `[docs] path_ignore` are not checked), `conflict_markers`, `eol` (warning), `core_pin` (the core checkout is
 unmodified, its `VERSION` is the pinned `vX.Y.Z`, and HEAD is that tag whenever the tag is in the checkout; a shallow checkout without
 it is compared by `VERSION` only, C21; in the core, tags match `VERSION`), `hooks` (warning: the pre-push hook is wired in this clone), `jobs`, `ci_render`, `run_refs` (every repo path a run README names exists; `[gates] run_refs_since` grandfathers old runs) and `tests`
 (host tests; the full set only). CI (`.github/workflows/gates.yml`) runs the full set on Linux and Windows on every push and PR.
+`[gates] skip` entries are `"<gate>:<decision id>"`: the id must be a row of the `[policy] decisions` file, each skipped gate prints `skipped <gate>: <id>`
+as a warning, and `--only <gate>` still runs it (W28). A rule inside a skippable gate (a game's host test inside `tests`) needs its own decision.
 A game adds its own checks as gate modules (`wsc.toml` `[gates] dirs`, `NAME` and `run(ctx) -> Result`: `docs/CONSUMING.md` "Game gates"), each its own line
 after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs view` page.
 

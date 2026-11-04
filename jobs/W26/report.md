@@ -30,8 +30,8 @@ stray-`.git` warnings, and `wsc jobs worktrees [--prune]` prints the same. Built
   `prune`. Git runs with `git_env()`.
 - **Verb** (`warscape/verbs/jobs.py`): `next` runs through `next_claim`. New: `--peek`, `--prune`, and the `worktrees` action. `HELP`,
   the header `usage:`/`when:` and the tools row are updated.
-- **Docs**: `docs/CONSUMING.md` (the `pc_state` key and a bullet on claim, autopilot and the consumer steps), `docs/DECISIONS.md` C31,
-  `docs/BACKLOG.md` B87 (the napoleon follow-ups). VERSION is 0.36.0 (W29 has not merged, so this job bumps VERSION itself: the next free minor above main 0.35.0; renumbered from 0.34.0 and C29 when main took those for W33, then from 0.35.0 and C30 when it took them for W27).
+- **Docs**: `docs/CONSUMING.md` (the `pc_state` key and a bullet on claim, autopilot and the consumer steps), `docs/DECISIONS.md` C32,
+  `docs/BACKLOG.md` B87 (the napoleon follow-ups). VERSION is left at main's: W29's release workflow reached `main` first and numbers the release (this row is below `semver_from`, so it counts as `patch`). The decision was renumbered from C29 as W33, W27 and W28 took C29 to C31.
 
 ## Evidence
 - Red commit `db0c17a` (tests only), CI run 41886083852: `gates (ubuntu-latest)` and `gates (windows-latest)` both failed, as intended.

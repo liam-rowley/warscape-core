@@ -114,6 +114,41 @@ class Golden(unittest.TestCase):
         self.assertIn('{ "null.dummy_hook", kHook, 0x1000u, 4, { 0xde, 0xad, 0xbe, 0xef }, 6, { 0x55, 0x8b, 0xec, 0x83, 0xec, 0x10 }, { 0 }, "dev.camera" },', hdr)
 
 
+class RegistryLoader(unittest.TestCase):
+    """W28: the generator reads engine_sites and config_keys through the core's registry loader, so `wsc reg migrate engine_sites --to dir`
+    keeps it working and the generated files keep their bytes."""
+
+    def generate(self, game):
+        import subprocess
+        env = {**os.environ, 'WSP_GAME_ROOT': str(game)}
+        env.pop('WSP_PROXY_ADAPTER', None)
+        (game / 'proxy' / 'null' / 'generated' / 'tables.h').unlink()
+        p = subprocess.run([sys.executable, str(ROOT / 'proxy' / 'tools' / 'gen_tables.py')], env=env, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        return (game / 'proxy' / 'null' / 'generated' / 'tables.h').read_bytes()
+
+    def test_dir_storage_gives_the_same_tables_bytes_as_jsonl(self):
+        import contextlib
+        import io
+        import shutil
+        import subprocess
+        import tempfile
+        from warscape.cli import main
+        want = (NULL_GAME / 'proxy' / 'null' / 'generated' / 'tables.h').read_bytes()
+        with tempfile.TemporaryDirectory() as td:
+            game = Path(td).resolve() / 'game'
+            shutil.copytree(NULL_GAME, game)
+            self.assertEqual(self.generate(game), want)            # no wsc.toml: the default place, JSON Lines
+            subprocess.run(['git', 'init', '-q', str(game)], check=True)
+            (game / 'wsc.toml').write_text('[registries]\nengine_sites = "core:engine_sites"\nconfig_keys = "core:config_keys"\n'
+                                           '[views]\ncommit = false\n', encoding='utf-8')
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(['--root', str(game), 'reg', 'migrate', 'engine_sites', '--to', 'dir']), 0)
+            self.assertFalse((game / 'registries' / 'engine_sites.jsonl').exists())
+            self.assertTrue((game / 'registries' / 'engine_sites').is_dir())
+            self.assertEqual(self.generate(game), want)            # one file per row: the same bytes
+
+
 class TypedKeys(unittest.TestCase):
     def test_float_key_renders_with_range_and_repr(self):
         k = vkey(release_value=250)

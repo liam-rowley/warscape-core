@@ -145,6 +145,17 @@ def findings(cfg, jobs, s, branch):
     return out
 
 
+RELEASE_MANUAL = ('manual: the release workflow (W29, C27) needs what a settings read cannot show without admin rights: the secrets '
+                  'RELEASE_APP_CLIENT_ID and RELEASE_APP_KEY (a GitHub App with contents, pull requests and issues write, checks read; '
+                  'or one secret RELEASE_TOKEN), allow_auto_merge kept on, and a tag ruleset on refs/tags/v* that blocks update and deletion '
+                  '(docs/CONSUMING.md, Releases)')
+
+
+def manual_lines(cfg):
+    """Lines the owner checks by hand: a secret's value cannot be read, and tag rulesets need admin rights to list."""
+    return [RELEASE_MANUAL] if 'release.yml' in (cfg.get('workflows') or []) else []
+
+
 def check(cfg, root, repo='', branch='main', run=subprocess.run, out=print):
     """Print the settings and the findings; 0 no problem, 1 problems, 2 cannot read."""
     try:
@@ -167,6 +178,8 @@ def check(cfg, root, repo='', branch='main', run=subprocess.run, out=print):
     fs = findings(cfg, jobs, s, branch)
     for level, text in fs:
         out(f'{level}: {text}')
+    for line in manual_lines(cfg):
+        out(line)
     probs = sum(1 for level, _ in fs if level == 'problem')
     out(f'check-settings: {probs} problem(s), {len(fs) - probs} note(s); this changes nothing: the fix is the owner\'s, in the repository settings')
     return 1 if probs else 0
