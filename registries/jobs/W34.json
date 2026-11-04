@@ -3,12 +3,14 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) C5, C6 (core half), C7, C8, C9 (rest). The wine smoke exe refuses every site and gets a null Direct3DCreate9, so nothing off the PC exercises a hook, a patch write or the UI host (proxy/tests/smoke_host.cpp): a stand-in exe with one patch site and one hook site at known RVAs and an identity file, and a smoke that checks the patch, the hook, a ctl ping round trip and VirtualQuery protections (pairs with W33). gen_tables.py --exe <staged copy>: an offline MATCH/MISMATCH of anchor and stock bytes (Empire had one). A static_assert on GameAdapter's size and a CONSUMING.md rule for designated initialisers (positional initialisers of 10 to 40 values shift silently when a field is inserted). ctl lua: only paths under luaDir and the ctl folder (devcore.h:419 accepts any absolute path), an owner-only DACL on the ctl folder, rotation of .cmd.taken files and _ids.txt. With text focus, WM_SYSKEYDOWN goes to RmlUi only (ui_core.h:76-77, ui_host.cpp:400,447), so Alt+F4 is swallowed: let system keys through. Opus: DLL. After W33, W20 and W16.",
   "title": "Real-process smoke, offline anchor check, ctl lua limits, Alt+F4 with UI focus",
   "phase": 1,
-  "status": "needs_brief",
+  "status": "queued",
   "model": "opus",
   "needs_pc": false,
+  "semver": "minor",
   "depends_on": [
     "W33",
     "W20",
     "W16"
-  ]
+  ],
+  "brief": "jobs/W34/brief.md"
 }
