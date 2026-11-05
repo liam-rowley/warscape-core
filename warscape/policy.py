@@ -28,6 +28,10 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
                 F  with `[policy] decisions_cite_job`, a decisions row added on job/<id> contains <id>.
               Rule A warns by default and D's branch cites warn: the W27 scan of the merged job branches (its report) passed the brief's kill
               criterion; the W40 scan (its report) put the core's rule A at error.
+              Workflow inputs (core W36): a changed path matching `[policy] workflow_paths`, and the rendered file of a changed `<template_dir>/<name>.in`
+              (the re-render changes both), that <id>'s brief on the base does not contain as a plain substring is a warning per path, so a job
+              cannot quietly add a check that posts a fake `policy` status. It warns, not refuses: the W36 scan passed the brief's kill criterion. `brief/`,
+              `plan/` and `release/` cannot touch these paths; `meta/` is the sanctioned route, which Liam reviews.
   release/vX.Y.Z  only VERSION, whose content is X.Y.Z, exactly one patch, minor or major step above the base's VERSION (W29, C27: the
               branch the release workflow opens; the workflow re-derives the version before it tags, so a hand-made one tags nothing).
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
@@ -40,9 +44,10 @@ the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatem
 Result's details are policy errors. Their facts carry `added_decision_rows` ([{id, text}], W27). Warnings print as `policy: warning: ...` lines
 before the verdict line and never change the exit code.
 
-A pull request is judged with its base's rules (core W23, C24). The verb's parent (warscape/policy_base.py `judge`) writes the base's rule
-inputs into a fresh temporary folder outside every repository and runs the base's code there in a child process (`wsc policy --judge`,
-which calls `run_check` here):
+A base given as `origin/<name>` must be listed in the base's `[policy] bases` (core W36; [] accepts any, a sha or other ref is not judged by this):
+a stacked pull request is refused before the head is read. A pull request is judged with its base's rules (core W23, C24). The verb's parent
+(warscape/policy_base.py `judge`) writes the base's rule inputs into a fresh temporary folder outside every repository and runs the base's code
+there in a child process (`wsc policy --judge`, which calls `run_check` here):
   - the base tree: inside the core, the base commit's tree; in a game, the core commit the base's gitlink pins at the base's `[ci] core`, read
     from the submodule's object store (never `core/` on disk, never the head's gitlink), plus the base's wsc.toml, every `[gates] dirs`
     folder and the `[jobs] legacy` file. Git cannot find a repository from inside it (GIT_CEILING_DIRECTORIES);
@@ -84,7 +89,7 @@ def settings(config):
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text']),
             'decisions_cite_job': bool(p.get('decisions_cite_job', False)), 'reviewer_code': p.get('reviewer_code', 'warn'), 'thin_lines': p.get('thin_merge_lines', 500),
-            'thin_files': p.get('thin_merge_files', 20)}
+            'thin_files': p.get('thin_merge_files', 20), 'workflow_paths': list(p['workflow_paths']), 'template_dir': config['ci']['template_dir']}
 
 
 def git(*args, cwd=None):
@@ -221,6 +226,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         if sf and 'VERSION' in changed and int(jid[len(cfg['job_prefix']):]) >= sf:
             errs.append(f'{jid} changes VERSION: the release workflow owns VERSION (C27); from {cfg["job_prefix"]}{sf} on a job states its '
                         f'level as `semver` on its row and leaves VERSION alone (git checkout origin/main -- VERSION)')
+        warns += workflow_warnings(jid, changed, base_file, cfg)
         if sessions and trailer:
             # fail closed: a commit with no trailer could be anyone's, so it can prove nothing about who reviewed
             by = {n: sessions(f'{jd}/{jid}/{n}') for n in ('report.md', 'review.md')}
@@ -274,6 +280,27 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         errs.append(f'branch "{branch}" is not job/{cfg["job_prefix"]}<n>, brief/{cfg["job_prefix"]}<n>, plan/*, meta/* or release/vX.Y.Z: all work goes through the job queue'
                     + (f" ({T['rules_ref']})" if T.get('rules_ref') else '') + '. Rename the branch, or add the work as a job first.')
     return errs
+
+
+def workflow_warnings(jid, changed, base_file, cfg):
+    """One warning per workflow input job `jid` changes and its brief on the base does not name (W36; the module docstring). A deletion and both
+    halves of a rename are changed paths (`diff_base` uses --no-renames). A template's rendered file is required even when it is not yet changed."""
+    globs, tdir, wf = cfg.get('workflow_paths') or [], cfg.get('template_dir') or 'ci', '.github/workflows/'
+    template = lambda p: p.startswith(f'{tdir}/') and p.endswith('.in') and '/' not in p[len(tdir) + 1:]
+    rendered = lambda p: f'{wf}{p[len(tdir) + 1:-3]}'
+    hits = [p for p in changed if matches(p, globs)]
+    need = sorted({*hits, *(r for r in map(rendered, filter(template, hits)) if matches(r, globs))})
+    brief = base_file(f"{cfg['jobs_dir']}/{jid}/brief.md") or ''
+    out = []
+    for p in need:
+        if p in brief:
+            continue
+        pair = (rendered(p), p) if template(p) else (p, f'{tdir}/{p[len(wf):]}.in') if p.startswith(wf) else None
+        both = pair and (pair[1] in changed or base_file(pair[1]) is not None)
+        out.append(f"`{p}` is a workflow input and {jid}'s brief on the base does not name it: a job cannot quietly add a check that posts a fake "
+                   '`policy` status (W36); name the file in the brief (briefs are merged before the job starts) or use a `meta/` branch'
+                   + (f' (`{pair[0]}` renders from `{pair[1]}`: name both)' if both else ''))
+    return out
 
 
 def release_problems(branch, changed, base_file, head_file):

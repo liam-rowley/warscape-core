@@ -3,7 +3,7 @@
 A fixture game repo for warscape-core's own CI: `WSP_GAME_ROOT=proxy/tests/null_game` makes `proxy/tools/layout.py` treat this
 folder as the game, so `proxy/tools/build.sh all|repro|smoke` builds the DLL from `proxy/src` with the null adapter
 (`proxy/null/`) and runs every host test, and `pc_deploy.py kit --what harness` builds a harness kit from `harness/null/`.
-`registries/` holds the config keys the core reads and two engine sites that are always refused: a hook and a value row (W7, its
+`registries/` holds the config keys the core reads and three engine sites: every exe refuses them but the smoke's second host build, which carries their bytes (W34, launch 12): a hook, a fixed patch and a value row (W7, its
 float key `null.distance` with a range), so the generator, the generated table and the host build exercise every field. `proxy/tests/` is the null game's own host test folder (`layout.py proxy-tests`, W16): `build.sh tests` compiles `test_null_adapter.cpp`
 after the core's tests, so the hook a game uses for its console and camera numbers runs on every CI run. `viewer/pins.json` is the UI pin file
 (`schemas/ui_pins.schema.json`), the reference a game copies an entry from. Nothing here is a real game;

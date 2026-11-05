@@ -28,7 +28,8 @@ null render interface, the host's Lua).
   TGA through stb_image) get a full premultiplied mip chain and trilinear sampling; font atlases and generated textures do not.
 - **Input.** `UiDecide` (pure, host-tested) routes each event: the pointer is RmlUi's only over an interactive element
   (`Context::IsMouseInteracting`), a press that began on the engine stays the engine's until every button is up, the wheel goes to RmlUi
-  only over a scrollable element, keys only while a text field has focus. The DirectInput mouse and keyboard devices are hooked
+  only over a scrollable element, keys only while a text field has focus. System keys (`WM_SYSKEYDOWN`, `WM_SYSKEYUP`, `WM_SYSCHAR`) always pass to the game, with text
+  focus too, and never reach RmlUi: `WndProc` hands them over before `UiDecide` (`UiIsSystemKey`, W34), so Alt+F4 closes the game. The DirectInput mouse and keyboard devices are hooked
   (`IDirectInput8::CreateDevice` [3] from the exe's `DirectInput8Create` import, then `GetDeviceState` [9] and `GetDeviceData` [10]): their
   buttons, wheel or keys are blanked while RmlUi owns them; movement always passes. The hooks read one published word (`s_diMask`, `UiDiMask`:
   blank buttons, blank wheel, text focus), never the route state and never a lock: the window thread publishes it with `InterlockedExchange` at the end of

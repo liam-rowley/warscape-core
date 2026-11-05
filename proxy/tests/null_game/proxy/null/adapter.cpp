@@ -1,5 +1,5 @@
 // adapter.cpp - the null adapter (J12): the smallest game adapter the proxy core builds and tests against in warscape-core's CI. No real
-// game: an identity no exe has, one engine site that is always refused, the config keys the core reads (fixture registries beside it),
+// game: an identity no exe has, engine sites only the smoke's second host build carries, the config keys the core reads (fixture registries beside it),
 // no console, no camera setter and no orders route. A game repo writes its own adapter.cpp in its proxy/<game>/ folder (docs/CONSUMING.md).
 // W6: a null GestureAdapter (a fixed camera, flat ground at y 0, three fake units, a commit that only counts) so the gesture layer builds,
 // starts and can be walked with `ctl gesture` without a game; controls.gestures ships off here.
@@ -24,6 +24,8 @@ int NullCommit(const GestureOrderOut*, size_t n, std::string& why) { why = "the 
 const GestureAdapter kGesture = { NullScene, NullCamera, NullGround, NullSelection, nullptr, NullCommit, 6, 3.0, 1, 3, 0.0, 0.0, 1 };
 }
 
+// W34 (C6): positional because the DLL builds as -std=c++17 and the designated form is C++20; the size assert in adapter.h catches a shifted
+// field. A new GameAdapter field goes at the end, with a default (docs/CONSUMING.md).
 const GameAdapter& Adapter() {
     static const GameAdapter a = { gen::kGameName, gen::kConfigFile, gen::kModDir, gen::kInstanceMutex, gen::kIdentity,
                                    gen::kSites, gen::kSiteCount, gen::kKeys, gen::kKeyCount, &kDev, nullptr, nullptr, nullptr, &kGesture };
