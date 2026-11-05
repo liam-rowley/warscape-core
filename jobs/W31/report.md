@@ -13,7 +13,7 @@ Usage: 85 tool calls; models: opus; 1 session, hand count of this build session'
 6. **`budget_lifts`.** It is in `schemas/jobs.schema.json` with `additionalProperties: false`. `wsc reg set` already takes JSON through `key:=`, so no `reg` change was needed; a test proves it (`RegSet`), and `docs/USAGE.md` gives the command.
 7. **B50.** `Result.cards` is on `warscape/gates.py`. `card_lines` collects the `view`-stage cards and `card()` draws them under `.meta`. `usage_chip` draws `usage 142 / 150 calls · opus` from the report with no game code, red above 1.25 x. B50 is gone from `docs/BACKLOG.md`.
 8. **No new dependency, no network, no `~/.claude`.** Standard library only. The command is the only seam.
-9. **Napoleon's follow-up** is `docs/BACKLOG.md` B88, in B87's form.
+9. **Napoleon's follow-up** is `docs/BACKLOG.md` B104, in B87's form.
 
 `brief_budget` is factored out of `brief_problems` as the brief asked; the new regex limits the number to nine digits so `int()` cannot fail on absurd input.
 
@@ -85,8 +85,8 @@ The brief's four, each following its recommendation: over-budget and model misma
 
 New ones for the reviewer or Liam:
 1. **A job in review shows no chip until it merges.** `card()` reads the working tree, and a job's report is on its branch until then. The row's `budget_lifts` on the branch are not read either. Reading the report from the branch needs one more `cat-file` per job in `branch_rows`; I left it out as outside the brief.
-2. **The model rule and side requests.** A session that also makes small requests on a smaller model has two models in its transcript. The rule would fail that line, so the game's command must leave them out; B88 and `docs/USAGE.md` say so. If napoleon wants them shown, the rule needs a way to allow them.
+2. **The model rule and side requests.** A session that also makes small requests on a smaller model has two models in its transcript. The rule would fail that line, so the game's command must leave them out; B104 and `docs/USAGE.md` say so. If napoleon wants them shown, the rule needs a way to allow them.
 3. **`jobs next` reads the working tree's rows.** In this session's first run the worktree sat at f1dbb13, so `jobs next --id W31` refused with `W31 (needs_brief): in progress on brief/W31`, although `origin/main` already had the brief. A fast-forward fixed it. Reading rows from the fetched `origin/main` would stop that, as a small backlog row; I did not add one here.
 
 ## What Liam must do
-Nothing in the core. For napoleon, B88 needs a `needs_brief` row in napoleon-remastered: `usage_reader.py --job <id> --json` for build and fix sessions only, `[jobs] usage_cmd` and `usage_from`, its CLAUDE.md line, and the Opus override as a D line.
+Nothing in the core. For napoleon, B104 needs a `needs_brief` row in napoleon-remastered: `usage_reader.py --job <id> --json` for build and fix sessions only, `[jobs] usage_cmd` and `usage_from`, its CLAUDE.md line, and the Opus override as a D line.
