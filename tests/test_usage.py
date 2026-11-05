@@ -211,6 +211,11 @@ class UsageProblems(Rule):
         self.assertIn('haiku', e)
         self.assertEqual(self.errs(row(model='sonnet'), rep=report('Usage: 10 tool calls; models: sonnet, Sonnet; x')), [])
 
+    def test_a_record_the_verb_takes_is_a_line_the_rule_takes(self):
+        for name in ('opus', 'Opus', 'opus 5.5', 'opus-5-5'):
+            line = jv.usage_line(jv.usage_record({'calls': 10, 'models': [name], 'sessions': 1, 'note': ''}))
+            self.assertEqual(self.errs(rep=report(line)), [], name)
+
 
 class Record(unittest.TestCase):
     GOOD = {'calls': 42, 'models': ['Opus'], 'sessions': 2, 'note': 'from the reader'}
@@ -231,7 +236,8 @@ class Record(unittest.TestCase):
         for bad, word in (([], 'object'), ({}, 'calls'), ({**self.GOOD, 'calls': True}, 'calls'), ({**self.GOOD, 'calls': -1}, 'calls'),
                           ({**self.GOOD, 'calls': '42'}, 'calls'), ({**self.GOOD, 'models': []}, 'models'), ({**self.GOOD, 'models': 'opus'}, 'models'),
                           ({**self.GOOD, 'models': ['opus; x']}, 'models'), ({**self.GOOD, 'models': ['a,b']}, 'models'), ({**self.GOOD, 'sessions': 1.5}, 'sessions'),
-                          ({**self.GOOD, 'note': 3}, 'note')):
+                          ({**self.GOOD, 'note': 3}, 'note'), ({**self.GOOD, 'models': ['claude-opus-5-5']}, "'claude-opus-5-5'"),
+                          ({**self.GOOD, 'models': ['opus', 'haiku']}, "'haiku'")):
             with self.assertRaises(ValueError, msg=bad) as c:
                 jv.usage_record(bad)
             self.assertIn(word, str(c.exception))

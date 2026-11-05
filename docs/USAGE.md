@@ -36,6 +36,8 @@ object on stdout and exits 0:
 {"calls": 142, "models": ["opus"], "sessions": 2, "note": "about $3, usage_reader, 2026-11-04"}
 ```
 
+`models` are family names from `[jobs] models`: a reader that keys by model id maps `claude-opus-5-5` to `opus`, or the command is refused.
+
 Anything else (a non-zero exit, bad JSON, a missing key, a timeout, an empty `usage_cmd`) is exit 1 with the reason, and nothing is written. The core reads no transcript and no
 `~/.claude` path: this command is the only seam. It must leave out sessions a row's model does not cover, such as a side request on a smaller model, or the model rule fires.
 

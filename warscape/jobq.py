@@ -328,6 +328,9 @@ def usage_record(data):
     models = data.get('models')
     if not isinstance(models, list) or not models or not all(isinstance(m, str) and USAGE_MODEL.match(m.strip()) for m in models):
         raise ValueError(f'the usage answer needs models as a list of model names, not {models!r}')
+    for m in models:
+        if model_family(m) not in S.models:
+            raise ValueError(f'the usage answer has model {m.strip()!r}: name a family from [jobs] models ({", ".join(S.models)}), not a model id')
     if not isinstance(data.get('note'), str):
         raise ValueError(f'the usage answer needs note as text, not {data.get("note")!r}')
     return {'calls': data['calls'], 'models': list(dict.fromkeys(m.strip().lower() for m in models)), 'sessions': data['sessions'],
