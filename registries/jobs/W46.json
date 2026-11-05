@@ -1,0 +1,13 @@
+{
+  "id": "W46",
+  "description": "Liam, 2026-11-05: the work has slowed. That day napoleon had 12 ready rows and nothing building: --auto starts only reviews and fixes (napoleon J52 left briefs and builds out of scope), so every brief and build waits for 'pick up the next job'. After W41 (the cap). [jobs] auto_actions (default review and fix, today's behaviour; a game opts in to brief and build). The tick starts in the order fix, review, build, brief, under [jobs] max_sessions, the needs_pc one-holder rule and the acceptance lock; a build or brief claims its branch first (W26's claim); a session that ends with no push is not restarted until the row or main moves; later rows (W43) are never started. [jobs] auto_hold_phases (rows of these phases are never auto-started, so a pipeline freeze is one config line) and auto_phase_order (which phases first). Host tests with a stubbed claude agents --json and git.",
+  "title": "Autopilot starts briefs and builds under the session cap, with held phases",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "opus",
+  "needs_pc": false,
+  "semver": "minor",
+  "depends_on": [
+    "W41"
+  ]
+}

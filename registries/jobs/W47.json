@@ -1,0 +1,15 @@
+{
+  "id": "W47",
+  "description": "C41, after W44, W45 and W46. The autopilot starts an audit session (named audit-<date>, counted in the cap, run on Sonnet: drafting proposals from a record is judgement, not a build) when the newest record in [audit] dir is older than [audit] every_days or more than [audit] every_merges job merges old. Its prompt: git pull, wsc audit --record, wsc proposals draft and fill each (options, apply recipes, recommendation, tag), wsc proposals close for the re-measured ones, push plan/audit-<date> with the record and the proposals, open the pull request. docs/AUDIT.md is the session's short procedure: what a good option is, at most [audit] max_questions open at once, a tagged proposal never defaults, a declined one is not re-raised inside its margin. Host tests on the tick.",
+  "title": "Autopilot runs the audit loop: a cadence, an audit session and its proposals",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "opus",
+  "needs_pc": false,
+  "semver": "minor",
+  "depends_on": [
+    "W44",
+    "W45",
+    "W46"
+  ]
+}
