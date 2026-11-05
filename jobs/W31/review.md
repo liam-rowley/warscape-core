@@ -1,5 +1,39 @@
 # W31 review
 
+## Round 2 (2026-11-05, branch job/W31 at 7166f9d)
+
+**Verdict: merge.**
+
+Every blocker and should-fix item of round 1 is answered in `## Fix round 1`, and I checked each against the tree rather than the report. `main` at b8ecfb7 is an ancestor of the head, so the gates below ran on what will merge. This round changes only this file and the job's row.
+
+### Round 1's findings
+
+- **Blocker 1 (C35, the merge):** answered. `git merge-base --is-ancestor origin/main HEAD` holds, and pull request 109 says `MERGEABLE`, `CLEAN`. `docs/DECISIONS.md` has this job's row as C39 after main's C35 to C38. No open `plan/` branch (pull requests 114, 119, 121) has a C39 or later row, or a B104 or later row. The only "B88" and "C35" left in the report are in `## Fix round 1`, which explains the change.
+- **Blocker 2 (`registries/tools.jsonl`):** answered. The `registries` and `tools` gates are ok. The merge's combined diff keeps one row of `wsc.jobs` with this job's text and one of `wsc.policy` with main's.
+- **Blocker 3 (`docs/CONSUMING.md`):** answered. 30,713 of 30,720 bytes on the merged tree, and `doc_size` is ok. The two passages it dropped are owned by `warscape/jobq.py`, as the report says: `MARKED_URL` at :1298 and the policy docstring at :1305.
+- **Should-fix 1 (model id):** answered. `--from-json` with `claude-opus-5-5` exits 1 naming the value and `[jobs] models`. `Opus` writes `opus`, and `opus-5-5` is taken, which agrees with the rule's first-word compare. A game's own `[jobs] models` reaches the check: `haiku` is refused by default and taken once listed.
+- **Should-fix 2 (backslash):** answered. A backslash in `usage_cmd` stops `wsc` with the config error, in both TOML string forms. The sentence in `docs/USAGE.md` is gone.
+- **Should-fix 3 (Usage line):** answered, see the numbers below.
+- **Later 1 and 2:** B102 and B103 are on `plan/w31-review-later` (pull request 121), which is open. This job does not depend on them.
+- **`main` red on `proxy` (run 42066067742):** cleared. Attempt 2 of that run is success on every job.
+
+### Findings
+
+No blocker and no should-fix.
+
+The report's hand count is low by 5. Session 9756d055's transcript holds 54 tool calls, all on `claude-opus-5-5`, against "about 49"; with the build's 87 that is 141, not 136. The report says the count was taken before its last calls and that no reader measured it, which is what the brief's acceptance asks for. Both numbers are far below the 187 the rule allows, and W31 is under `usage_from`, so I leave the line as it stands.
+
+### What I ran (2026-11-05, on this PC, at 7166f9d)
+
+- **Gates:** `python3 wsc.py gates`: 15 ok, 1 warn, 0 failed; 1137 host tests passed, 5 skipped (a POSIX sh with symlinks for one, capstone for four: the `tests` warn).
+- **Policy before this round:** refused only for the missing merge verdict and the `done` row. The branch changes `warscape/gatemods.py`, `gates.py`, `jobq.py`, `repo.py`, `verbs/jobs.py` and `wsc.toml`, so `policy` notes them; their new rules are proven by the host tests, and none of them is `warscape/policy.py`.
+- **CI:** run 42078112387 at 7166f9d passed `gates` on both systems, `proxy`, `harness-windows` and `changes`; `wsc jobs review` printed all 9 checks passed or skipped. No workflow changed.
+- **Fixtures, on a throwaway copy:** the model check disabled fails `test_a_bad_record_is_refused`, and the backslash guard disabled fails `test_bad_values_are_refused`, as the fix round says. The ceiling at 1.5 x still goes red on the merged code. `tests.test_usage` and `tests.test_jobs.UsageRule` passed on the unchanged copy first.
+- **Acceptance:** `parse_usage` reads 136 calls and `opus` from the report, and `brief_budget` gives 150. With `usage_from = 31`, `usage_problems` is empty for W31 and fails only the `done` rows W33 to W40, which merged without a line. That is five rows more than round 1's W33, W37 and W38, because W34, W35, W36, W39 and W40 reached this tree with the merge of `main`; `usage_from = 42` in `wsc.toml` exempts them all. `git log --all -- registries/jobs/W42.json` is empty, so no W42 row exists on any ref and 42 is still the first free number. `jobs view --offline` draws `usage 136 / 150 calls · opus`.
+- **The Usage line's numbers:** the build session's transcript holds 87 tool calls, as the line says, and the fix session's 54, as above.
+- **Read in depth, as the code that changed since round 1 and that every game's queue reads:** the fix commits 9e8ee38 and 0dbd030, the combined diff of merge 0133efa for `registries/tools.jsonl`, and `warscape/verbs/jobs.py` against `main` (the `usage` action, the bare-id guard). Round 1 read the rule and `--write` in depth, and they have not changed since, so I did not repeat that.
+- **The brief:** no kill criterion fired. `wsc.toml` sets `usage_from = 42`, and `jobs check` on the core's own queue is ok. I did not probe the report's open question 3 (`jobs next` reading the working tree's rows).
+
 ## Round 1 (2026-11-05, branch job/W31 at e12011e)
 
 **Verdict: merge after fixes.**
