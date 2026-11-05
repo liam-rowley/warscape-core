@@ -69,3 +69,37 @@ After the tag, in its pin-bump job:
 2. Retire its own `dump_read.py` row in favour of the core's. Keep `napoleon.dxvk.wndproc_cycle`, `napoleon.dxvk.rehook_paths`, `napoleon.pc.vulkan_icds` and the run reports `20261030_j16dumps` and `20261104_j16ab` as evidence.
 3. The build id changes: 20 consecutive acceptance passes on the new id, one set covering W33 and W39.
 4. Run the fix arm with Liam present: 4K to 1440p, 4K to 1080p and windowed to fullscreen, three round trips each way. Expect no crash, no dump, `4 slots` at start, and `wndproc guard: window ... above DXVK's proc` naming the dropped module per switch. Also check that the mouse reaches the game after a fullscreen to windowed switch and that the Steam overlay opens. Input lost with the guard on is a separate finding (open questions 4 and 5).
+
+## Fix round 1
+Answers `## Round 1` of `review.md` (2026-11-05). This section supersedes the version statements above: **the version is 0.39.0, not 0.38.0.** The review asked for "Version and W33" to be rewritten, but `wsc jobs fix` forbids touching earlier report sections, so that section and the first paragraph stand as written and this one corrects them.
+
+**1. Version (blocker): fixed, `024c313` and `ea7942f`.** `git merge origin/main` at `3688fc2` (W35, W36, the B90-B94 rows), no conflicts, no rebase. `VERSION` is 0.39.0: `main` says 0.38.0, `v0.38.0` is the newest tag, and no open job branch is above 0.38.0 (W31 0.37.0, W34 and W40 0.38.0). The UPGRADING heading is 0.39.0 and the section now sits after W35's. W39 is a legacy row below `semver_from`, so `release.py`'s `plan` tags 0.39.0 as it is, unless a row from W40 on merges first. W34 is also a legacy row: whichever of W34 and W39 merges second takes the next number.
+
+**2. Short guard (should-fix): fixed, `4ea1e61`.** `kDxvkWndProcSlots = 4` is in `runtime.h`, a `static_assert` ties it to the guard's table, and `backend.cpp` logs a warning when fewer are patched. That covers a DXVK with other imports and a failed `VirtualProtect`, which counts as a slot not patched. The lint in `test_wndproc.cpp` was red first (`267 passed, 3 failed`, the three new checks), then green (`270 passed, 0 failed`), `build.sh --docker tests` and `--docker all` on the merged tree, 2026-11-05: 17 core tests and 1 game test pass. The info line is unchanged, so the `4 slots` expectation below stands. This changes `dxvk_wndproc.cpp`, which is no longer byte-identical to `95f5a1e` (one added line).
+
+**3. Claims with nothing to open (should-fix): the wine run is redone below; the other two cannot be reopened.**
+- **Wine run, redone 2026-11-05 on `4ea1e61`'s sources.** The DLL is sha256 `7049bcb17bc7`, built by `WSP_GAME_ROOT=proxy/tests/null_game proxy/tools/build.sh --docker all`. DXVK is the pinned 3.1.1 (`python3 proxy/tools/fetch_dxvk.py`, sha256 `265888c31ca7`). The arms ran in the pinned image with wine installed: `smoke_host.cpp` as `Game.exe`, `nullgame\dxvk\d3d9_dxvk.dll` in place, the ini `[proxy] backend=dxvk, exe_guard=0, dxvk_wndproc_fix=<0|1>`, then `WINEDEBUG=-all WINEDLLOVERRIDES="d3d9=n,b;winedbg.exe=d" wine Game.exe`. The third arm's DLL is a mingw stub exporting only `Direct3DCreate9`, so it has no user32 import. Log lines as they came:
+  ```
+  === arm pinned-on (key=1): exit 3
+  backend: dxvk d3d9 loaded from Z:\tmp\game\nullgame\dxvk\d3d9_dxvk.dll (7856142 bytes); ...
+  backend: wndproc guard on DXVK's imports: 4 slots
+  backend: dxvk ready (Direct3DCreate9=77be1530)
+  === arm pinned-off (key=0): exit 3
+  [WARN ] backend: proxy.dxvk_wndproc_fix=0: an in-game fullscreen re-entry can loop DXVK's and a foreign window proc (J16)
+  backend: dxvk ready (Direct3DCreate9=77be1530)
+  === arm no-user32 (key=1): exit 0
+  backend: wndproc guard on DXVK's imports: 0 slots
+  [WARN ] backend: wndproc guard patched 0 of 4 slots: this DXVK reaches user32 past the guard, an in-game fullscreen re-entry can still loop (J16)
+  backend: dxvk ready (Direct3DCreate9=78c314d0)
+  ```
+  The third arm is the review's "to see it fail", now passing. As before, the exit 3 arms stop in the smoke host at `Direct3DCreate9`, after the guard ran, which the original report put down to the container having no Vulkan; I did not re-examine the cause. The run is still a one-off outside CI, and `Hk_*` still have not executed. The scripts lived in a git-ignored scratch folder, so the lines above are the record.
+- **The five mutants: cannot be reopened.** No log or command survives from the build session. The review reproduced the result with its own four mutants, so that is the evidence to rely on.
+- **The `ping.exe` dump run: cannot be reopened.** No log survives and `cdb` is not on this session's PATH, so I did not repeat it. `tests/test_dump_read.py` (9 tests) covers the parsing on canned output, not a live cdb.
+
+**4. CONSUMING against UPGRADING (should-fix): fixed, `ea7942f` and `20d82ab`, differently from the review.** "Every game that builds the proxy" would not fit: `main` left CONSUMING 49 bytes under the 30 KB cap, and the corrected line failed `doc_size`. So the line is gone from CONSUMING, whose upgrade-notes list now names `0.39.0 (new key proxy.dxvk_wndproc_fix)` and links UPGRADING, which owns the key row and already said every game. CONSUMING is 30,714 of 30,720 bytes, so the next job to add to it must move something out. This departs from brief decision 3's "one line in the proxy section".
+
+**Later (5 to 8): left in the review.** `wsc jobs fix` asks for blockers and should-fix items, and `docs/REVIEW.md` keeps a repo's own later items in the review. No code changed for them. For the PC run, item 5 changes how to read the log, so add this to step 4 of "What napoleon must do": **a `wndproc guard: DXVK hooked window` line whose `proc` equals its `previous` is the write-back case of open question 4, and one more fullscreen entry turns it into the same crash, not only lost input.**
+
+**Gates and policy on `20d82ab`:** `python3 wsc.py gates` exit 0: 15 ok, 1 warn, 0 failed, 1008 host tests passed, 5 skipped (no POSIX sh for one hook test, capstone not installed for four). `python3 wsc.py policy --branch job/W39 --base origin/main` exit 1, REFUSED for the two expected reasons only: the verdict is not yet `merge`, and the row is not `done`.
+
+**Not shown yet:** CI's `proxy` job on the merged code, which the review asks for. This session's Docker host tests and DLL build are green on it; the repro build and the wine smoke run only in CI on this push. This report commit touches no `proxy/` file, so check that job on the head that last changed `proxy/` if it is skipped on the newest one.
