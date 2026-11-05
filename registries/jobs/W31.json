@@ -3,7 +3,7 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) R3 (core half), automation 7. brief_problems checks that a budget and a kill criterion exist (jobq.py:113-115), but 0 of 52 napoleon reports carry a usage line, budgets were lifted mid-job in prose only (J9, J10, J40), and nothing compares usage with the budget. Reports need a Usage: line (a jobs check rule a game switches on), filled by wsc jobs usage <id> through a game hook that reads the game's usage source (napoleon's tools/usage_reader.py); flag usage over 1.25x the brief's budget and a model other than the row's; a budget_lifts row field (date, from, to, why; schema). Fold in B50 (per-card lines in jobs view) to show usage per card. After W26 (jobq.py).",
   "title": "Usage accounting in reports",
   "phase": 1,
-  "status": "fix",
+  "status": "review",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",

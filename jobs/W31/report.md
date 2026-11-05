@@ -2,7 +2,7 @@
 
 A game can now hold its reports to their budgets. With `[jobs] usage_from` set, `wsc jobs check` needs one `Usage:` line in each report on a row in review, fix or done. It fails usage above 1.25 times the effective budget, a model other than the row's, and a broken `budget_lifts` chain. `wsc jobs usage <id> --write` fills the line from a command the game names, so the core reads no transcript. `budget_lifts` is a new row field, and the `jobs view` cards show usage against budget, with a per-card line for gate modules (B50). Everything is off by default, so `jobs check` on a queue that sets neither key gives the same result as before. Built by session 4efda02d-37d4-4632-bba0-f82f9930ba5f.
 
-Usage: 85 tool calls; models: opus; 1 session, hand count of this build session's tool calls, not a reader's measurement, 2026-11-04
+Usage: 136 tool calls; models: opus; 2 sessions, by hand, no reader: build 87 (the review's transcript count) and fix round 1 about 49, 2026-11-05
 
 ## What was built, per decision
 1. **The Usage line.** `parse_usage` in `warscape/jobq.py` reads the shape in decision 1. It ignores a line in a code fence, and it refuses two lines or a line with no models part or no free text. `Usage` is a NamedTuple of calls, models and note.
@@ -90,3 +90,26 @@ New ones for the reviewer or Liam:
 
 ## What Liam must do
 Nothing in the core. For napoleon, B104 needs a `needs_brief` row in napoleon-remastered: `usage_reader.py --job <id> --json` for build and fix sessions only, `[jobs] usage_cmd` and `usage_from`, its CLAUDE.md line, and the Opus override as a D line.
+
+## Fix round 1
+Session 9756d055-2ef5-4875-acd0-8bbbd0980fac, 2026-11-05, on `origin/main` b8ecfb7. Every blocker and should-fix item from round 1 is addressed.
+
+### Blockers
+1. **C35 taken, the branch does not merge (0133efa, fbdfce1).** Merged `origin/main`. Main's C35 to C38 stay and this job's row is C39, which none of the three open `plan/` branches uses. The backlog row is B104, after main's B90 to B95: B88 and B89 are pull request 114's, B96 to B101 are 119's, B102 and B103 are 121's. Every "B88" in this report became B104. The review asked for that, so this is the one edit to earlier sections besides the Usage line.
+2. **`registries/tools.jsonl` (0133efa).** One row each: `wsc.jobs` keeps this job's `jobs usage` text and `wsc.policy` keeps main's `--scan` text. `wsc reg add tools` was rerun for both, and the `jobs.py` header already held main's text and this job's.
+3. **`docs/CONSUMING.md` over the cap (f08257c).** 30,713 of 30,720 bytes, read from the merged tree. The view page's CSP detail and the "new marked version" sentence went, because `warscape/jobq.py` owns both (the `MARKED_URL` comment, the CSP docstring), and the usage link line is shorter. Every key name stays on that line. Only 7 bytes are free, so the next job to write here has to make room.
+
+### Should-fix
+1. **`usage_record` took a model id (9e8ee38).** A model whose family is not in `S.models` is now a `ValueError` naming the value, with two cases in `Record.test_a_bad_record_is_refused`. `UsageProblems.test_a_record_the_verb_takes_is_a_line_the_rule_takes` covers the round trip. Beyond the review: `docs/USAGE.md` and B104 now say a reader maps ids to family names, because napoleon's reader keys by model name. Red with the check disabled: `test_a_bad_record_is_refused`.
+2. **The backslash trap (0dbd030).** `load_config` refuses a backslash in `usage_cmd`, with a case in `Config.test_bad_values_are_refused`, and the sentence in `docs/USAGE.md` is gone. The new rule refused the `Verb` fixture on Windows, as its `sys.executable` path has backslashes, so the fixture now writes `as_posix()` paths. Red with the guard disabled: `test_bad_values_are_refused`.
+3. **The Usage line (this commit).** Rewritten with `wsc jobs usage W31 --write --from-json <file>`. The numbers are by hand, and no reader measured them: 87 for the build (the review's transcript count, not the build's own 85) and about 49 for this session, counted before its last calls.
+
+### Later
+B102 and B103 are the reviewer's, on `plan/w31-review-later` (pull request 121). This round did not touch them.
+
+### Checks
+- `python3 wsc.py gates` at 0dbd030 on 2026-11-05: 15 ok, 1 warn, 0 failed; 1137 host tests passed, 5 skipped (a POSIX sh with symlinks for one, capstone for four).
+- `python3 wsc.py policy --branch job/W31 --base origin/main`: refused only for the missing merge verdict and the `done` row.
+- `main` was red on `proxy` at the review (run 42066067742). I did not look at that run again, so the merge round still has to see it cleared or rerun.
+
+The worktree `W31-build` still has `job/W31` checked out at e12011e, so this round was built on a local branch and pushed to `job/W31`.
