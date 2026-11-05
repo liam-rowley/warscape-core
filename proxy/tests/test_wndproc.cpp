@@ -208,6 +208,12 @@ void Lints() {
     CHECK(load != np && call != np && under != np && dxvk != np && system != np && first != np);
     CHECK(load < dxvk && dxvk < under && under < call && call < system && system < first);
     CHECK_EQ(Count(be, "DxvkWndProcGuard("), size_t(1));
+    // a guard short of its slots leaves the crash in with DXVK's other writes: it warns, whatever the count, and the number is the guard's own table
+    const std::string rh = Code("core/runtime.h");
+    CHECK(rh.find("constexpr int kDxvkWndProcSlots = 4;") != np);
+    CHECK(gd.find("static_assert(sizeof(map) / sizeof(map[0]) == kDxvkWndProcSlots") != np);
+    const size_t slots = be.find("const int slots = DxvkWndProcGuard(s_real);"), shortOf = be.find("if (slots < kDxvkWndProcSlots) LOGW(");
+    CHECK(slots != np && shortOf != np && under < slots && slots < shortOf && shortOf < system);
     CHECK(be.find("rt.cfg.Bool(\"proxy.dxvk_wndproc_fix\")") != np);
     CHECK(be.find("rt.cfg.Bool(\"proxy.dxvk_wndproc_fix\")") < call);
     // the unknown-backend warning is the else of the `want` test and of nothing else: the guard's if may not come between them (J16's shape did)

@@ -62,6 +62,7 @@ int DxvkWndProcGuard(HMODULE dxvk) {
     r_SetW = (PFN_SetWL)(void*)GetProcAddress(u32, "SetWindowLongW"); r_SetA = (PFN_SetWL)(void*)GetProcAddress(u32, "SetWindowLongA");
     const struct { void* real; void* hook; } map[] = {{(void*)r_GetW, (void*)Hk_GetWindowLongW}, {(void*)r_GetA, (void*)Hk_GetWindowLongA},
                                                       {(void*)r_SetW, (void*)Hk_SetWindowLongW}, {(void*)r_SetA, (void*)Hk_SetWindowLongA}};
+    static_assert(sizeof(map) / sizeof(map[0]) == kDxvkWndProcSlots, "runtime.h's slot count is this table's size");
     auto* base = reinterpret_cast<uint8_t*>(dxvk);
     auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
     auto* nt = reinterpret_cast<IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);

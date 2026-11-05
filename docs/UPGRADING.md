@@ -80,7 +80,7 @@ What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROX
 - **Behaviour:** with DXVK loaded, its own `GetWindowLong`/`SetWindowLong` (W and A) import slots go through a guard, so a window proc stacked above
   DXVK's is dropped at a fullscreen re-entry and cannot close a cycle with it (a stack overflow at an in-game resolution change). The key at 0 patches
   nothing and warns. Nothing changes under the system d3d9. A new DLL input: the build id changes, so the acceptance passes run again.
-- **New log lines:** `backend: wndproc guard on DXVK's imports: <n> slots` (the pinned DXVK imports 4), `wndproc guard: DXVK hooked|restored window ...`
+- **New log lines:** `backend: wndproc guard on DXVK's imports: <n> slots`, then a warning `backend: wndproc guard patched <n> of 4 slots: ...` if a DXVK build imports fewer, `wndproc guard: DXVK hooked|restored window ...`
   per set, `wndproc guard: window ... above DXVK's proc ...` naming the dropped module, `backend: proxy.dxvk_wndproc_fix=0: ...` with the key off.
 - **New tool:** `proxy/tools/dump_read.py` reads a dump with cdb (stack against its limit, the repeating frame cycle, graphics modules). A game
   retires its own copy's `tools` row at the bump.

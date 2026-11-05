@@ -67,6 +67,7 @@ void CaptureEvent(int kind, const wchar_t* name);   // 0 BeginEvent, 1 EndEvent,
 bool BackendEnsure();          // loads the configured backend once (never from DllMain); false = no d3d9 at all
 const char* BackendName();
 int DxvkWndProcGuard(HMODULE dxvk);   // J16: guard DXVK's window-proc reads/writes (dxvk_wndproc.cpp); returns the patched import slots
+constexpr int kDxvkWndProcSlots = 4;  // Get/SetWindowLongW/A: fewer patched means DXVK reaches user32 past the guard, and backend.cpp warns
 
 std::string Narrow(const std::wstring& w);
 
