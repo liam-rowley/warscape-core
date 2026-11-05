@@ -65,3 +65,23 @@ None is touched today. W35, the only in-flight branch with a review, printed no 
 
 ## What napoleon must do after the tag
 Nothing is forced. Its pin is at 0.10.0, so it meets rule A for the first time at its next bump, as a warning. It may set `[policy] reviewer_code = "error"` in a pin-bump commit, once its open `merge` rounds are done; until then rule A stays a warning there. `python3 core/wsc.py policy --scan --rule A` gives it the count first.
+
+## Fix round 1
+Session f42fcd9e, 2026-11-05, answering `## Round 1` of `review.md`. This section changes two things the sections above say: rule A now clears by ancestry, and this job's decision is C38, not C36.
+
+- **Should-fix 1 (a fresh round clears code it never saw): fixed in commit `29a63bf`.** A commit is cleared only when it is an ancestor of the commit that first wrote a newer round: `GitReads.is_ancestor` (`git merge-base --is-ancestor`, and a git error keeps the hit), with `fake_reads` keeping the log's order. The reviewer's case is `test_w40_code_a_fresh_round_never_saw_is_not_cleared_by_its_place_in_the_log` in `PolicyOnGit`, on a real repository. It asserts the trap first (the code is listed before round 2's review commit) and then the hit. It was red before the fix (`errs` was `[]`). `test_w40_a_fresh_round_on_top_of_the_merge_clears_that_code` and `test_w40_a_fresh_round_clears_the_code_it_descends_from` show the way out still works, and the CoreMode test `test_w40_a_fresh_round_clears_a_stranded_merge_with_an_error_base` shows it through the real verb and the judge's child process.
+- **Later 1 (a round's later edit clears code before it): tightened, same commit.** It was cheap: the check reads the commit that first wrote the round, so a later edit of round 2 clears nothing. The cost is that a round 2 session that sees late code and edits its own round does not clear it; a fresh round 3 has to. I took that side because a false refusal has a stated way out and a false pass reaches `main`. Test: `test_a_rounds_later_edit_of_itself_does_not_clear_code_before_that_edit`, both modes, red first. C38 and `docs/REVIEW.md` say so.
+- **Later 2 (open question 2): not fixed, filed as B95 in commit `378b27b`.** It still changes what rule A attributes, which the brief did not ask for, so it needs its own job. Until then `docs/REVIEW.md` overstates what is refused in that one shape.
+
+**Merge of `origin/main` (W36, W39, W34), commit `9be8881`.** The review did not ask for this, but the branch no longer merged: 7 files conflicted, so I did it first and built the fix on top. Both sides are kept in every conflict. What a reviewer should check:
+- W36 and W34 took C36 and C37, so this job's row is now **C38**. The report above still says C36 because earlier sections are not edited.
+- W36's `bases` refused the five W40 CoreMode tests' scratch bases, so `reviewer_code()` in `tests/test_policy_base.py` now lists its base.
+- `docs/CONSUMING.md` went over the cap with both sides' keys (30,848 bytes). Comments are trimmed to 30,711, under 30,720, with nothing removed. Only 9 bytes are left, so the next key there needs a real cut.
+- `registries/tools.jsonl` kept two `wsc.policy` rows, now one, regenerated from the merged header.
+
+**Evidence, 2026-11-05 on Windows, Python 3.15.2:**
+- **Gates:** `python3 wsc.py gates` at `378b27b`: 14 ok, 2 warn, 0 failed; 1052 host tests passed, 5 skipped. The warns are `hooks` (this worktree's `core.hooksPath` is absolute, as in round 1) and the skips (no POSIX sh, no capstone).
+- **Scan after the fix:** `wsc policy --scan --rule A`: core 35 judged, 0 not judged, 6 hits (W4, W6, W19, W24, W29, W37); `--since 95f0269`: 8 judged, 1 hit (W29). The same six branches as the report, so the fix moved no number and the kill criterion is still not met. Napoleon was not re-scanned: the fix can only add hits there, and only on a branch with a merge of this shape.
+- **Branch CI:** not yet run on this head when this was written; the next round reads it with `wsc jobs review`.
+
+**Open question 1 is still Liam's** (merge now, or wait for reviewers to use `merge after fixes` for a while).
