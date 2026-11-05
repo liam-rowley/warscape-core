@@ -1,5 +1,62 @@
 # W39 review
 
+## Round 2 (2026-11-05, branch job/W39 at 0c9e0b4)
+
+**Verdict: merge.**
+
+Every round 1 blocker and should-fix is answered, and CI's `proxy` job ran green on the merged code. I found no new defect in the guard, the policy or the hook-up. The fix itself stays unproven until napoleon's J16 fix arm on the PC, as the report says. This round changed nothing outside the job folder and the row.
+
+### Round 1 findings
+
+1. **Version (blocker): answered.** `VERSION` is 0.40.0, and the UPGRADING heading and CONSUMING's list say so. The UPGRADING section sits after W35's.
+   - The number is free: at the time of writing `git ls-remote --tags origin` stops at `v0.39.0` (`c915e02`, W36) and `origin/main:VERSION` is 0.39.0.
+   - No open job branch is above it: W31 0.37.0, W34 and W40 0.38.0.
+   - No doc on the branch still ties this code to 0.38.0. `docs/CONSUMING.md:99`'s 0.38.0 is W35's.
+   - `release.py`'s `plan`: W39 is legacy, so `VERSION` 0.40.0 above `v0.39.0` is tagged as it is. A W40 row landing in the same window still gives `tag`, through `V == computed` or `old and V > computed` (`warscape/release.py:140-142`).
+   - The report's request to re-check just before merging is carried out under "Merging" below.
+2. **Short guard (should-fix): answered.** `backend.cpp:98-100` warns under `kDxvkWndProcSlots`, and a `static_assert` ties the constant to the guard's table.
+   - The early returns (`user32` missing, no import directory) return 0, so they warn too.
+   - A failed `VirtualProtect` skips `++patched`, so it counts as a slot not patched.
+   - The lint is at `test_wndproc.cpp:211-216`. 270 passed in CI on the head.
+3. **Claims with nothing to open (should-fix): answered, as round 1 allowed.** The wine run's commands and log lines are in the report. The mutants and the `ping.exe` run are stated plainly as not reopenable. The red count (`267 passed, 3 failed`) also has no log, but the lint's green state is in CI and the checks are plain text matches.
+4. **CONSUMING against UPGRADING (should-fix): answered, differently from what round 1 asked, and I accept it.** The line left CONSUMING for the 30 KB cap, the upgrade-notes list links UPGRADING, and `docs/UPGRADING.md:78` says every game needs the row. The report names this as a departure from decision 3. CONSUMING is 30,714 of 30,720 bytes, measured.
+
+Later items 5 to 8 stay open and were not expected in the fix round. Item 5's log-reading note went into the report for the PC run. I checked it against `GuardSet`: `proc` is the new value and `previous` is what `SetWindowLong` returned, so an orphan DXVK proc on top logs them equal, as the note says.
+
+### Later
+
+9. **A hand-bumped `VERSION` already taken by a release passes every machine.** `warscape/policy.py:218` only refuses a `VERSION` change from `semver_from` on. Below that, nothing compares a job's `VERSION` with the base's or the tags.
+   - W39 hit this twice in one day. The guard against a third time is prose in `jobs/W39/report.md:78`, which is a repeat under REVIEW step 5.
+   - W31 and W34 are still open legacy rows, so it can bite again.
+   - Fix: `policy` refuses a legacy job whose changed `VERSION` is not above the base's. That also covers round 1's item 8 for legacy rows, not for a number written in a doc heading.
+   - To see it: a job branch with `VERSION` equal to `origin/main:VERSION` and no other fault gets no line from `policy`.
+
+### Machines
+
+- `python3 wsc.py gates` on 0c9e0b4, this worktree: 15 ok, 1 warn, 0 failed in 322 s, 1008 host tests passed and 5 skipped. The warn is the skipped tests (no POSIX sh for one, capstone not installed for four).
+- `python3 wsc.py policy --branch job/W39 --base origin/main` on 0c9e0b4: REFUSED for the two expected reasons only (the verdict and the row, which this round sets). Its result on the review commit is under "Merging".
+- CI run 42044403116 on 0c9e0b4 (push): `gates` on both systems, `harness-windows` and `proxy` all success. **`proxy` was not skipped.** Its log shows `test_wndproc: 270 passed, 0 failed`, `host tests passed (17 core, 1 game)`, `repro: identical from another path`, and `build.sh smoke: passed (11 launches under wine...)` for both the null game and the no-gesture build. That closes round 1's "full proxy build on merged code is unproven" and the report's "Not shown yet".
+- PR #108: draft, mergeable, state CLEAN.
+
+### Merging
+
+Checked immediately before merging, as the report asks. `origin/main` was `c915e02` at 0.39.0, with no `v0.40.0` tag and no open release branch or pull request for it.
+
+- `python3 wsc.py policy --branch job/W39 --base origin/main` on the review commit: ok, 22 files changed, no warning.
+- `python3 wsc.py release plan --ref HEAD`: `action tag, version 0.40.0`, "bumped by hand above v0.39.0: tagged as it is".
+- `git merge-tree` of this head into `origin/main`: clean.
+- **W34 (PR #113) is ready with auto-merge on but cannot land:** it conflicts with `main` on `docs/DECISIONS.md`. Its row is `done` with `semver=minor` and its branch leaves `VERSION` at the base's. So if it landed first, `release.py` would cut 0.40.0 for it and this branch's docs would name the wrong tag. W39 landing first avoids that; W34 then takes the next number.
+- **W34 will also fail `doc_size` once it merges `main` after this.** `docs/CONSUMING.md` in a `git merge-tree` of W34 with this head is 30,907 bytes against the 30,720 cap, so W34 must move something out of it.
+- The `main` ruleset has `strict_required_status_checks_policy` false, so auto-merge does not wait for a branch that fell behind. A release landing during this head's CI would not stop it.
+
+### Evidence checked
+
+- **Risk-first reading:** `git diff d59f80f HEAD -- proxy/src` plus `dxvk_wndproc.cpp` and `backend.cpp`'s `LoadOnce` in full, because a mistake there shows only as a hang or crash on the PC. The fix round's code change is the `slots` local, the warning, the constant and the `static_assert`. The guard's logic is what round 1 read. The order is still `LoadDxvk`, guard, `Resolve("Direct3DCreate9")`.
+- **The brief:** `dllmain.cpp`, `patch_engine.h`, `headless.cpp` and every `adapter.cpp` are untouched. No `proxy/` file on the branch names a game: of the changed files outside `jobs/`, only `docs/CONSUMING.md`, `docs/UPGRADING.md` and the row contain "napoleon".
+- **Not re-run:** I did not repeat the wine run, `dump_read.py` against a live cdb, or round 1's mutants. Docker was not used: the DLL and tests are CI's result above.
+
+**Not proven by anyone:** `Hk_*` still have not executed with a real window and a subclass.
+
 ## Round 1 (2026-11-05, branch job/W39 at d59f80f)
 
 **Verdict: merge after fixes.**
