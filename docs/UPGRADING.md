@@ -73,7 +73,7 @@ Pin bump: a new build id (`build.sh` changed: 20 passes); delete game verbs name
 after the proxy build step (give it `id: dll`) and `wsc ci render`; attach `d3d9.map` and `d3d9.map.json` to each release; set `[agent_settings] safe` (`exact_only = true`: only those rules).
 What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROXY_HARNESS.md](PROXY_HARNESS.md) "Guarded verbs".
 
-## DLL changes in 0.39.0 (W39)
+## DLL changes in 0.40.0 (W39)
 - **New key `proxy.dxvk_wndproc_fix`** (bool, JSON `true` in the row, so `default` and `release_value` render as 1; owner `proxy`). Add the row to
   `registries/config_keys`, then `gen_tables.py`; without it the host tests fail and name the key. Every game that builds the proxy needs the row: the
   test reads the core's key list, not the game's backend.

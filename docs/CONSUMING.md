@@ -96,7 +96,7 @@ jobs:
   check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
-  0.34.0 (DLL changes, C29), 0.38.0 (crash maps, guarded verbs, C35) or 0.39.0 (new key `proxy.dxvk_wndproc_fix`) are in [UPGRADING.md](UPGRADING.md).
+  0.34.0 (DLL changes, C29), 0.38.0 (crash maps, guarded verbs, C35) or 0.40.0 (new key `proxy.dxvk_wndproc_fix`) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
 Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
