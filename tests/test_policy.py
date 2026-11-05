@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WSC = ROOT / 'wsc.py'
 sys.path.insert(0, str(ROOT))
 from warscape import policy as pp  # noqa: E402
-from warscape.repo import DEFAULTS, Ctx  # noqa: E402
+from warscape.repo import DEFAULTS, ConfigError, Ctx, load_config  # noqa: E402
 
 CFG = pp.settings({**DEFAULTS, 'policy': {**DEFAULTS['policy'], 'decisions': 'docs/DECISIONS.md'}})
 
@@ -410,6 +411,87 @@ class W27DecisionsCiteJob(unittest.TestCase):
     def test_off_by_default_and_plan_branches_are_unchanged(self):
         self.assertEqual(self.run_f('| D2 | 2026-11-04 | Claude | B. | yes |\n', on=False)[0], [])
         self.assertEqual(self.run_f('| D2 | 2026-11-04 | Claude | B. | yes |\n', branch='plan/x')[0], [])
+
+
+class W36WorkflowFiles(unittest.TestCase):
+    """W36 decision 1: a job's change to a workflow input its brief on the base does not name. A warning, not a refusal: the scan of the merged job
+    branches passed the brief's kill criterion (jobs/W36/report.md)."""
+    WF, GATES, TPL = '.github/workflows/x.yml', '.github/workflows/gates.yml', 'ci/gates.yml.in'
+
+    def run_w(self, changed, brief='# J1\n', branch='job/J1', cfg=CFG, extra=None):
+        """(errors, warnings) of `branch` changing `changed`; the job is otherwise mergeable."""
+        warns = []
+        base = files(**{'jobs/J1/brief.md': brief, **(extra or {})})
+        head = files(**{'jobs/J1/report.md': 'r', REV: rv((1, 'merge'))})
+        row = DONE if branch.startswith('job/') else ROW
+        errs = check(branch, list(changed), {'J1': ROW, 'J2': OTHER}, {'J1': row, 'J2': OTHER}, base, head, cfg=cfg, warnings=warns)
+        return errs, warns
+
+    def missing(self, warns):
+        return [w.split('`')[1] for w in warns if 'is a workflow input' in w]
+
+    def test_a_workflow_the_brief_names_passes_and_one_it_does_not_warns(self):
+        self.assertEqual(self.run_w([self.WF], brief=f'# J1\nAdds `{self.WF}`.\n'), ([], []))
+        errs, warns = self.run_w([self.WF])
+        self.assertEqual(errs, [])
+        self.assertEqual(warns, [f"`{self.WF}` is a workflow input and J1's brief on the base does not name it: a job cannot quietly add a check that posts a fake "
+                                 "`policy` status (W36); name the file in the brief (briefs are merged before the job starts) or use a `meta/` branch"])
+
+    def test_one_warning_per_path(self):
+        self.assertEqual(self.missing(self.run_w(['ci/a.txt', 'ci/b.txt', 'warscape/x.py'], brief='`ci/b.txt`')[1]), ['ci/a.txt'])
+
+    def test_a_template_change_must_name_the_rendered_file(self):
+        warns = self.run_w([self.TPL, self.GATES], brief=f'Edit `{self.TPL}`.', extra={self.TPL: 't'})[1]
+        self.assertEqual(self.missing(warns), [self.GATES])
+        self.assertIn(f'`{self.GATES}` renders from `{self.TPL}`: name both', warns[0])
+        self.assertEqual(self.run_w([self.TPL, self.GATES], brief=f'`{self.TPL}` and `{self.GATES}`', extra={self.TPL: 't'})[1], [])
+
+    def test_a_template_change_alone_still_needs_the_rendered_file_named(self):
+        """The re-render changes both; the `ci_render` gate fails the branch that leaves the workflow behind."""
+        self.assertEqual(self.missing(self.run_w([self.TPL], brief=f'`{self.TPL}`', extra={self.TPL: 't'})[1]), [self.GATES])
+
+    def test_a_rendered_file_names_its_template_sibling_only_when_there_is_one(self):
+        self.assertEqual(self.missing(self.run_w([self.GATES], brief=f'`{self.TPL}`', extra={self.TPL: 't'})[1]), [self.GATES])
+        self.assertNotIn('name both', self.run_w([self.WF])[1][0])
+        self.assertNotIn('name both', self.run_w(['ci/helper.sh'])[1][0])
+
+    def test_the_template_folder_comes_from_the_config(self):
+        cfg = {**CFG, 'template_dir': 'tpl', 'workflow_paths': ['.github/workflows/**', 'tpl/**']}
+        warns = self.run_w(['tpl/gates.yml.in', self.GATES], brief='`tpl/gates.yml.in`', cfg=cfg, extra={'tpl/gates.yml.in': 't'})[1]
+        self.assertEqual(self.missing(warns), [self.GATES])
+        self.assertIn('renders from `tpl/gates.yml.in`', warns[0])
+
+    def test_a_delete_and_a_rename_count(self):
+        self.assertEqual(self.missing(self.run_w([self.WF])[1]), [self.WF])   # a delete is a changed path the base has
+        old, new = '.github/workflows/old.yml', '.github/workflows/new.yml'   # --no-renames: a delete and an add
+        self.assertEqual(self.missing(self.run_w([old, new], brief=f'`{new}`')[1]), [old])
+        self.assertEqual(self.missing(self.run_w([old, new], brief=f'`{old}`')[1]), [new])
+
+    def test_an_empty_list_switches_the_rule_off(self):
+        self.assertEqual(self.run_w([self.WF], cfg={**CFG, 'workflow_paths': []}), ([], []))
+
+    def test_other_paths_and_other_branch_kinds_are_unchanged(self):
+        self.assertEqual(self.run_w(['warscape/x.py', '.github/CODEOWNERS', 'docs/ci/x.md']), ([], []))
+        for branch in ('plan/x', 'meta/x', 'brief/J1', 'release/v1.0.0'):
+            with self.subTest(branch):
+                self.assertEqual(self.run_w([self.WF], branch=branch)[1], [])
+        self.assertEqual(self.run_w([self.WF], branch='meta/x', cfg={**CFG, 'meta': ['.github/**']}), ([], []))
+
+    def test_the_default_globs_and_the_core_spells_them_out(self):
+        self.assertEqual(DEFAULTS['policy']['workflow_paths'], ['.github/workflows/**', 'ci/**'])
+        self.assertEqual(DEFAULTS['policy']['bases'], ['main'])
+        for root in (ROOT, ROOT / 'tests' / 'fixture_game'):
+            raw = tomllib.loads((root / 'wsc.toml').read_text(encoding='utf-8'))['policy']
+            self.assertEqual((raw['workflow_paths'], raw['bases']), (['.github/workflows/**', 'ci/**'], ['main']), root)
+
+    def test_the_keys_are_lists_of_strings(self):
+        for key in ('workflow_paths', 'bases'):
+            for bad in ('main', 1, [1], ['']):
+                with self.subTest(key=key, bad=bad), tempfile.TemporaryDirectory() as t:
+                    Path(t, 'wsc.toml').write_text(f'[policy]\n{key} = {json.dumps(bad)}\n', encoding='utf-8')
+                    with self.assertRaises(ConfigError) as e:
+                        load_config(Path(t))
+                    self.assertIn(f'policy.{key}', str(e.exception))
 
 
 class CoreOwnConfig(unittest.TestCase):

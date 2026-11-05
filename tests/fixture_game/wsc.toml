@@ -31,6 +31,8 @@ decision_prefix = "X"
 session_trailer = "Agent-Session"
 thin_merge_lines = 500     # the core W27 defaults, spelled out: a game tunes them
 thin_merge_files = 20
+workflow_paths = [".github/workflows/**", "ci/**"]   # the core W36 defaults, spelled out
+bases = ["main"]
 plan = ["docs/**", "jobs/*/brief.md", "registries/jobs/*"]
 meta = ["docs/**", "jobs/*/brief.md", "registries/jobs/*", "ci/**", ".github/**", "wsc.toml"]
 

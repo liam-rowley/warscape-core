@@ -28,6 +28,16 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
 4. **Behaviour.** CI judges the pull request's head against the base tip, so a branch behind `main` on the decisions file must merge `main`. Globs
    match by path segment: `registries/*` no longer covers `registries/<name>/<row>.json`. Until the bump merges, the game's pull requests are judged
    as before, with the note.
+5. **`[policy] bases` (W36) fails open on an older base.** CI's parent is the base's code, so a branch whose core predates W36 does not know the rule: a pull
+   request into it is not refused. Its merge still reaches `main` only through a pull request judged by main's rules.
+
+## Workflow inputs, bases and the commit match (core W36)
+Nothing is forced; the defaults apply when the keys are absent.
+- **`[policy] bases`** (default `["main"]`): a game whose default branch is not `main` lists it, or sets `[]`, in the pin-bump commit, or its pull requests are refused.
+- **`[policy] workflow_paths`** (default `.github/workflows/**`, `ci/**`): a warning, never a refusal, so a brief that touches CI should name each file, the
+  rendered workflow as well as its template. Set `[]` to switch it off.
+- **`commit_lacks_trailer`** takes the command as typed: global options, `-c alias.X=` and a shell's command string are seen, and an argument (`echo git commit`) is
+  no commit. A hook that normalises first keeps working; `warscape.trailer.COMMIT` is gone (nothing in the core or napoleon read it).
 
 ## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
 - **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
