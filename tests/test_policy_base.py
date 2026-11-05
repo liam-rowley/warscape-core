@@ -417,7 +417,8 @@ class CoreMode(Branches, unittest.TestCase):
         self.branch('plan/one', {'registries/decisions/C261105-aaaa.json': rows['C261105-aaaa']})
         self.branch('plan/two', {'registries/decisions/C261105-bbbb.json': rows['C261105-bbbb']})
         for name in ('plan/one', 'plan/two'):
-            self.assertEqual(self.local(name)[0], 0, self.local(name)[1])
+            res = self.local(name)
+            self.assertEqual(res[0], 0, res[1])
 
     def test_a_release_branch_is_judged_by_the_bases_rules(self):
         """W29 (C27): release/vX.Y.Z may change only VERSION, one step above the base's; a head that widens its own kind changes nothing."""
