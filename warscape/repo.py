@@ -202,6 +202,8 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: jobs.usage_from must be a job number (0 = off)')
     if not isinstance(cfg['jobs']['usage_cmd'], str):
         raise ConfigError(f'{CONFIG_NAME}: jobs.usage_cmd must be one command line as a string ("" = none)')
+    if '\\' in cfg['jobs']['usage_cmd']:
+        raise ConfigError(f'{CONFIG_NAME}: jobs.usage_cmd has a backslash, which POSIX splitting drops: write its paths with forward slashes')
     if rel['consumer_check'] not in ('warn', 'block'):
         raise ConfigError(f'{CONFIG_NAME}: release.consumer_check must be "warn" or "block"')
     if not isinstance(rel['annotated_from'], str) or (rel['annotated_from'] and not re.fullmatch(r'\d+\.\d+\.\d+', rel['annotated_from'])):

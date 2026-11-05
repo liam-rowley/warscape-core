@@ -345,7 +345,7 @@ class Verb(unittest.TestCase):
         self.config('ok')
 
     def config(self, mode):
-        cmd = f'{shlex.quote(sys.executable)} {shlex.quote(str(FAKE))} {mode} {{id}}' if mode else ''
+        cmd = f'{shlex.quote(Path(sys.executable).as_posix())} {shlex.quote(FAKE.as_posix())} {mode} {{id}}' if mode else ''
         (self.d / 'wsc.toml').write_text('[registries]\njobs = "core:jobs"\n[storage]\ndir = ["jobs"]\n[views]\ncommit = false\n'
                                          f"[jobs]\nusage_from = 5\nusage_cmd = '''{cmd}'''\n", encoding='utf-8')
 
@@ -429,7 +429,8 @@ class Config(unittest.TestCase):
         self.assertEqual((cfg['jobs']['usage_from'], cfg['jobs']['usage_cmd']), (0, ''))
 
     def test_bad_values_are_refused(self):
-        for body in ('[jobs]\nusage_from = -1\n', '[jobs]\nusage_from = "J5"\n', '[jobs]\nusage_from = true\n', '[jobs]\nusage_cmd = 5\n', '[jobs]\nusage_cmd = ["a"]\n'):
+        for body in ('[jobs]\nusage_from = -1\n', '[jobs]\nusage_from = "J5"\n', '[jobs]\nusage_from = true\n', '[jobs]\nusage_cmd = 5\n', '[jobs]\nusage_cmd = ["a"]\n',
+                     "[jobs]\nusage_cmd = 'python3 tools\\reader.py {id}'\n"):
             with self.assertRaises(ConfigError, msg=body):
                 self.load(body)
 

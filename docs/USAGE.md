@@ -29,8 +29,7 @@ The reviewer clears an over-budget error with a lift or a corrected line. There 
 Prints the line from the game's command, or from `FILE` (the same JSON by hand; a repo with no command uses this route). `--write` replaces the `Usage:` line in the report, or
 inserts one, and changes no other byte; it refuses a missing report or a report with two lines. Run it again after a fix round: the fix session counts too.
 
-The command runs with the repo root as cwd, no shell, a 60 s limit. Write its paths with forward slashes: the template is split by POSIX rules, so a bare backslash is lost. It prints one JSON
-object on stdout and exits 0:
+The command runs with the repo root as cwd, no shell, a 60 s limit. It prints one JSON object on stdout and exits 0:
 
 ```json
 {"calls": 142, "models": ["opus"], "sessions": 2, "note": "about $3, usage_reader, 2026-11-04"}
