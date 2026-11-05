@@ -1,0 +1,12 @@
+{
+  "id": "W43",
+  "description": "Liam, 2026-11-05, maximum priority. Decisions and backlog rows as one file per row, the shape registries/jobs already has, so parallel branches stop colliding. Measured that day: renumbering and re-merging docs/DECISIONS.md and docs/BACKLOG.md cost about 2 h of sessions across napoleon J80 and core W34, W39, W40 and W31, and three plan PRs that each passed alone took BACKLOG.md over the doc cap and turned main red (issues #122, #123). Work out and state in the brief: the file layout; the id rule (two branches must not take the same next number: decide how, for example an id allocated at merge, or a non-sequential id, and keep existing ids such as C36 and B95 valid, since reports and reviews cite them); how `[policy] decisions` and its append-only rule (warscape/policy.py) carry over, so a row still cannot be changed or removed without a replacing row; the plan_doc setting; the doc_size gate; the views (J55: rendered, not committed). Migrate the core's docs/DECISIONS.md, docs/BACKLOG.md and docs/BACKLOG_HARNESS.md in the same job, with no row lost. A consumer stays on the Markdown file until it opts in, so napoleon can move at its next pin bump.",
+  "title": "Decisions and backlog rows as one file per row",
+  "phase": 1,
+  "status": "queued",
+  "model": "opus",
+  "needs_pc": false,
+  "semver": "minor",
+  "depends_on": [],
+  "brief": "jobs/W43/brief.md"
+}
