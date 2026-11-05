@@ -717,6 +717,19 @@ class CheckSettings(unittest.TestCase):
         self.assertIn('matrix job gates: list its checks in [ci] required_checks', out)
         self.assertFalse(any('`gates' in p for p in self.problems(out)), out)
 
+    def test_a_required_matrix_job_with_a_job_level_if_is_a_problem(self):   # W42: a skipped matrix reports `gates`, so `gates (<value>)` never does
+        def about_if(wf):
+            return [p for p in self.problems(self.go(CORE_ANSWERS, wf, CORE_REQUIRED)[1]) if 'job-level `if:`' in p]
+        guarded = {**CORE_WF, 'gates.yml': CORE_WF['gates.yml'].replace('  gates:\n', '  gates:\n    if: github.ref != 1\n')}
+        [p] = about_if(guarded)
+        self.assertIn('`gates`', p)
+        self.assertIn('plain job', p)
+        self.assertEqual(about_if(CORE_WF), [])
+        step_if = {**CORE_WF, 'gates.yml': CORE_WF['gates.yml'].replace('        os: [a, b]\n', '        os: [a, b]\n    steps:\n      - if: x\n        run: y\n')}
+        self.assertEqual(about_if(step_if), [])   # a step's `if:` skips no job
+        unrequired = {**CORE_WF, 'gates.yml': guarded['gates.yml'].replace('  gates:\n', '  other:\n')}
+        self.assertEqual(about_if(unrequired), [])
+
     def test_issues_disabled_is_a_problem_and_enabled_or_unreported_is_not(self):
         off = {**GAME_ANSWERS, 'repos/o/game': (0, json.dumps({'allow_auto_merge': True, 'has_issues': False}), '')}
         rc, out = self.go(off, GAME_WF, ['gates', 'policy', 'proxy', 'harness-windows'], repo='o/game')
