@@ -6,7 +6,6 @@ import contextlib
 import io
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -188,12 +187,19 @@ class ConflictFiles(Case):
         f = self.fixture()
         for n in (1, 2):
             self.both_sides(f, n)
-        f.commit('plan: only main (#9)', {'docs/Y.md': 'main\n'}, 6)
-        f.branch('job/T3')
-        f.commit('branch', {'docs/Z.md': 'z\n'}, 5)
-        f.git('merge', '-q', '--no-edit', 'main', days=4)
-        f.main()
         self.assertEqual([i for i in f.ids() if i.startswith('conflict_file')], [])
+        g = self.fixture()
+        for n in (1, 2, 3):                                    # three merges, each file changed on one side only
+            g.branch(f'job/T{n}')
+            g.commit('branch', {'docs/BRANCH.md': f'{n}\n'}, 5)
+            g.main()
+            g.commit(f'plan: main (#{n})', {'docs/MAIN.md': f'{n}\n'}, 5)
+            g.git('checkout', '-q', f'job/T{n}')
+            g.git('merge', '-q', '--no-edit', 'main', days=4)
+            g.main()
+        rec = g.audit()
+        self.assertEqual(rec['metrics']['conflict_files']['details']['merges'], 3)
+        self.assertEqual([x['id'] for x in rec['findings'] if x['id'].startswith('conflict_file')], [])
 
     def test_a_merge_outside_the_window_does_not_count(self):
         f = self.fixture()
@@ -427,6 +433,11 @@ class ReviewLoop(Case):
         self.assertNotIn('review_churn', [x['id'] for x in rec['findings']])
         self.assertEqual(rec['metrics']['review_loop']['details']['later'], 4)
 
+    def test_one_round_that_asked_for_fixes_is_not_a_round_1_merge(self):
+        f = self.fixture()
+        f.merge_job(1, 3, {'jobs/T1/review.md': self.review('merge after fixes')})
+        self.assertEqual(f.audit()['metrics']['review_loop']['value'], 0.0)
+
     def test_no_reviews_is_no_finding(self):
         f = self.fixture()
         f.merge_job(1, 3)
@@ -515,6 +526,11 @@ class PinLag(Case):
         x = self.finding(f.audit(), 'pin_lag')
         self.assertEqual((x['value'], x['threshold']), (5, 5))
         self.assertIn('0.41.0', x['evidence'])
+
+    def test_a_pin_written_with_its_v_is_read(self):
+        f = self.game('v0.30.0')                               # napoleon's wsc.toml writes it this way
+        self.core(f, 'v0.41.0')
+        self.assertEqual(self.finding(f.audit(), 'pin_lag')['value'], 11)
 
     def test_quiet_under_and_a_newer_major_counts(self):
         f = self.game('0.37.2')
