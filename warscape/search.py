@@ -7,7 +7,7 @@ unless asked. (Ranking rules carried from empire-remastered `assets/find.py`.)
 import re
 
 WORD = re.compile(r'[^\W_]+')
-STRONG = ('id', 'purpose', 'description', 'claim', 'when', 'action', 'binding')
+STRONG = ('id', 'backlog_id', 'purpose', 'description', 'claim', 'when', 'action', 'binding')
 SUMMARY = ('purpose', 'description', 'claim', 'action', 'role')
 
 

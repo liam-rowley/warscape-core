@@ -113,7 +113,7 @@ class Rule(unittest.TestCase):
         self.assertEqual(got, [{'id': NEW, 'text': f'| {NEW} | 2026-11-05 | proposed (Claude, core W43) | A thing. | yes |'}])
 
     def test_check_runs_the_rule_on_every_branch_kind_and_rule_f_reads_it(self):
-        cfg = {**CFG, 'decisions_cite_job': True}
+        cfg = {**CFG, 'decisions_cite_job': True, 'job_prefix': 'W'}
         kw = {'cfg': cfg, 'base_ref': 'origin/main'}
         base, bad = tree(**self.BASE), tree(C36=row('C36', decision='Edited.'))
         self.assertTrue(any('append only' in e for e in pp.check('plan/x', [f'{D}/C36.json'], {}, {}, base, bad, **kw)))
@@ -213,7 +213,7 @@ class Verbs(unittest.TestCase):
     def test_rows_are_json_so_the_doc_cap_never_sees_them(self):
         self.repo.write(f'{D}/{NEW}.json', row(decision='x' * 40000))
         git(self.repo.root, 'add', '-A')
-        self.assertEqual(G.gate_doc_size(Ctx.load(self.repo.root)).status, 'ok')
+        self.assertEqual(G.gate_doc_size(Ctx.load(self.repo.root)).level, 'ok')
 
 
 class Gates(unittest.TestCase):
@@ -227,19 +227,19 @@ class Gates(unittest.TestCase):
 
     def test_a_retired_file_in_step_passes(self):
         repo = self.repo_with(self.RETIRED)
-        self.assertEqual(G.gate_registries(Ctx.load(repo.root)).status, 'ok')
+        self.assertEqual(G.gate_registries(Ctx.load(repo.root)).level, 'ok')
 
     def test_a_row_added_to_the_retired_file_fails_the_gate(self):
         repo = self.repo_with(self.RETIRED)
         repo.write('docs/DECISIONS.md', TABLE + '| C3 | 2026-11-05 | Liam | Stale branch. | yes |\n')
         res = G.gate_registries(Ctx.load(repo.root))
-        self.assertEqual(res.status, 'error')
+        self.assertEqual(res.level, 'error')
         self.assertIn('C3', ' '.join(res.details))
 
     def test_a_deleted_retired_file_passes(self):
         repo = self.repo_with(self.RETIRED)
         (repo.root / 'docs/DECISIONS.md').unlink()
-        self.assertEqual(G.gate_registries(Ctx.load(repo.root)).status, 'ok')
+        self.assertEqual(G.gate_registries(Ctx.load(repo.root)).level, 'ok')
 
     def test_a_skip_finds_its_decision_in_a_row_file(self):
         repo = self.repo_with(TOML + '[gates]\nskip = ["eol:C1"]\n')

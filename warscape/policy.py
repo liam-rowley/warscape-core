@@ -39,7 +39,9 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
   meta/*      repo infrastructure: the `[policy] meta` globs.
 Anything else is refused. Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
-YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. A repo's own rules (napoleon's rule 79,
+YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. With `decisions = "registry:<name>"` (core W43)
+the same rule holds per file: a row file on the base never changes, moves or goes, and an added one is a minted id (`wsc reg add <name> --mint`) with
+those fields and `replaces` naming rows that exist. `changed` runs from the merge base, so a branch behind the base has nothing to merge first. A repo's own rules (napoleon's rule 79,
 the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the decisions check: an `error`
 Result's details are policy errors. Their facts carry `added_decision_rows` ([{id, text}], W27). Warnings print as `policy: warning: ...` lines
 before the verdict line and never change the exit code.
@@ -71,7 +73,8 @@ import tomllib
 from pathlib import Path
 
 from . import gatemods
-from .repo import DEFAULTS, Ctx, git_env, matches
+from .registry import file_to_id
+from .repo import DEFAULTS, Ctx, decisions_registry, git_env, matches
 
 # The judge's interface (the `--judge` child's arguments), read from a base core's text by warscape/policy_base.py: keep it on a line of its own.
 JUDGE_API = 1
@@ -83,8 +86,8 @@ class Refusal(Exception):
 
 def settings(config):
     """The policy settings from a loaded wsc.toml: `[policy]` plus the pieces of `[jobs]` and `registries_dir` the rules need."""
-    p, j = config['policy'], config['jobs']
-    return {'decisions': p['decisions'], 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
+    p, j, dreg = config['policy'], config['jobs'], decisions_registry(config)
+    return {'decisions': p['decisions'], 'decisions_dir': f"{config['registries_dir']}/{dreg}" if dreg else '', 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
             'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'semver_from': j.get('semver_from', 0), 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text']),
@@ -177,6 +180,63 @@ def decisions_problems(base_text, head_text, cfg, base_ref='the base branch'):
     return errs
 
 
+def decision_row(text):
+    """The row dict of a decision row file's text, or None when it is not a JSON object."""
+    try:
+        r = json.loads(text)
+    except ValueError:
+        return None
+    return r if isinstance(r, dict) else None
+
+
+def decision_row_problems(changed, base_file, head_file, cfg):
+    """The append-only rule over a decisions folder (W43): errors for a row file changed, moved or removed, and for an added file that is not a
+    well-formed minted row. A file the head has as the base has it is no change, whatever the merge base held. Fails closed on what it cannot parse."""
+    d, pre, errs = cfg['decisions_dir'], cfg['prefix'], []
+    for p in changed:
+        if not p.startswith(d + '/'):
+            continue
+        name, old, new = p[len(d) + 1:], base_file(p), head_file(p)
+        if old == new:
+            continue
+        if old is not None:
+            errs.append(f'{d} is append only: {name} was changed, moved or removed (a reversal is a new row whose `replaces` names the old one)')
+        elif '/' in name or not name.endswith('.json'):
+            errs.append(f'{p}: only <id>.json row files go in {d}')
+        elif (r := decision_row(new)) is None:
+            errs.append(f'{p}: not a JSON object')
+        else:
+            errs += [f'{p}: {e}' for e in decision_row_errors(r, name, pre, d, head_file)]
+    return errs
+
+
+def decision_row_errors(r, name, pre, d, head_file):
+    """What is wrong with the added row `r` of file `name`."""
+    errs, rid = [], r.get('id')
+    if rid != file_to_id(name):
+        errs.append(f'id {rid!r} is not its file name')
+    elif not re.fullmatch(rf'{re.escape(pre)}\d{{6}}-[0-9a-f]{{4}}', str(rid)):
+        errs.append(f'id {rid} is not a minted id: numbers are closed, so two branches never share one (wsc reg add <registry> --mint ...)')
+    if not re.fullmatch(r'\d{4}-\d\d-\d\d', str(r.get('date'))):
+        errs.append('date is not YYYY-MM-DD')
+    errs += [f'{k} is empty' for k in ('who', 'decision') if not str(r.get(k) or '').strip()]
+    if r.get('reversible') not in ('yes', 'no'):
+        errs.append('reversible is not yes or no')
+    gone = [x for x in r.get('replaces') or [] if head_file(f'{d}/{x}.json') is None]
+    if gone:
+        errs.append(f'replaces {", ".join(map(str, gone))}, not a row')
+    return errs
+
+
+def added_decision_files(changed, base_file, head_file, cfg):
+    """[{id, text}] of the row files the head adds: `added_decision_rows` for a decisions folder, `text` the row as its table line."""
+    d, out = cfg['decisions_dir'], []
+    for p in changed:
+        if p.startswith(d + '/') and base_file(p) is None and (r := decision_row(head_file(p) or '')):
+            out.append({'id': str(r.get('id')), 'text': '| ' + ' | '.join(str(r.get(k, '')) for k in ('id', 'date', 'who', 'decision', 'reversible')) + ' |'})
+    return out
+
+
 def allowed(path, globs):
     return matches(path, globs)
 
@@ -190,12 +250,18 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
     pure-logic tests). `warnings`: a list the warnings are appended to (they never refuse)."""
     cfg = cfg or settings(_default_config())
     T, jd, trailer = cfg['text'], cfg['jobs_dir'], cfg['trailer']
-    errs = (decisions_problems(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg, base_ref or 'the base branch')
-            if cfg['decisions'] and cfg['decisions'] in changed else [])
+    if cfg.get('decisions_dir'):
+        errs = decision_row_problems(changed, base_file, head_file, cfg)
+    else:
+        errs = (decisions_problems(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg, base_ref or 'the base branch')
+                if cfg['decisions'] and cfg['decisions'] in changed else [])
     m = re.fullmatch(rf"(job|brief)/({re.escape(cfg['job_prefix'])}[1-9][0-9]*)", branch)
     kind = m.group(1) if m else branch.split('/', 1)[0] if '/' in branch else ''
     warns = warnings if warnings is not None else []
-    added = added_decision_rows(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] in changed else []
+    if cfg.get('decisions_dir'):
+        added = added_decision_files(changed, base_file, head_file, cfg)
+    else:
+        added = added_decision_rows(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] in changed else []
     if cfg.get('decisions_cite_job') and kind == 'job':   # rule F
         errs += [f"decision row {r['id']} on {branch} must name the brief that required it (add `{m.group(2)}` to the row, or move it to a plan/ branch)"
                  for r in added if not re.search(rf'(?<![A-Za-z0-9]){re.escape(m.group(2))}(?![0-9])', r['text'])]
