@@ -54,7 +54,7 @@ exempt = ["tests/**", "**/runs/**"]
 max_kb = 30
 
 [cli]
-verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract as warscape/verbs/)
+verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract; never a core verb's name: reg find gates jobs policy ci discovery crash agent-settings)
 ```
 
 CI in the game repo (`.github/workflows/gates.yml`):
@@ -96,7 +96,7 @@ jobs:
   check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
-  or 0.34.0 (DLL changes, C29) are in [UPGRADING.md](UPGRADING.md).
+  0.34.0 (DLL changes, C29), 0.38.0 (crash maps, guarded verbs, C35) or 0.40.0 (new key `proxy.dxvk_wndproc_fix`) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
 Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
@@ -148,16 +148,19 @@ failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside eac
 claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
-decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
+decisions = "docs/DECISIONS.md"    # append-only: | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
 decision_prefix = "D"
-bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
-session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
+bootstrap = []                     # names exempt from the branch-kind rules: only the PR that adds the pipeline
+session_trailer = "Claude-Session" # who wrote the report may not write the review; "" turns this and rules A-E off
 decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
-thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
-plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
+reviewer_code = "warn"             # W40 rule A: "error" refuses reviewer code under `merge`: a pin bump sets it, once open `merge` rounds are done
+workflow_paths = [...]             # W36: a job's change here its brief does not name warns; [] = off
+bases = ["main"]                   # W36: a pull request to another branch is refused; [] = any
+thin_merge_lines = 500             # W27 rule E: a `merge` past this (or thin_merge_files = 20) outside jobs/ and registries, no evidence, warns
+plan = [...]                       # globs a plan/* branch may touch (* in one folder, ** across); meta = [...] for meta/*
 [ci]
-inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
-workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
+inputs = { ... }                   # set name -> regex: paths that run that slow job (`wsc ci inputs`)
+workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate checks
 required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.22.0)
 ```
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
@@ -184,9 +187,9 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   branch behind the base on the decisions file is told to merge it. It fails closed, naming the fix: a ref that does not resolve, an unreadable base
   `wsc.toml`, no gitlink, an uninitialised submodule or a missing pin (`git -C core fetch origin <pin>`), or a child with no verdict. A base whose
   core predates W23 (no `JUDGE_API` line) is judged as before, with a note. `--commit-msg` stays a local check of the message being written.
-- **What the `policy` check does not prove.** Anyone with a write token can post a status named `policy`, and GitHub calls same-named jobs in two
-  workflows ambiguous, so a head that adds a workflow with a `policy` job can blur the result. No code in a user-owned repository closes this (an
-  organisation's "require workflows to pass" ruleset would); it is accepted for now (W23), and the reviewer reads any `.github/workflows/` change.
+- **What the `policy` check does not prove.** Anyone with a write token can post a status named `policy`, and same-named jobs in two workflows are
+  ambiguous, so a head that adds a `policy` job can blur the result (accepted, W23). A job that changes a `workflow_paths` file its brief on the base does
+  not name gets a warning (W36), not a refusal: the reviewer must clear it. Still open: a token holder, and `meta/` branches, which Liam reviews.
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc fetch_cache}}`, `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.
@@ -261,9 +264,9 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   4. Tests in the game's `tests/` that load the file by path or call the old names: `test_jobs_hooks.py` (module path, the three source-text reads, the
      renamed functions), `test_build_id.py`, `test_registry_merge.py`, `test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `test_usage_reader.py`
      (`sys.path` gains `tools/gates`, `import pipeline as hk`), `test_proxy_host.py`.
-  5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside dated job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
+  5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
-  6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
+  6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: `jobs check` and the page's PC block read as before.
 
 ## Review integrity (0.35.0, core W27, C30)
 `wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
@@ -291,11 +294,15 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
 
 ## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
-- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
-  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
-- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
-- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
-- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
+Moved to [UPGRADING.md](UPGRADING.md) (2026-11-04, the cap).
+
+## DLL changes from W34's tag (W34, C37)
+- **`GameAdapter`:** size asserted (`proxy/src/adapter.h`). A new field goes at the **end**, defaulted. Initialise by name (`.gameName = ...`, a GNU extension
+  in the DLL's `-std=c++17`): a positional list compiles but shifts silently.
+- **ctl `lua`:** reads only under `luaDir` and the ctl folder ([PROXY_CTL.md](PROXY_CTL.md)).
+- **The ctl folder is owner-only:** say so in the pin-bump report if another user drives.
+- **System keys** always reach the game, text focus too ([PROXY_UI.md](PROXY_UI.md)).
+- **`gen_tables.py --exe <staged copy>`:** add it to the exe-update checklist after `exe_info.py`, before a PC run (new build id).
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

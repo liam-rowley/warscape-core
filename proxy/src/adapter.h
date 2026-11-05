@@ -65,6 +65,10 @@ struct GameAdapter {
     const OrdersAdapter* orders;             // proxy/<game>/adapter.cpp (J28); nullptr = no battle unit orders
     const GestureAdapter* gesture;           // proxy/<game>/adapter.cpp (W6); nullptr = no gestures (the layer is inert)
 };
+// W34 (C6): a field inserted mid-struct shifts a positional adapter silently (-Werror sees only a missing tail). One assert for both layouts,
+// the 32-bit DLL's and the 64-bit host tests', so a host build fails too. A new field goes at the end, with a default.
+static_assert(sizeof(GameAdapter) == (sizeof(void*) == 4 ? 68 : 128),
+              "GameAdapter changed size: initialise it with designated initialisers (docs/CONSUMING.md) and update this size in the same change");
 
 const GameAdapter& Adapter();   // defined by the game's adapter.cpp
 

@@ -9,6 +9,8 @@ const char* const kNone[] = { nullptr };
 const DevAdapter kDev = { kNone, kNone, kNone, "nullgame\\lua\\", "data\\battleterrain\\presets\\", "data\\*.pack" };
 }
 
+// W34 (C6): positional because the DLL builds as -std=c++17 and the designated form is C++20; the size assert in adapter.h catches a shifted
+// field. A new GameAdapter field goes at the end, with a default (docs/CONSUMING.md).
 const GameAdapter& Adapter() {
     static const GameAdapter a = { gen::kGameName, gen::kConfigFile, gen::kModDir, gen::kInstanceMutex, gen::kIdentity,
                                    gen::kSites, gen::kSiteCount, gen::kKeys, gen::kKeyCount, &kDev, nullptr, nullptr, nullptr, nullptr };

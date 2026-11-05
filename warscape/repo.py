@@ -39,6 +39,10 @@ DEFAULTS = {
         'path_ignore': [],                 # doc_paths gate (W28): backticked tokens (exact, or globs) that look like a path but are not one of this repo's
     },
     'tests': {'dirs': ['tests'], 'timeout_s': 600},
+    # wsc agent-settings (W35, C35): the Claude Code command rules an agent may add to .claude/settings.json without asking, e.g.
+    # "Bash(git status:*)"; a rule is added only when one of these covers it (itself, or extended by whole words without a write flag).
+    # Empty (the default) = the verb is not configured. exact_only = true: only the patterns themselves.
+    'agent_settings': {'safe': [], 'exact_only': False},
     'gates': {'fast': [], 'skip': [],      # fast: empty = every gate except `tests`; skip: "<gate>:<decision id>" (a [policy] decisions row; W28)
               'dirs': [],                  # repo-relative folders of game gate modules (warscape/gatemods.py)
               'run_refs_since': ''},       # YYYY-MM-DD: the `run_refs` gate skips run folders dated before it ('' = checks every run README; C23)
@@ -83,6 +87,9 @@ DEFAULTS = {
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
         'decisions_cite_job': False,       # a decisions row added on job/<id> must contain <id>, the brief that required it (core W27 rule F)
+        'reviewer_code': 'warn',           # rule A (core W27, W40): reviewer code under a `merge` verdict warns, or with "error" refuses
+        'workflow_paths': ['.github/workflows/**', 'ci/**'],   # a job's change to one of these that its brief on the base does not name warns (core W36); [] = off
+        'bases': ['main'],                 # the branches a pull request may target, as origin/<name>; [] = any (core W36)
         'thin_merge_lines': 500,           # a `merge` on more changed lines than this outside jobs/ and the registries...
         'thin_merge_files': 20,            # ...or more files, whose newest round cites no evidence, is a warning (core W27 rule E)
         'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
@@ -203,6 +210,11 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: release.consumers must list tables with name, repo, adapter and ref')
     if not isinstance(cfg['policy']['decisions_cite_job'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
+    if cfg['policy']['reviewer_code'] not in ('warn', 'error'):
+        raise ConfigError(f'{CONFIG_NAME}: policy.reviewer_code must be "warn" or "error"')
+    for k in ('workflow_paths', 'bases'):
+        if not isinstance(cfg['policy'][k], list) or not all(isinstance(x, str) and x for x in cfg['policy'][k]):
+            raise ConfigError(f'{CONFIG_NAME}: policy.{k} must be a list of non-empty strings')
     for t, k in (('policy', 'thin_merge_lines'), ('policy', 'thin_merge_files'), ('jobs', 'claim_hours')):
         if isinstance(cfg[t][k], bool) or not isinstance(cfg[t][k], (int, float)) or cfg[t][k] < 0:
             raise ConfigError(f'{CONFIG_NAME}: {t}.{k} must be a number of at least 0')

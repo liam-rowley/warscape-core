@@ -97,6 +97,9 @@ inline bool UiDiBlankWheel(uint32_t diMask) { return (diMask & kDiBlankWheel) !=
 // Focus left the application (WM_ACTIVATEAPP, either value: a release can be lost either way): no button is held any more, and RmlUi
 // does not own the pointer until the next event says so.
 inline void UiFocusLost(UiRouteState& s, bool& rmlOwner) { s.engineButtons = 0; s.rmlButtons = 0; rmlOwner = false; }
+// System keys (W34, C9): the Alt chords are the game's and the system's, never RmlUi's. Alt+F4 arrives as WM_SYSKEYDOWN (there is no
+// WM_KEYDOWN for F4 while Alt is held), so the rule is per message, not per key. Plain numbers: this header has no windows.h.
+inline bool UiIsSystemKey(uint32_t msg) { return msg == 0x0104 || msg == 0x0105 || msg == 0x0106; }   // WM_SYSKEYDOWN, WM_SYSKEYUP, WM_SYSCHAR
 inline const char* UiEvName(UiEv e) {
     switch (e) { case UiEv::Move: return "move"; case UiEv::Down: return "down"; case UiEv::Up: return "up"; case UiEv::Wheel: return "wheel"; case UiEv::Key: return "key"; default: return "char"; }
 }

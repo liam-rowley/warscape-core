@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # purpose: agent helper on the PC (Git Bash): submit a watcher job, block inside ONE call until its result (or a timeout), print the output, return the job's exit code (refused 2, no answer 124); also take, refresh and release the game lock
-# usage: job.sh [--adapter FILE] <owner> <file|-> [timeout_s (default 100)]  |  job.sh adapter  |  job.sh [--adapter FILE] lock [--wait S] <owner|-> <session> <purpose> [hang_s]  |  touch <owner>  |  unlock <owner> [--force]  |  holds <owner>  |  status  |  root  |  scratch <owner>  |  ctl <owner> '<verb args>' [wait_s (default 100)]
+# usage: job.sh [--adapter FILE] <owner> <file|-> [timeout_s (default 100)]  |  job.sh adapter  |  job.sh [--adapter FILE] lock [--wait S] <owner|-> <session> <purpose> [hang_s]  |  touch <owner>  |  unlock <owner> [--force]  |  vdisplay-aside <owner|-> <session> <why>  |  holds <owner>  |  status  |  root  |  scratch <owner>  |  ctl <owner> '<verb args>' [wait_s (default 100)]
 # when: every time an agent runs something on the PC (launch, kill, profile, scripts): the watcher root comes from the adapter (state_dir + watcher_subdir), never a default path; waiting belongs here, not in repeated agent calls
 # not-a-verb: a bash helper agents call directly from Git Bash (python3 only reads JSON); the PC side of the protocol is harness/watcher.ps1
 # The lock owner is the session (W10, C26): one owner rule ^[a-z0-9][a-z0-9_-]{0,39}$ for every command (a session id is a 36-character UUID; `lock -` makes the owner the session id).
@@ -221,6 +221,54 @@ case "$cmd" in
     cur="$(lock_owner)"; cs="$(lock_session)"
     if [ "$cur" != "$owner" ] && [ "$cs" != "$owner" ]; then echo "game.lock belongs to '$cur' (session '$cs'), not '$owner': not refreshed" >&2; exit 2; fi
     touch "$ROOT/game.lock" && echo "game.lock refreshed"; exit 0;;
+  vdisplay-aside)
+    # W35 (C35): move a stale vdisplay_restore.json aside (the one-off ask of the first consumer's J10 and J44 reports), only when the
+    # files say the watcher cannot restore it: it exists; the lock is free or <owner>'s (holds_check); the watcher runs and its status
+    # lists no game process; and its own restore failed or dropped it (the last "vdisplay: " line of watcher.log, at or after the file's
+    # time) or the file is older than the lock's stale limit. Prints the saved mode; never deletes, never writes the display mode (only
+    # the watcher's pump does) and overwrites nothing (a unique name, mv -n, checked as lock expiry is). No watcher change.
+    owner="${2:-}"; session="${3:-}"; why="${4:-}"
+    { [ -n "$owner" ] && [ -n "$session" ]; } || { echo "job.sh vdisplay-aside: usage: vdisplay-aside <owner|-> <session> <why>" >&2; exit 64; }
+    [ "$owner" = "-" ] && owner="$session"
+    owner_ok vdisplay-aside "$owner" || exit 64
+    [ -n "${why// /}" ] || { echo "job.sh vdisplay-aside: refused: say why (the third argument): the record keeps it" >&2; exit 64; }
+    F="$ROOT/vdisplay_restore.json"
+    [ -f "$F" ] || { echo "job.sh vdisplay-aside: refused: no vdisplay_restore.json in $ROOT: nothing to move (the watcher restored or dropped it)" >&2; exit 2; }
+    if [ -f "$ROOT/game.lock" ]; then holds_check "$owner" || { echo "job.sh vdisplay-aside: refused: $HOLDS_WHY" >&2; exit 2; }; fi
+    alive=99; [ -f "$ROOT/watcher.alive" ] && alive=$(( $(date +%s) - $(stat -c %Y "$ROOT/watcher.alive") ))
+    [ "$alive" -lt 15 ] || { echo "job.sh vdisplay-aside: refused: the watcher is not running (job.sh status), so its status cannot say no game runs: start the watcher, which then restores the mode itself" >&2; exit 2; }
+    games=""
+    for _ in 1 2 3 4 5; do   # watcher.status is replaced every 2 s: a read mid-swap is retried
+      games="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8-sig")); g=d.get("game_state") or {}; print(len(d.get("processes") or []) + (1 if g.get("pid") else 0))' "$ROOT/watcher.status" 2>/dev/null)" && break
+      games=""; sleep 0.2
+    done
+    [ -n "$games" ] || { echo "job.sh vdisplay-aside: refused: watcher.status is unreadable, so whether a game runs is unknown: retry, or job.sh status" >&2; exit 2; }
+    [ "$games" = 0 ] || { echo "job.sh vdisplay-aside: refused: a game process runs (watcher.status): kill it through the watcher first; its exit lets the watcher restore the mode" >&2; exit 2; }
+    fmt=$(stat -c %Y "$F"); age=$(( $(date +%s) - fmt )); lim=$(( $(stale_min) * 60 )); because=""
+    last="$(grep -a 'vdisplay: ' "$ROOT/watcher.log" 2>/dev/null | tail -1 | tr -d '\r')"
+    case "$last" in
+      *"vdisplay: RESTORE FAILED"*|*"the RESTORE FAILED above repeated"*|*"vdisplay: pending restore dropped"*)
+        ts="$(printf '%s' "$last" | sed -n 's/^\[\([^]]*\)\].*/\1/p')"; t="$(date -u -d "$ts" +%s 2>/dev/null || echo 0)"
+        [ "$t" -ge $(( fmt - 2 )) ] && because="the watcher's last vdisplay line: $last";;
+    esac
+    [ -z "$because" ] && [ "$age" -ge "$lim" ] && because="the file is ${age}s old (the lock's stale limit is ${lim}s)"
+    [ -n "$because" ] || { echo "job.sh vdisplay-aside: refused: the watcher's restore is still pending (the file is ${age}s old and the last vdisplay line of watcher.log is not a failure): let the watcher restore it (release the lock; it retries every 60 s), or wait for the stale limit (${lim}s)" >&2; exit 2; }
+    mode="$(tr -d '\r' < "$F" | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$ROOT/_to_delete"; dest=""
+    for i in "" $(seq 2 50 | sed 's/^/_/'); do
+      d="$ROOT/_to_delete/vdisplay_restore_${stamp}${i}.json.aside"
+      [ -e "$d" ] && continue
+      mv -n "$F" "$d" 2>/dev/null
+      if [ -e "$d" ] && [ ! -e "$F" ]; then dest="$d"; break; fi
+      [ -e "$F" ] || { echo "job.sh vdisplay-aside: refused: vdisplay_restore.json vanished meanwhile (the watcher restored or dropped it): nothing moved" >&2; exit 2; }
+    done
+    [ -n "$dest" ] || { echo "job.sh vdisplay-aside: refused: no free name in _to_delete for $stamp: nothing moved, retry" >&2; exit 2; }
+    rec="job.sh vdisplay-aside: moved vdisplay_restore.json to _to_delete\\$(basename "$dest") (owner $owner, session $session): $why; because $because; saved mode: $mode"
+    printf '[%s] %s\r\n' "$(utc)" "$rec" >> "$ROOT/watcher.log" 2>/dev/null || echo "job.sh vdisplay-aside: watcher.log could not be appended: the record is this output" >&2
+    echo "vdisplay_restore.json moved aside (never deleted) to $dest"
+    echo "saved mode: $mode"
+    echo "because: $because"
+    echo "the next launch that needs another size saves the mode again; the display itself was not changed"; exit 0;;
   unlock)
     owner="${2:?unlock <owner> [--force]}"; owner_ok unlock "$owner" || exit 64
     [ -f "$ROOT/game.lock" ] || { echo "no game.lock held"; exit 0; }

@@ -67,3 +67,26 @@ under wine)`. A PC build writes nothing.
 ## Fetching
 `fetch_lua.py` and `fetch_ui.py` retry each download and `git fetch` on a network flake (`netfetch.retry`, one stderr line each), never a
 sha256 mismatch or a failed patch; `fetch_ui.py` trusts a checkout only when HEAD is the pin and the working tree equals HEAD.
+
+## Symbolising a crash (W35, C35)
+- **The map.** `build.sh dll` links with `-Wl,-Map` (no `--cref`: the verb reads sections and symbols only) and writes, beside the DLL in
+  `build/proxy/<adapter>/`, `d3d9.map` (checkout paths become the labels `core/`, `adapter/`, `out/`, `ui/`; gcc's temporary objects are named
+  after their sources in link order), `d3d9.map.json` (`{dll, build_id, dll_sha256, image_base, size, size_of_image}`, the id and sha256 of
+  the build line) and `d3d9.map.build.txt` (the build line). No timestamp enters them. `repro` compares both maps from another path and
+  links once more without the flag: the DLL must be byte-identical (both sha256 printed); a difference fails the job, never waived.
+- **CI keeps it.** The `{{wsc proxy_map step=<id>}}` block after the build step (`id: dll`) uploads `proxy-map-<build id>`, the name
+  `build.sh` wrote to the step's outputs, for 90 days (GitHub's maximum), and links it in the step summary. A map outlives 90 days only by
+  being kept: **a release attaches `d3d9.map` and `d3d9.map.json` to the release it publishes** (the consumer's release builder).
+- **The command.** `python3 core/wsc.py crash symbolise <dump> --map d3d9.map [--log proxy.log] [--dll d3d9.dll]`, or `--build-id <id>
+  [--run <run id>]` to fetch the artifact with `gh` into `_scratch/maps/<id>/`. Standard library only, no debugger, no network but `gh`.
+  The sidecar must agree with the launch line and `self_hash` of `--log`, the sha256 of `--dll` and the module's size of image in the
+  dump, else it refuses (exit 2) with both values; `--force-map` uses it anyway and prefixes every line `WRONG MAP?`.
+- **What it prints.** The exception (code, name, address, thread), the **exception frame** as `d3d9.dll+rva  .text: symbol+offset [object]`
+  (certain: the faulting instruction), then up to 16 **stack scan** candidates: words on the faulting thread's stack that point into the
+  DLL's code, by depth. A 32-bit mingw DLL has no `.pdata`, so a scan hit is a candidate (a stale return address or a function pointer can
+  look the same), never a frame. The map lists globals only: a static function shows as the nearest preceding global of its object.
+  Addresses outside the DLL print `module+rva` (`--sites <engine_sites>` adds the site an exe rva falls in). Exit 0 named, 1 no frame in
+  the DLL (the module list is printed), 2 refused. The in-process dump has the stacks and the memory they reference, not full memory, so
+  scans are best effort; the exception frame is always named.
+- **Proof.** The smoke's step 9 faults inside the DLL (the stand-in exe calls `wsp_sentinel` with a bad `lua_State`) and the verb must
+  name `lua_gettop` (with the PE leading underscore when the toolchain adds one); CI uploads that dump and log as `proxy-smoke-dll-fault`.

@@ -3,12 +3,14 @@
   "description": "W27 shipped rule A (reviewer code under a merge verdict) as a warning because a scan of merged job branches found 32 would have been refused (W27 report, kill criterion). Liam decided 2026-11-04 to make it an error later, by a small job, after reviewers have used 'merge after fixes' for a while: either outright or behind a [policy] key a game can switch on. This job re-runs W27's false-positive scan on the job branches merged since W27 and recommends which.",
   "title": "Rule A (reviewer code under a merge verdict) becomes an error",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "semver": "patch",
   "depends_on": [
     "W27"
   ],
-  "brief": "jobs/W40/brief.md"
+  "brief": "jobs/W40/brief.md",
+  "report": "jobs/W40/report.md",
+  "review": "jobs/W40/review.md"
 }

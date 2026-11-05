@@ -18,6 +18,7 @@
 #define PSAPI_VERSION 2
 #endif
 #include <psapi.h>
+#include <sddl.h>
 #include <map>
 #include <set>
 #include <algorithm>
@@ -386,7 +387,9 @@ Outcome Execute(const std::string& id, const CtlRequest& r) {
     if (r.verb == "state") { Lock l; UpdateSceneLocked(MonoS()); o.result = "\"state\": " + StateJson(); return o; }
     if (r.verb == "log") { LOGI("ctl: log: %s", r.arg.c_str()); return o; }
     if (r.verb == "lua") {
-        std::string text; bool to = false;
+        std::string text, why; bool to = false;
+        const DevAdapter* ad = Adapter().dev;
+        if (!LuaPathAllowed(r.arg, Narrow(Rt().gameDir), ad && ad->luaDir ? ad->luaDir : "", Narrow(Dk().ctlDir), why)) { o.status = "refused"; o.reason = why; return o; }
         { Lock l; s_luaArgs = r.luaArgs; }
         const bool ok = RunLua(id, r.arg, timeout, text, to);
         o.result = "\"chunk\": " + JStr(text);
@@ -491,10 +494,57 @@ void HandleRequest(const std::wstring& dir, const std::wstring& file, int64_t wr
     WriteFileAtomic(done, ResultJson(id, TrimS(text), o, start, UnixMs(), {}));
 }
 
+// The SID of the user this process runs as, as text; "" = unknown, and GetLastError says why.
+std::wstring ProcessUserSid() {
+    HANDLE t = nullptr; std::wstring sid;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &t)) return sid;
+    DWORD n = 0; GetTokenInformation(t, TokenUser, nullptr, 0, &n);
+    std::vector<uint8_t> b(n); LPWSTR text = nullptr;
+    if (n && GetTokenInformation(t, TokenUser, b.data(), n, &n) && ConvertSidToStringSidW(((TOKEN_USER*)b.data())->User.Sid, &text)) { sid = text; LocalFree(text); }
+    CloseHandle(t);
+    return sid;
+}
+
+// W34 (C8): the channel runs Lua in the game, so the folder is the game's user's alone, wherever dev.ctl_dir points. A protected DACL with one ACE
+// for that user; files created from now on inherit it (SetFileSecurityW does not walk what is already there). The ACE names the user's SID, not
+// OWNER RIGHTS (OW): wine maps an OW ACE to mode 000 and reports success, which kills the channel for a non-root user, and on Windows an OW ACE
+// locks the game out of a folder an elevated process made (its owner is Administrators). A failure never stops the channel (FAT refuses).
+// Never from DllMain: the ctl thread starts at the first Direct3DCreate9 (W33).
+void CtlRestrictFolder(const std::wstring& dir) {
+    PSECURITY_DESCRIPTOR sd = nullptr; DWORD err = 0;
+    const std::wstring sid = ProcessUserSid();
+    if (sid.empty()) err = GetLastError();
+    else if (!ConvertStringSecurityDescriptorToSecurityDescriptorW((L"D:PAI(A;OICI;FA;;;" + sid + L")").c_str(), SDDL_REVISION_1, &sd, nullptr)) err = GetLastError();
+    else {
+        if (!SetFileSecurityW(dir.c_str(), DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, sd)) err = GetLastError();
+        LocalFree(sd);
+    }
+    if (err) LOGW("ctl: could not restrict %ls (error %lu): continuing", dir.c_str(), err);
+    else LOGI("ctl: folder %ls is owner-only", dir.c_str());
+}
+
+// W34 (C8): what the disk keeps (devcore.h kCtlKeepTaken, kCtlKeepIds); s_ids is untouched. On the ctl thread, between requests.
+void CtlRotate(const std::wstring& dir) {
+    std::vector<CtlFile> taken;
+    WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((dir + L"*.cmd.taken").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) taken.push_back({ fd.cFileName, ((uint64_t)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime }); } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    size_t gone = 0;
+    for (const std::wstring& n : RotatePlan(taken, kCtlKeepTaken)) gone += DeleteFileW((dir + n).c_str()) ? 1 : 0;
+    std::string ids; size_t trimmed = 0;
+    if (ReadFileBytes(dir + L"_ids.txt", ids) && CountIds(ids) > kCtlTrimIdsOver && WriteFileAtomic(dir + L"_ids.txt", TrimIds(ids, kCtlKeepIds))) trimmed = CountIds(ids) - kCtlKeepIds;
+    if (gone || trimmed) LOGI("ctl: rotated: %zu taken files deleted, %zu old ids dropped from _ids.txt", gone, trimmed);
+}
+
 DWORD WINAPI CtlThread(LPVOID) {
     const std::wstring dir = Dk().ctlDir.back() == L'\\' ? Dk().ctlDir : Dk().ctlDir + L"\\";
     CreateDirectoryW(dir.c_str(), nullptr);
+    CtlRestrictFolder(dir);
     { std::string ids; if (ReadFileBytes(dir + L"_ids.txt", ids)) { size_t p = 0; while (p < ids.size()) { size_t e = ids.find('\n', p); if (e == std::string::npos) e = ids.size(); std::string s = TrimS(ids.substr(p, e - p)); if (!s.empty()) s_ids.insert(s); p = e + 1; } } }
+    CtlRotate(dir);
+    size_t handled = 0;
     LOGI("ctl: watching %ls (%zu ids already used)", dir.c_str(), s_ids.size());
     if (s_tl.processStartMs < 0) LOGW("ctl: the process start time is unknown (GetProcessTimes failed): stale requests from an earlier launch are not refused");
     for (;;) {
@@ -523,6 +573,7 @@ DWORD WINAPI CtlThread(LPVOID) {
         for (auto& f : files) {
             FILETIME ft; ft.dwLowDateTime = (DWORD)f.first; ft.dwHighDateTime = (DWORD)(f.first >> 32);
             HandleRequest(dir, f.second, FileTimeToUnixMs(ft));
+            if (++handled % kCtlRotateEvery == 0) CtlRotate(dir);
         }
     }
 }
