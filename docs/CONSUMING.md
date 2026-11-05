@@ -168,14 +168,13 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
 - **The `jobs view` page** loads marked 12.0.2 from cdnjs with its Subresource Integrity hash (`jobq.MARKED_SRI`), shows raw HTML in a brief, report or
-  review as text (marked's `html` renderer escapes it), and carries a Content-Security-Policy: scripts from that one URL and the page's inline script by hash,
-  styles by hash, `connect-src 'self'` (W28). A new marked version is a new URL, hash and test.
+  review as text (marked's `html` renderer escapes it), and carries a Content-Security-Policy (W28; `jobq.py` owns it).
 - **Claim and autopilot (core W26, C32).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
   (`brief/<id>`); a lost race moves on, any other failure exits 1. `--peek` and `--offline` claim nothing. Order is (phase, number). An empty claim
   older than 24 h is listed with its release command. `--auto` starts a review only on a green head, a fix once CI has finished, one `needs_pc` row
   at a time, and prunes dead worktrees each tick. A game: sets `[jobs] pc_state` and has its `setup` verb print
   `warscape.worktrees.report(root, rows, branches)`; `wsc jobs worktrees [--prune]` prints the same.
-- **Usage accounting (core W31):** the report's `Usage:` line, `[jobs] usage_from` and `usage_cmd`, `budget_lifts`, `Result.cards`: [USAGE.md](USAGE.md).
+- **Usage accounting (W31):** the `Usage:` line, `[jobs] usage_from`, `usage_cmd`, `budget_lifts`, `Result.cards`: [USAGE.md](USAGE.md).
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
   `HEAD`) writes the base's rule inputs into a temporary folder and runs the base's own code there in a child process: inside the core, the base
