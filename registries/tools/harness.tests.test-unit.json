@@ -1,0 +1,11 @@
+{
+  "id": "harness.tests.test-unit",
+  "kind": "script",
+  "path": "harness/tests/Test-Unit.ps1",
+  "purpose": "static and unit host tests for the harness: every learning from the earlier remaster's watcher history as a guard (BOM-less UTF-8, byte[] returns, UTC everywhere, id and lock rules, hang verdicts, overlays, profile snapshot/restore, tolerant status reads)",
+  "usage": "powershell -NoProfile -ExecutionPolicy Bypass -File Test-Unit.ps1 [-Repo <repo root>]   (CI: Windows PowerShell 5.1; the pure parts also run under pwsh on Linux)",
+  "when": "on every push (CI job harness-windows) and before committing a change to harness/",
+  "not_a_verb": "a PowerShell test script, not a repo operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

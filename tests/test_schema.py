@@ -8,7 +8,7 @@ from warscape.schema import check_schema, validate
 class CheckSchema(unittest.TestCase):
     def test_shipped_schemas_are_within_the_subset(self):
         files = sorted((CORE / 'schemas').glob('*.schema.json'))
-        self.assertEqual(len(files), 10)   # the nine registry schemas and ui_pins (W16, the UI pin file's)
+        self.assertEqual(len(files), 11)   # the ten registry schemas and ui_pins (W16, the UI pin file's)
         for f in files:
             self.assertEqual(check_schema(json.loads(f.read_text(encoding='utf-8'))), [], f.name)
 

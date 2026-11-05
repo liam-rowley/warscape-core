@@ -1,0 +1,11 @@
+{
+  "id": "harness.campose",
+  "kind": "script",
+  "path": "harness/campose.py",
+  "purpose": "turn the output of proxy/<game>/lua/probes/cam_read.lua (the camera position trilaterated in Lua, and the screen position, depth and",
+  "usage": "campose.py <ctl result .json | cam_read text file>   (prints the pose as JSON); library: parse(text), solve(parsed) -> pose dict",
+  "when": "every ctl cam readback, and by hand on a saved probe result",
+  "not_a_verb": "pure maths on a probe's text, called by ctl.py; a J12 core candidate with ctl.py",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

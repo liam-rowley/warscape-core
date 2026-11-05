@@ -1,0 +1,7 @@
+{
+  "id": "C31",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W28)",
+  "decision": "**Gates are never silent and repo data is strict.** A `[gates] skip` entry is `\"<gate>:<decision id>\"` naming a row of the decisions file, and each skipped gate prints a warning line; strict JSON refuses duplicate keys everywhere repo data is read; `verified_dates` takes only an ISO date, a compact run id or a records path; a `doc_paths` error checks backticked repo paths in living docs (other repos' paths are listed in `[docs] path_ignore`, mostly prefix globs, or marked `(was <path>)`; Liam, plan PR #87).",
+  "reversible": "yes"
+}

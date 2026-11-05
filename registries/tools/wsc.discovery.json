@@ -1,0 +1,11 @@
+{
+  "id": "wsc.discovery",
+  "kind": "verb",
+  "path": "warscape/verbs/discovery.py",
+  "purpose": "Check every committed discovery result, render the generated discovery READMEs, run the discovery gate and (on the PC) the discovery passes; the game comes from `[discovery] adapter` in wsc.toml.",
+  "usage": "wsc discovery check | render | gate [--install] [--write] [--json OUT] | assets | sheets | db | loc | ui | all   (the passes read the install on the PC; all = assets, db, loc, sheets, ui, then render)",
+  "when": "after any discovery pass (discovery/*.py) rewrites a result; `check` includes the gate and also fails when a committed README is stale; `gate --install` on the PC after a game update; `gate --write` rewrites discovery/gate/summary.json.",
+  "verb": "discovery",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

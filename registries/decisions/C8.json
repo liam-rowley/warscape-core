@@ -1,0 +1,7 @@
+{
+  "id": "C8",
+  "date": "2026-10-28",
+  "who": "proposed (Claude, PR 1)",
+  "decision": "Tool ids: `wsc.<verb>` for verbs, the path slug for scripts. Library modules and host tests are not tools (no row); the `tools` section of `wsc.toml` says which globs. The header is the source of a tool row; there is no first-sentence fallback.",
+  "reversible": "yes"
+}

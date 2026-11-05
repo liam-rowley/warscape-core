@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.x86re",
+  "kind": "script",
+  "path": "discovery/x86re.py",
+  "purpose": "library and CLI for static RE of a 32-bit Warscape exe without Ghidra: find a string's address and every dword that points at it, every E8 caller of a function, every instruction reading or writing a global (from the relocation table), and a recursive-descent walk of one function (calls, globals, returns)",
+  "usage": "<re venv python> -I discovery/x86re.py <exe> str <text> | refs <va> | callers <va> | xrefs <va> | dis <va> [n] | func <va>   (venv: discovery/re_env.py)",
+  "when": "J15 console RE; J9 engine sites and any later engine-site hunt (every address it prints is a candidate until an engine_sites row with anchor bytes is verified on the PC)",
+  "not_a_verb": "reads a game exe in place (read only), outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

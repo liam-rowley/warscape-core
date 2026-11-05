@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.build",
+  "kind": "script",
+  "path": "proxy/tools/build.sh",
+  "purpose": "build the proxy d3d9.dll (mingw-w64 i686, the release route) and/or build and run the host tests (g++)",
+  "usage": "proxy/tools/build.sh [--docker] [dll|tests|all|smoke|repro|id] [--adapter DIR]   (DIR: the game's proxy adapter folder, default proxy/tools/layout.py proxy-adapter; tests: the core's proxy/tests/test_*.cpp, then the game's own (layout.py proxy-tests, W16); --docker: the same target inside the image proxy/tools/toolchain.py pins, with its pinned mingw-w64 packages, the PC route (D31), the outer of the game root and the core mounted; smoke: run the built DLL under wine with a stand-in exe, and for the null games a second build of it that carries their sites, so a patch is really written; repro: rebuild from a copy at another path, fail unless byte-identical; id: print the build id only)   (outputs in <game repo>/build/proxy/; dll needs the pinned mingw-w64 packages, `toolchain.py apt` (WSP_TOOLCHAIN=any builds off the pin with a -dirty id), or Docker Desktop with --docker; contract: docs/PROXY_BUILD.md)",
+  "when": "after any change to the proxy sources or the adapter (CI runs `all` on every push); on the PC always with --docker; the DLL in <game repo>/build/proxy/<adapter name>/d3d9.dll is what proxy/tools/pc_deploy.py kits",
+  "not_a_verb": "a compiler driver for C++ sources, not a registry operation; CI and agents call it directly",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

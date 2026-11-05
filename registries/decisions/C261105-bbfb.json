@@ -1,0 +1,7 @@
+{
+  "id": "C261105-bbfb",
+  "date": "2026-11-05",
+  "who": "proposed (Claude, core W43)",
+  "decision": "**Decisions are one file per row, new ids are minted, and backlog items are `later` job rows.** `[policy] decisions = \"registry:<name>\"` names a one-file-per-row registry (`registries/decisions/`); a Markdown path stays the default, so a consumer is unchanged until it opts in. A row file on the base never changes, moves or goes; a reversal is a new row whose `replaces` names the old one. New ids are `<prefix><yymmdd>-<4 hex>` from `wsc reg add <registry> --mint`, so two branches never share a next number; old numbers stay valid and are closed. Backlog items become job rows with status `later`, keeping the old number in `backlog_id`, which `wsc find` resolves; they are picked up batched by area. `registries/tools/` is one file per row too. A move off a Markdown table takes two pull requests, as the base's rules (C24) refuse deleting the file in the same one: `[policy] decisions_retired` guards the file between them. Liam's direction, W43.",
+  "reversible": "yes"
+}

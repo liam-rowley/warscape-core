@@ -1,0 +1,7 @@
+{
+  "id": "C18",
+  "date": "2026-11-02",
+  "who": "proposed (Claude, napoleon J62), accepted by Liam's merge",
+  "decision": "**The job pipeline lives here and the core runs its own queue.** The `jobs` verb, the pull-request `policy`, the `ci` verb (input sets and tree hashes, the failure comment, rendered workflows), the `core:jobs` schema and the trailer rule are core code; everything a game decides is `wsc.toml` (`[jobs]`, `[jobs.text]`, `[policy]`, `[ci]`) or a hook module with at most five names (`warscape/hooks.py`; general game gates stay B1). Workflows are rendered from templates, not reusable `workflow_call` workflows, because a called workflow renames the required checks (`<caller job> / <called job>`) and branch protection is Liam's to change. From 0.9.0 a core change is a `job/W<n>` branch (ids `W<n>`; `brief/W<n>` for its brief) that an independent reviewer merges on green CI; this replaces \"a merge Liam approves\" in `CLAUDE.md`. Tags stay Liam's.",
+  "reversible": "yes"
+}

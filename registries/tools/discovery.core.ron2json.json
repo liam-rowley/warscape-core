@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.ron2json",
+  "kind": "script",
+  "path": "discovery/ron2json.py",
+  "purpose": "parse an RPFM .ron db schema and write {source: {url, commit, file_sha256, licence}, tables: {name_tables: [{version, fields: [{name, type, key, ref}]}]}}",
+  "usage": "python3 -I discovery/ron2json.py SCHEMA.ron OUT.json --url URL --commit SHA --licence MIT   (run with -I: the .ron is downloaded, untrusted data)",
+  "when": "J7 db schema (<adapter>/db_schema.json); again when the schema pin moves; ported from empire-remastered rml_mod/tools/db/ron2json.py",
+  "not_a_verb": "a one-off converter for a downloaded file, run when the schema pin changes",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

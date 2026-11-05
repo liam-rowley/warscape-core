@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.luac_list",
+  "kind": "script",
+  "path": "proxy/tools/luac_list.py",
+  "purpose": "read the engine's .luac UI scripts (function names, arguments, the calls they make, constants) without a 32-bit luac",
+  "usage": "luac_list.py FILE.luac [--func NAME ...] [--calls]   (--func: only functions whose debug name or first line matches; --calls: one",
+  "when": "discovery of the front-end, campaign and battle scripts (autostart, reset, scene probes); input comes from pack_list.py --extract.",
+  "not_a_verb": "a bytecode reader for game files, not a registry operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

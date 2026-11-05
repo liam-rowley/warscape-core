@@ -1,0 +1,7 @@
+{
+  "id": "C39",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W31), reversible",
+  "decision": "**A report states its usage, and a budget lift is a row field.** From `[jobs] usage_from` on (the core: W42; 0 = off) a report on a row in review, fix or done has one `Usage: <n> tool calls; models: <m1>, <m2>; <free text>` line, counted over the job's build and fix sessions. Usage above 1.25 x the effective budget (the newest `budget_lifts` `to`, else the brief's), or a model other than the row's, is an error and not a warning: the reviewer clears it with a lift or a corrected line. The numbers come from the game's `[jobs] usage_cmd`, a command run with no shell that prints one JSON object (`wsc jobs usage`); the core reads no transcript. Owner: `docs/USAGE.md`.",
+  "reversible": "yes"
+}

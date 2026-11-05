@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.sheets",
+  "kind": "script",
+  "path": "discovery/sheets.py",
+  "purpose": "draw every image row of registries/assets.jsonl onto per-role contact sheets under /extract/<target>/sheets/ and write discovery/assets/sheets.json (sheet name to tile ids; position from the tile's index)",
+  "usage": "python3 discovery/sheets.py [--games <adapter>/games.json] [--role ROLE ...]   (or `wsc discovery sheets`); Pillow: python3 -m pip install --user -r discovery/requirements.txt",
+  "when": "J7 after the asset pass; J10 (atlas) to eyeball a role; re-run after the registry changes. Ported in spirit from empire-remastered assets/tools/make_sheets.py",
+  "not_a_verb": "decodes game textures read in place on the PC with Pillow (not in CI); `wsc discovery sheets` runs it",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.ui_walk",
+  "kind": "script",
+  "path": "discovery/ui_walk.py",
+  "purpose": "walk one compiled UI script (.luac, Lua 5.1) symbolically and report its engine calls, the fields read off each engine result, data passed in (Initialise, OpenPanel, LuaCall, SetSpecialTooltip), the OnXxx handlers and per-function calls",
+  "usage": "from ui_walk import walk_chunk; r = walk_chunk(bytes, engine_tables)   (library; ui_atlas.py runs it over every script)",
+  "when": "J10 static atlas (discovery/ui_atlas.py); any later question of the form \"which getter feeds this field",
+  "not_a_verb": "a library, ported from empire-remastered rml_mod/docs/atlas/atlas_static.py (Walker) with the engine tables passed in",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

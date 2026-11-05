@@ -1,0 +1,7 @@
+{
+  "id": "C21",
+  "date": "2026-11-03",
+  "who": "proposed (Claude, core W11)",
+  "decision": "**`core_pin` on a shallow submodule** (amends C10's shallow clause, B12): a pinned tag that is in the core checkout is always checked against HEAD; a pinned tag missing from a **shallow** checkout weakens the check to `VERSION` only (a depth-1 CI submodule brings the core tip's tag, not an older pinned one, so C10's \"a shallow submodule has none\" stopped holding once a newer tag existed, napoleon J41 review); missing from a full checkout that has other tags, it is an error naming `git -C <core> fetch --tags`; no tags at all stays `VERSION` only. Fetching the tag from inside the gate was refused: gates need no network. C10's rules for a full clone and inside the core are unchanged. The gate reads `VERSION` from the checkout it checks (`ctx.core_root`, B7).",
+  "reversible": "yes"
+}

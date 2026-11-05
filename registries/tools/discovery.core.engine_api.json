@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.engine_api",
+  "kind": "script",
+  "path": "discovery/engine_api.py",
+  "purpose": "read the \"api <state> <owner> <name>:<type> ...\" lines that proxy/<game>/lua/probes/api_surface.lua logs and the \"sample ...\" lines of the getter probe (in the runs' committed proxy logs), merge them per name (owner, kind, C or Lua, the states where it exists, observed type, getter samples), merge the static binding map <adapter>/lua_cfuncs.json (address and argument counts per C function) and answer the open questions of J6's static Lua API diff (discovery/diff/lua_api.json: are its new and gone names there at runtime, which argument-count drifts are real); writes <adapter>/engine_api.json",
+  "usage": "python3 discovery/engine_api.py build --run harness/runs/<id> [--run ...] [--out <adapter>/engine_api.json] [--check] | probe-safe [--lua <file>] [--check]",
+  "when": "after a PC run of the api_surface probe (J9; again after a game update); --check in review rebuilds the table from the committed logs",
+  "not_a_verb": "a discovery pass over committed run evidence, writing one discovery table; outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

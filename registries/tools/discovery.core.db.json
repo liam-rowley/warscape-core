@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.db",
+  "kind": "script",
+  "path": "discovery/db.py",
+  "purpose": "write discovery/db/tables.json (per table: file, pack, version, rows, sha256, decoded or why not, fields with types, keys and refs); decoded rows go to /extract/<target>/db/; readme() renders discovery/db/README.md",
+  "usage": "python3 discovery/db.py [--games <adapter>/games.json]   (or `wsc discovery db`; `wsc discovery render` writes the README)   |   from db import parse_header, decode_table",
+  "when": "J7; re-run after a game update or a schema pin change (<adapter>/db_schema.json from discovery/ron2json.py); without the schema it still writes the index",
+  "not_a_verb": "reads data.pack in place on the PC; `wsc discovery db` runs it",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

@@ -1,7 +1,7 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
 purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
-usage: wsc jobs check | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE]
+usage: wsc jobs check | jobs later --from-md <file> [--area <name>] [--check] | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE]
 when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo; `usage` to fill a report's `Usage:` line before status=review.
 verb: jobs
 

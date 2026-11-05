@@ -1,0 +1,7 @@
+{
+  "id": "C22",
+  "date": "2026-11-03",
+  "who": "proposed (Claude, core W13)",
+  "decision": "**Game gate modules replace the five hook names of C18.** A game adds checks as modules in `wsc.toml` `[gates] dirs` (`warscape/gatemods.py`): `NAME`, `run(ctx) -> Result` and optional `STAGES` (`gates`, `jobs`, `policy`, `view`) and `FAST`, the contract of a verb. `[jobs] hooks` and `warscape/hooks.py` are removed with no shim: the loader refuses the key with a message naming the migration (`docs/CONSUMING.md` \"Game gates\"), and a module that still defines an old hook name is a load error. A `view` Result may carry `html`, drawn as is (napoleon's PC block). C18 otherwise stands. Backlog B1 and B46 are built; B50 is a `view`-stage note",
+  "reversible": "yes"
+}

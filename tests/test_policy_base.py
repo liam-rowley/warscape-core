@@ -398,11 +398,26 @@ class CoreMode(Branches, unittest.TestCase):
             self.assertRefused(res, 'a plan/ branch may only touch', JUDGED)
             self.assertIn('warscape/policy.py', self.note(res[1]))
 
-    def test_bypass_4_an_empty_decisions_key_on_the_head_keeps_the_file_append_only(self):
-        dec = self.text('docs/DECISIONS.md').replace('| C1 | 2026-10-28 |', '| C1 | 2025-10-28 |', 1)
-        self.branch('meta/dec', {'wsc.toml': self.toml().replace('decisions = "docs/DECISIONS.md"', 'decisions = ""'), 'docs/DECISIONS.md': dec})
+    def test_bypass_4_an_empty_decisions_key_on_the_head_keeps_the_rows_append_only(self):
+        dec = self.text('registries/decisions/C1.json').replace('2026-10-28', '2025-10-28', 1)
+        self.branch('meta/dec', {'wsc.toml': self.toml().replace('decisions = "registry:decisions"', 'decisions = ""'), 'registries/decisions/C1.json': dec})
         for res in (self.ci('meta/dec'), self.local('meta/dec')):
-            self.assertRefused(res, 'docs/DECISIONS.md is append only: rows C1 were changed', JUDGED)
+            self.assertRefused(res, 'registries/decisions is append only: C1.json was changed', JUDGED)
+
+    def test_w43_a_changed_row_is_refused_with_and_without_a_replacing_row(self):
+        dec = self.text('registries/decisions/C36.json').replace('"yes"', '"no"', 1)
+        new = '{"id": "C261105-a3f2", "date": "2026-11-05", "who": "t", "decision": "Replaces C36.", "reversible": "yes", "replaces": ["C36"]}\n'
+        self.branch('plan/edit', {'registries/decisions/C36.json': dec})
+        self.branch('plan/both', {'registries/decisions/C36.json': dec, 'registries/decisions/C261105-a3f2.json': new})
+        for name in ('plan/edit', 'plan/both'):
+            self.assertRefused(self.local(name), 'registries/decisions is append only: C36.json was changed', JUDGED)
+
+    def test_w43_two_branches_mint_rows_and_the_second_needs_no_merge(self):
+        rows = {n: '{"id": "%s", "date": "2026-11-05", "who": "t", "decision": "A.", "reversible": "yes"}\n' % n for n in ('C261105-aaaa', 'C261105-bbbb')}
+        self.branch('plan/one', {'registries/decisions/C261105-aaaa.json': rows['C261105-aaaa']})
+        self.branch('plan/two', {'registries/decisions/C261105-bbbb.json': rows['C261105-bbbb']})
+        for name in ('plan/one', 'plan/two'):
+            self.assertEqual(self.local(name)[0], 0, self.local(name)[1])
 
     def test_a_release_branch_is_judged_by_the_bases_rules(self):
         """W29 (C27): release/vX.Y.Z may change only VERSION, one step above the base's; a head that widens its own kind changes nothing."""

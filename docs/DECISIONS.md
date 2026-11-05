@@ -1,8 +1,8 @@
 # Decisions
 
-One line per decision: date, who, the decision, and whether it is reversible. **Append only**; a reversal is a new dated line that
-names the one it replaces. Detail lives in the doc or code that owns the topic. Numbers are `C<n>` so they never collide with a game
-repo's `D<n>`. Lines marked "proposed" came in a pull request; Liam's merge of that pull request accepts them.
+**Frozen (W43).** The decisions are one file per row in `registries/decisions/`; add one with `python3 wsc.py reg add decisions --mint`, read them with
+`python3 wsc.py reg render decisions` (`_scratch/registries/decisions.md`) or `python3 wsc.py find <words>`. A row added here fails the `registries` gate. This file goes
+in the follow-up to W43 (its report, Open questions).
 
 | # | Date | Who | Decision | Reversible |
 |---|---|---|---|---|

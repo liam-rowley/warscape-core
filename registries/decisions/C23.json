@@ -1,0 +1,7 @@
+{
+  "id": "C23",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W12)",
+  "decision": "**A `commit-msg` hook enforces the session trailer** (`.githooks/commit-msg`, `wsc policy --commit-msg`, as C6 is for pre-push): it refuses a commit whose message has no `[policy] session_trailer` trailer with a value, read by `git interpret-trailers --parse` so it can never disagree with `policy`. Opt-in per repo (`[policy] commit_msg_hook`, default false; the core turns it on); merge commits are exempt; a human commit bypasses with `git commit --no-verify`. Same job: the `run_refs` gate (`[gates] run_refs_since`), `jobs check` refuses committed views beside a jobs registry (C19), and a moved-trees lint for old `*/core/` paths.",
+  "reversible": "yes"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "C14",
+  "date": "2026-10-31",
+  "who": "proposed (Claude, napoleon J12), accepted by Liam's merge",
+  "decision": "**The proxy, the harness and the save tools live here** (phase 1 promotion): `proxy/src` (the DLL core), `proxy/tests`, `proxy/tools`, `harness/`, `saves/`. A tool finds the game through `proxy/tools/layout.py` (the superproject that pins this repo, `wsc.toml` `[proxy]`/`[harness] adapter`, else the one adapter in the repo), never by its own location or a game name; `tests/test_moved_tools.py` lints the moved trees for game names. CI builds and tests them against the null game (`proxy/tests/null_game`).",
+  "reversible": "yes"
+}

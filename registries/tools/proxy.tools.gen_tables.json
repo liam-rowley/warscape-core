@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.gen_tables",
+  "kind": "script",
+  "path": "proxy/tools/gen_tables.py",
+  "purpose": "turn the game repo's engine_sites and config_keys registries (read through the core's registry loader, so either storage works) and its proxy adapter's identity.json into <adapter>/generated/tables.h and the shipped default config file, validating every site (hex, lengths, overlaps, config key, exe pin; value_key rows: the key's explicit int/float type, default 0, a max, 4 stock bytes that round-trip) and every key (type, default, release value, min/max range); docs/PROXY_SITES.md",
+  "usage": "python3 proxy/tools/gen_tables.py [--adapter <repo-relative adapter folder>] [--check] [--exe <staged exe copy> [--allow-pin-mismatch]]   (default adapter: proxy/tools/layout.py; --exe: one MATCH or MISMATCH line per site from the file's own bytes, writes nothing; exit 0 all match, 1 a mismatch, 2 an unreadable file)",
+  "when": "after any change to the engine_sites or config_keys registry or identity.json (then rebuild the DLL); --check runs in the gates (tests/test_proxy_tables.py) and fails when the generated files are stale or a site is invalid; --exe on a staged copy of the exe after a new site or a game update, before a PC run",
+  "not_a_verb": "games cannot add wsc verbs for the proxy yet (wsc.toml verb_dirs is empty and the generator moves to warscape-core with proxy/core at the end of phase 1); the gates reach it through tests/",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

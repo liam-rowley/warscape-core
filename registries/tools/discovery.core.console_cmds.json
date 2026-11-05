@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.console_cmds",
+  "kind": "script",
+  "path": "discovery/console_cmds.py",
+  "purpose": "find every static initialiser that registers a console command (four string ctors, a handler push, a call to the dictionary's register function, found from one seed command name), classify each handler statically (no_op: a bare ret; parse_only: only reads its arguments or the selection; prints_only: only formats output the retail console never shows; acts: calls other engine code) and write the table; optional diff against empire-remastered's campaign_commands.tsv",
+  "usage": "<re venv python> -I discovery/console_cmds.py <exe> --seed teleport_to --out <tsv> [--reference <the reference game's campaign_commands.tsv> --diff-out <tsv>] [--profile <adapter>/console.json]",
+  "when": "J15 (the campaign dictionary behind `console`), and again after a game update; the proxy's no-op refusal list is generated from the TSV (proxy/tools/gen_console_table.py)",
+  "not_a_verb": "reads a game exe in place (read only), outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

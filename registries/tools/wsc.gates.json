@@ -1,0 +1,11 @@
+{
+  "id": "wsc.gates",
+  "kind": "verb",
+  "path": "warscape/verbs/gates.py",
+  "purpose": "Run the repo gates: schemas, registries, tool headers and rows, strict JSON, Windows-safe paths, doc size cap, undated \"verified\", conflict markers, line endings, core pin, host tests, then the repo's own game gates ([gates] dirs).",
+  "usage": "wsc gates [--fast] [--only name,name] [--json OUT] [-q]   (exit 1 when any gate fails; warnings never fail)",
+  "when": "before every push (the pre-push hook runs --fast), in CI on every push and PR (full set), and after any change to a registry, tool or doc.",
+  "verb": "gates",
+  "status": "live",
+  "last_used": "2026-10-28"
+}

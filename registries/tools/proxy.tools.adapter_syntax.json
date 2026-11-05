@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.adapter_syntax",
+  "kind": "script",
+  "path": "proxy/tools/adapter_syntax.py",
+  "purpose": "compile <adapter>/adapter.cpp against proxy/src with the DLL compile line's language, warning and define flags (read from build.sh's build_dll line at run time, so they cannot drift) plus -fsyntax-only: no linking, no Lua or UI objects, no build id; a GameAdapter member the adapter does not initialise fails under -Werror=missing-field-initializers (audit C2)",
+  "usage": "python3 proxy/tools/adapter_syntax.py --adapter DIR [--src DIR] [--cxx COMPILER] [--print-flags]   (exit 0 compiles, 1 does not (the first error printed), 2 no compiler or no adapter.cpp)",
+  "when": "CI's proxy job on proxy/tests/null_game (must pass) and a copy missing the gesture member (must fail); `wsc release check-consumers` on each `[release] consumers` adapter before the release workflow tags",
+  "not_a_verb": "a compiler driver for C++ sources (beside build.sh), called by CI and by `wsc release check-consumers`",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "C17",
+  "date": "2026-11-02",
+  "who": "proposed (Claude, napoleon J28)",
+  "decision": "**An order's readback never counts a value the order itself wrote as proof that it happened.** The engine stores a move's destination front centre and width in the unit at the push, whether or not it finds a path (napoleon run 20261102_j28pc, siege_small: pushed, never moved, the destination read back exact), so `ctl.py order` proves arrival with the unit's live centre (behind the front on the ordered axis at about its own half depth), the engine's own `is_moving` and a \"moved\" check; the destination fields only show the order was taken. Units are named by pointer for the whole call, never by a list position that a lost unit renumbers.",
+  "reversible": "no"
+}
