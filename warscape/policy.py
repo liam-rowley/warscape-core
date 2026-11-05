@@ -8,8 +8,8 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
               every commit touching the report or the review must carry that trailer (fails closed). From job number `[jobs] semver_from`
               on (W29, C27) it may not change VERSION: the release workflow owns it.
               Review integrity (core W27), read from the branch's commits by sha:
-                A  a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict, and no newer round's review
-                   commit follows them (a fresh round has then reviewed the change: W40, the one way out, as rule C keeps the old verdict). A warning,
+                A  a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict, and no commit that first wrote a newer
+                   round descends from them (a fresh round has then reviewed the change: W40, the one way out, as rule C keeps the old verdict). A warning,
                    or with `[policy] reviewer_code = "error"` (W40; the core's own wsc.toml) a refusal. A round's commits:
                    the review.md commits whose review.md holds round N as its newest, any other commit by a session of those, and a commit by nobody
                    known (no trailer, or a session neither the builder's nor a round's) after the first review commit, which goes to the round of
@@ -384,15 +384,17 @@ def round_problems(jid, cfg, reads, builder, head_review):
     round its review.md holds; any other commit by a round's session belongs to that round; a commit by nobody known (no trailer, or a
     session that is neither the builder's nor a round's) after the first review commit belongs to the round of the next review commit, or to
     the newest round when none follows. Commits before the first review commit and the builder's own (report.md writers: the builder and
-    every fix session) are never a round's. A commit a newer round's review commit follows has been reviewed by that round, so rule A skips it."""
+    every fix session) are never a round's. A commit that the first commit of a newer round descends from has been reviewed by that round, so rule A skips it: ancestry, not the
+    log's order (`reads.is_ancestor`; a merge lists a side branch's commits in either order), and a round's later edits of itself clear nothing."""
     jd, T = cfg['jobs_dir'], cfg['text']
     rev = f'{jd}/{jid}/review.md'
     hist = reads.history(rev)
     wrote = {sha: max(rounds_of(text), default=0) for sha, _, text in hist}
-    by_round = {}
+    by_round, opened = {}, {}
     for sha, who, _ in hist:
         if wrote[sha]:
             by_round.setdefault(wrote[sha], set()).update(who)
+            opened.setdefault(wrote[sha], sha)
     errs, doc = [], f" ({T['review_doc']})" if T.get('review_doc') else ''
     for n in sorted(by_round):   # rule B; the builder's sessions are the own-review rule's message
         for j in sorted(k for k in by_round if k < n):
@@ -415,7 +417,7 @@ def round_problems(jid, cfg, reads, builder, head_review):
             if i < first:
                 continue
             n = next((wrote[c[0]] for c in commits[i + 1:] if wrote.get(c[0])), max(by_round))
-        if not any(wrote.get(c[0], 0) > n for c in commits[i + 1:]):   # W40: else a fresh round (rule B) reviewed it
+        if not any(k > n and reads.is_ancestor(sha, first_sha) for k, first_sha in opened.items()):   # W40: else a fresh round (rule B) reviewed it
             hits.setdefault(n, []).append((sha, code))
     head_r = rounds_of(head_review)
     rule_a = errs if cfg.get('reviewer_code') == 'error' else warns
@@ -519,6 +521,10 @@ class GitReads:
             sha, *who = first.split('\x1f')
             recs.append((sha, self._who(who), [p for p in paths if p.strip()]))
         return recs
+
+    def is_ancestor(self, sha, of):
+        """True when `sha` is `of` or in its history; a git error is False, so rule A keeps the hit."""
+        return self._ok('merge-base', '--is-ancestor', sha, of)
 
     def history(self, path):
         """[(sha, sessions, text or None)] of the commits of mb..h that touch `path`, oldest first."""

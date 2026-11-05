@@ -193,7 +193,8 @@ def rv(*rounds):
 
 def fake_reads(commits=(), history=(), numstat=(), exists=(), refs=None, shas=None):
     from types import SimpleNamespace
-    return SimpleNamespace(commits=lambda: list(commits), history=lambda p: list(history) if p == REV else [],
+    order = [c[0] for c in commits]   # a linear branch: ancestry is the log's order (a merge needs a real repository: PolicyOnGit)
+    return SimpleNamespace(commits=lambda: list(commits), is_ancestor=lambda a, b: order.index(a) <= order.index(b), history=lambda p: list(history) if p == REV else [],
                            numstat=lambda: list(numstat), exists=lambda p: p in exists,
                            ref_state=lambda r: (refs or {}).get(r, 'missing'), sha_state=lambda s: (shas or {}).get(s, 'missing'))
 
@@ -268,6 +269,13 @@ class ReviewerCodeCases:
         hit, _ = self.steps([BUILD, ('c2', 'R1', ['warscape/early.py'], rv((1, 'merge'))), ('c3', 'R2', [], rv((2, 'merge'), (1, 'merge'))),
                              ('c4', 'R1', ['warscape/late.py'], None)])
         self.assertTrue(hit and all('warscape/late.py' in x and 'warscape/early.py' not in x for x in hit), hit)
+
+
+    def test_a_rounds_later_edit_of_itself_does_not_clear_code_before_that_edit(self):
+        """W40 review round 1, later 1: only the commit that first writes a round clears; after it that round has reviewed nothing new."""
+        hit, _ = self.steps([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'R2', [], rv((2, 'merge'), (1, 'merge'))), ('c4', 'R1', ['warscape/late.py'], None),
+                             ('c5', 'R2', [], rv((2, 'merge', 'A typo fixed.'), (1, 'merge')))])
+        self.assertTrue(any('c4' in x and 'warscape/late.py' in x for x in hit), hit)
 
 
 class RuleAWarns(ReviewerCodeCases, unittest.TestCase):
@@ -626,6 +634,50 @@ class PolicyOnGit(unittest.TestCase):
         self.commit('wsc.toml', '[policy]\ndecisions = "docs/DECISIONS.md"\n[ci]\ncore = ""\n')
         self.commit('jobs/J1/brief.md', 'brief')
         self.write_rows([ROW, OTHER], layout)
+
+    def sha(self, rev='HEAD'):
+        return subprocess.run(['git', 'rev-parse', rev], cwd=self.d, check=True, capture_output=True, text=True).stdout.strip()
+
+    def round_1_then_side_round_2(self):
+        """W40 review round 1, should-fix 1: R1 writes round 1 `merge`; R2 writes round 2 on a side branch; R1 commits code on the job branch without
+        having seen it, and merges the side branch (an ordinary `git pull`). The log then lists the code before R2's review commit, though R2 never saw it."""
+        self.git('checkout', '-q', '-B', 'job/J1', 'main')
+        self.commit('jobs/J1/report.md', 'report', 'S1')
+        one = rv((1, 'merge'))
+        self.commit(REV, one, 'R1')
+        self.git('checkout', '-q', '-b', 'side')
+        self.commit(REV, rv((2, 'merge'), (1, 'merge')), 'R2')
+        self.git('checkout', '-q', 'job/J1')
+        self.commit('late.py', 'x = 1\n', 'R1')
+        late = self.sha()
+        self.git('merge', '-q', '--no-edit', 'side')
+        return late
+
+    def rule_a(self):
+        cfg, main, head = {**CFG, 'reviewer_code': 'error'}, self.sha('main'), self.sha()
+        review = (Path(self.d) / REV).read_text(encoding='utf-8')
+        return pp.round_problems('J1', cfg, pp.GitReads(self.d, main, head, main, 'Claude-Session'), {'S1'}, review)
+
+    def test_w40_code_a_fresh_round_never_saw_is_not_cleared_by_its_place_in_the_log(self):
+        late = self.round_1_then_side_round_2()
+        order = subprocess.run(['git', 'log', '--reverse', '--topo-order', '--format=%H', 'main..HEAD'], cwd=self.d, check=True, capture_output=True, text=True).stdout.split()
+        self.assertLess(order.index(late), order.index(self.sha('side')))   # the trap: first in the log, and not an ancestor
+        errs, warns = self.rule_a()
+        self.assertEqual(warns, [])
+        self.assertTrue(len(errs) == 1 and late[:12] in errs[0] and 'late.py' in errs[0], errs)
+
+    def test_w40_a_fresh_round_on_top_of_the_merge_clears_that_code(self):
+        self.round_1_then_side_round_2()
+        self.commit(REV, rv((3, 'merge'), (2, 'merge'), (1, 'merge')), 'R3')
+        self.assertEqual(self.rule_a(), ([], []))
+
+    def test_w40_a_fresh_round_clears_the_code_it_descends_from(self):
+        self.git('checkout', '-q', '-B', 'job/J1', 'main')
+        self.commit('jobs/J1/report.md', 'report', 'S1')
+        self.commit(REV, rv((1, 'merge')), 'R1')
+        self.commit('code.py', 'x = 1\n', 'R1')
+        self.commit(REV, rv((2, 'merge'), (1, 'merge')), 'R2')
+        self.assertEqual(self.rule_a(), ([], []))
 
     def test_rows_at_reads_either_layout_the_same(self):
         dir_rows = pp_rows_at(self.d, 'main')
