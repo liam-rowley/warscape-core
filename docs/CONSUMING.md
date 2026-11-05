@@ -213,11 +213,11 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   `GestureAdapter` passes steps 6 and 7 on the inert path (the log says "no adapter"), and step 8 peeks the first engine site in the game's
   generated tables (a game with no engine sites checks the stale request only). The core proves both paths: the null game, and the fixture
   `proxy/tests/null_game_no_gesture`.
-- **Settings only the owner can make** (no verb changes a repository setting): require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
+- **Settings only the owner can make:** require the checks `gates` (and `proxy`, `harness-windows` or whatever slow
   jobs the repo has) and `policy` on `main`, allow auto-merge, require no approving review (one account cannot approve its own pull request), and set `WARSCAPE_CORE_TOKEN` (or the `[ci] token_secret` name) only if the core is private.
   Until required checks exist, `gh pr merge --auto` has nothing to wait for and merges at once. `wsc ci check-settings [--repo owner/name]` reads them
-  (`gh api` GETs only) against the workflows and `[ci] required_checks` and names each one missing (exit 1; 2 when it cannot read them). A matrix job's
-  checks are named per value (`gates (ubuntu-latest)`): list those in `required_checks`.
+  against the workflows and `[ci] required_checks` and names each one missing (exit 1; 2 when it cannot read them). List a matrix job's checks per value
+  (`gates (ubuntu-latest)`); one that can be skipped must be a plain job with that `name:`: a skipped matrix reports only its id.
 - **Upgrading from a repo that has its own pipeline** (napoleon J62): move the texts into `[jobs.text]`, the rules that are not generic into a gate module,
   turn each workflow into `ci/<name>.in`, run `wsc ci render`, delete the local copies in the same pull request as the pin bump (B9: the pin and `wsc.toml` version in one commit).
 

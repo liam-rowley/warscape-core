@@ -6,6 +6,7 @@ as `wsc ci notify` (warscape/ci.py `gh`). The settings are the owner's; this onl
   empty, every job id of the workflows in `[ci] workflows` but `changes` and `notify`. A matrix job reports one check per value
   (`gates (ubuntu-latest)`), which cannot be known without a YAML parser: it is named for `[ci] required_checks` instead of guessed;
 - every required check must be produced by a workflow job (a renamed job's old check never reports, so every merge waits for it);
+- a required check must not come from a matrix job with a job-level `if:`: skipped, it reports its bare id, never `<id> (<value>)` (W42, run 42118898100);
 - `allow_auto_merge` must be on (`gh pr merge --auto` has nothing to wait for otherwise);
 - issues must be enabled (`wsc ci main-health` opens one per red required job on main);
 - no rule may require approving reviews (one account cannot approve its own pull request: the pipeline's merges stall).
@@ -22,16 +23,20 @@ from . import ci
 SKIP = ci.SKIP   # changes, notify, main_health (W22): not required checks
 
 
-def workflow_jobs(text):
-    """[(job id, check name or None, is matrix)] of one workflow: the two-space keys under `jobs:`. The check name is the job's
-    `name:` when it has a plain one, else its id; None when GitHub names it per matrix value or by an expression."""
+def job_blocks(text):
+    """[(job id, its text)] of one workflow: the two-space keys under `jobs:`."""
     m = re.search(r'^jobs:\s*$', text, re.M)
     if not m:
         return []
-    body = text[m.end():]
-    parts = re.split(r'^  ([A-Za-z0-9_-]+):\s*$', body, flags=re.M)
+    parts = re.split(r'^  ([A-Za-z0-9_-]+):\s*$', text[m.end():], flags=re.M)
+    return list(zip(parts[1::2], parts[2::2]))
+
+
+def workflow_jobs(text):
+    """[(job id, check name or None, is matrix)] of one workflow. The check name is the job's `name:` when it has a plain one, else its id; None
+    when GitHub names it per matrix value or by an expression."""
     out = []
-    for jid, block in zip(parts[1::2], parts[2::2]):
+    for jid, block in job_blocks(text):
         matrix = re.search(r'^      matrix:', block, re.M) is not None
         nm = re.search(r'^    name:\s*(.+?)\s*$', block, re.M)
         name = nm.group(1).strip('\'"') if nm else jid
@@ -46,6 +51,17 @@ def read_jobs(cfg, root):
         if f.is_file():
             jobs += workflow_jobs(f.read_text(encoding='utf-8'))
     return jobs
+
+
+def skippable_matrix_jobs(cfg, root):
+    """The ids of the matrix jobs with a job-level `if:` (W42): `if:` cannot see `matrix`, so such a job is skipped whole."""
+    out = []
+    for n in cfg['workflows']:
+        f = Path(root) / '.github' / 'workflows' / n
+        if f.is_file():
+            out += [jid for jid, block in job_blocks(f.read_text(encoding='utf-8'))
+                    if re.search(r'^      matrix:', block, re.M) and re.search(r'^    if:', block, re.M)]
+    return out
 
 
 def produced(check, jobs):
@@ -101,8 +117,8 @@ def read_settings(repo, branch, run):
     return s
 
 
-def findings(cfg, jobs, s, branch):
-    """[(level, text)]: 'problem' or 'note'."""
+def findings(cfg, jobs, s, branch, skippable=()):
+    """[(level, text)]: 'problem' or 'note'. `skippable`: skippable_matrix_jobs."""
     out = []
     explicit = list(cfg.get('required_checks') or [])
     if explicit:
@@ -124,6 +140,11 @@ def findings(cfg, jobs, s, branch):
         if not produced(r, jobs):
             out.append(('problem', f'required check `{r}` ({s["where"].get(r, "ruleset")}) is produced by no workflow job in [ci] workflows: '
                                    'it never reports, so every merge waits for it (a renamed job?)'))
+    for jid in skippable:
+        for r in s['required']:
+            if r.startswith(f'{jid} ('):
+                out.append(('problem', f'required check `{r}` comes from matrix job `{jid}`, which has a job-level `if:`: skipped, it reports `{jid}` and `{r}` '
+                                       'never reports, so every merge waits for it; make it a plain job with that `name:`'))
     if not s['auto_merge']:
         out.append(('problem', 'allow_auto_merge is false: `gh pr merge --auto` has nothing to wait for (Settings, General, "Allow auto-merge")'))
     if s.get('issues') is False:
@@ -175,7 +196,7 @@ def check(cfg, root, repo='', branch='main', run=subprocess.run, out=print):
         f'{str(s["auto_merge"]).lower()}; {classic}')
     out(f'check-settings: workflow checks {", ".join(n or f"{j} (matrix)" for j, n, _ in jobs if j not in SKIP) or "none"} '
         f'([ci] workflows); expected {", ".join(cfg.get("required_checks") or []) or "derived from the workflows"}')
-    fs = findings(cfg, jobs, s, branch)
+    fs = findings(cfg, jobs, s, branch, skippable_matrix_jobs(cfg, root))
     for level, text in fs:
         out(f'{level}: {text}')
     for line in manual_lines(cfg):
