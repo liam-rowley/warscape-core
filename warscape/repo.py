@@ -85,6 +85,7 @@ DEFAULTS = {
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
         'decisions_cite_job': False,       # a decisions row added on job/<id> must contain <id>, the brief that required it (core W27 rule F)
+        'reviewer_code': 'warn',           # rule A (core W27, W40): reviewer code under a `merge` verdict warns, or with "error" refuses
         'workflow_paths': ['.github/workflows/**', 'ci/**'],   # a job's change to one of these that its brief on the base does not name warns (core W36); [] = off
         'bases': ['main'],                 # the branches a pull request may target, as origin/<name>; [] = any (core W36)
         'thin_merge_lines': 500,           # a `merge` on more changed lines than this outside jobs/ and the registries...
@@ -202,6 +203,8 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: release.consumers must list tables with name, repo, adapter and ref')
     if not isinstance(cfg['policy']['decisions_cite_job'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
+    if cfg['policy']['reviewer_code'] not in ('warn', 'error'):
+        raise ConfigError(f'{CONFIG_NAME}: policy.reviewer_code must be "warn" or "error"')
     for k in ('workflow_paths', 'bases'):
         if not isinstance(cfg['policy'][k], list) or not all(isinstance(x, str) and x for x in cfg['policy'][k]):
             raise ConfigError(f'{CONFIG_NAME}: policy.{k} must be a list of non-empty strings')

@@ -148,18 +148,19 @@ failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside eac
 claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
-decisions = "docs/DECISIONS.md"    # append-only rows | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
+decisions = "docs/DECISIONS.md"    # append-only: | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
 decision_prefix = "D"
-bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
-session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
+bootstrap = []                     # names exempt from the branch-kind rules: only the PR that adds the pipeline
+session_trailer = "Claude-Session" # who wrote the report may not write the review; "" turns this and rules A-E off
 decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
+reviewer_code = "warn"             # W40 rule A: "error" refuses reviewer code under `merge`: a pin bump sets it, once open `merge` rounds are done
 workflow_paths = [...]             # W36: a job's change here its brief does not name warns; [] = off
-bases = ["main"]                   # W36: a pull request into another branch is refused; [] = any
-thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
-plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
+bases = ["main"]                   # W36: a pull request to another branch is refused; [] = any
+thin_merge_lines = 500             # W27 rule E: a `merge` past this (or thin_merge_files = 20) outside jobs/ and registries, no evidence, warns
+plan = [...]                       # globs a plan/* branch may touch (* in one folder, ** across); meta = [...] for meta/*
 [ci]
-inputs = { ... }                   # set name -> regex: the paths that make that slow job run (`wsc ci inputs`)
-workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate fails on a difference
+inputs = { ... }                   # set name -> regex: paths that run that slow job (`wsc ci inputs`)
+workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate checks
 required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.22.0)
 ```
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
@@ -262,9 +263,9 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   4. Tests in the game's `tests/` that load the file by path or call the old names: `test_jobs_hooks.py` (module path, the three source-text reads, the
      renamed functions), `test_build_id.py`, `test_registry_merge.py`, `test_repo_rules.py` (`MOVED_ALLOWED` key and the loader), `test_usage_reader.py`
      (`sys.path` gains `tools/gates`, `import pipeline as hk`), `test_proxy_host.py`.
-  5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside dated job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
+  5. Living docs: `git grep -n "jobs_hooks\|hook module\|policy_problems"` outside job folders (`CLAUDE.md`, `docs/REVIEW.md`, `harness/README.md`,
      `docs/plans/PLAN.md`, the `wsc.toml` comments).
-  6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: the `jobs check` line and the page's PC block read as before.
+  6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: `jobs check` and the page's PC block read as before.
 
 ## Review integrity (0.35.0, core W27, C30)
 `wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
