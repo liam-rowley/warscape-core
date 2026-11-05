@@ -72,3 +72,17 @@ Nothing is forced; the defaults apply when the keys are absent.
 Pin bump: a new build id (`build.sh` changed: 20 passes); delete game verbs named `crash` or `agent-settings`; put `{{wsc proxy_map step=dll}}`
 after the proxy build step (give it `id: dll`) and `wsc ci render`; attach `d3d9.map` and `d3d9.map.json` to each release; set `[agent_settings] safe` (`exact_only = true`: only those rules).
 What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROXY_HARNESS.md](PROXY_HARNESS.md) "Guarded verbs".
+
+## DLL changes in 0.40.0 (W39)
+- **New key `proxy.dxvk_wndproc_fix`** (bool, JSON `true` in the row, so `default` and `release_value` render as 1; owner `proxy`). Add the row to
+  `registries/config_keys`, then `gen_tables.py`; without it the host tests fail and name the key. Every game that builds the proxy needs the row: the
+  test reads the core's key list, not the game's backend.
+- **Behaviour:** with DXVK loaded, its own `GetWindowLong`/`SetWindowLong` (W and A) import slots go through a guard, so a window proc stacked above
+  DXVK's is dropped at a fullscreen re-entry and cannot close a cycle with it (a stack overflow at an in-game resolution change). The key at 0 patches
+  nothing and warns. Nothing changes under the system d3d9. A new DLL input: the build id changes, so the acceptance passes run again.
+- **New log lines:** `backend: wndproc guard on DXVK's imports: <n> slots`, then a warning `backend: wndproc guard patched <n> of 4 slots: ...` if a DXVK build imports fewer, `wndproc guard: DXVK hooked|restored window ...`
+  per set, `wndproc guard: window ... above DXVK's proc ...` naming the dropped module, `backend: proxy.dxvk_wndproc_fix=0: ...` with the key off.
+- **New tool:** `proxy/tools/dump_read.py` reads a dump with cdb (stack against its limit, the repeating frame cycle, graphics modules). A game
+  retires its own copy's `tools` row at the bump.
+- **Proof on a PC:** host tests model the switches; only the game shows the fix works. After the bump, change the resolution in the game with the key on
+  and read the log lines above. The wine smoke has no DXVK window, so it cannot.
