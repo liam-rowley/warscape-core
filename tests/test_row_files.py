@@ -291,10 +291,11 @@ class Later(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIsNone(J.not_ready('brief', 'W7', {'W7': {**LATER, 'status': 'needs_brief'}}, set()))
 
-    def test_find_resolves_the_old_number(self):
+    def test_find_resolves_the_old_number_ahead_of_a_row_that_cites_it(self):
+        self.repo.write('registries/jobs/W1.json', json.dumps({**LATER, 'id': 'W1', 'description': 'Covers B96 and B96.', 'backlog_id': 'B2'}, indent=2) + '\n')
         rc, out = self.repo.wsc('find', 'B96')
         self.assertEqual(rc, 0, out)
-        self.assertIn('W7', out)
+        self.assertLess(out.index('W7'), out.index('W1'))
 
 
 class LaterImport(unittest.TestCase):
