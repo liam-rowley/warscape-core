@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from warscape import ci, ci_render  # noqa: E402
+from warscape import ci, ci_render, ci_settings  # noqa: E402
 from warscape.repo import DEFAULTS  # noqa: E402
 
 WF = r'^\.github/workflows/'
@@ -534,14 +534,73 @@ class CoreConfig(unittest.TestCase):
                  'proxy/tests/host/t.cpp': {'proxy'}, 'harness/watcher.ps1': {'harness'}, 'tests/test_moved_tools.py': {'harness'},
                  'warscape/ci.py': {'harness'}, 'ci/gates.yml.in': {'proxy', 'harness'}, '.github/workflows/gates.yml': {'proxy', 'harness'},
                  'wsc.toml': {'proxy', 'harness'}}
+        paper = ('docs/', 'jobs/', 'registries/jobs/', 'README.md')
         for path, want in cases.items():
             got = {k for k, v in ci.classify([path], self.sets).items() if v}
-            self.assertEqual(got, want, path)
+            self.assertEqual(got, want if path.startswith(paper) else want | {'gates_windows'}, path)
+
+    def test_gates_windows_skips_paperwork_only(self):   # W42
+        def runs(*files):
+            return ci.classify(list(files), self.sets)['gates_windows']
+        paper = ['docs/X.md', 'docs/a/b.md', 'jobs/W1/brief.md', 'jobs/W1/review.md', 'registries/jobs/W1.json', 'README.md', 'CLAUDE.md']
+        for f in paper:
+            self.assertFalse(runs(f), f)
+        self.assertFalse(runs(*paper))
+        code = ['warscape/ci.py', 'tests/test_ci.py', 'wsc.toml', 'wsc.py', 'ci/gates.yml.in', '.github/workflows/gates.yml', 'registries/tools.jsonl',
+                'schemas/x.json', 'README.md.bak', 'CLAUDE.md.txt', 'proxy/docs/x.md', 'VERSION']
+        for f in code:
+            self.assertTrue(runs(f), f)
+            self.assertTrue(runs('docs/X.md', f), f)
+        self.assertTrue(ci.classify(None, self.sets)['gates_windows'])   # an unknown base runs everything
 
     def test_required_checks_and_no_artifacts(self):
         self.assertEqual(self.cfg['required_checks'], ['gates (ubuntu-latest)', 'gates (windows-latest)', 'policy', 'proxy', 'harness-windows'])
         self.assertEqual(self.cfg['artifacts'], {})
         self.assertEqual(DEFAULTS['ci']['required_checks'], [])
+
+
+class CoreGatesJobs(unittest.TestCase):
+    """W42: the committed gates workflow. A job-level `if:` cannot see `matrix`, so the Windows gates are a plain job whose `name:` is the check
+    main requires: it has to report under that name when skipped."""
+    @classmethod
+    def setUpClass(cls):
+        from warscape.repo import Ctx
+        cls.cfg = Ctx.load(ROOT).config['ci']
+        cls.text = (ROOT / '.github' / 'workflows' / 'gates.yml').read_text(encoding='utf-8')
+
+    def job(self, jid):
+        return re.search(rf'^  {jid}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)', self.text, re.M | re.S).group(1)
+
+    def test_every_required_check_is_produced_and_the_gates_checks_are_plain_names(self):
+        jobs = ci_settings.read_jobs(self.cfg, ROOT)
+        for check in self.cfg['required_checks']:
+            self.assertTrue(ci_settings.produced(check, jobs), check)
+        plain = {name: jid for jid, name, matrix in jobs if not matrix}
+        self.assertEqual(plain.get('gates (ubuntu-latest)'), 'gates')
+        self.assertEqual(plain.get('gates (windows-latest)'), 'gates-windows')
+
+    def test_the_limit_is_20_minutes_on_both(self):
+        for jid in ('gates', 'gates-windows'):
+            self.assertIn('    timeout-minutes: 20\n', self.job(jid), jid)
+
+    def test_ubuntu_starts_at_once_and_always_runs(self):
+        job = self.job('gates')
+        self.assertNotIn('    needs:', job)
+        self.assertNotIn('    if:', job)
+        self.assertIn('runs-on: ubuntu-latest', job)
+
+    def test_windows_keeps_the_fail_safe_and_the_pass_marker(self):
+        job = self.job('gates-windows')
+        self.assertIn('    needs: changes\n', job)
+        self.assertIn('runs-on: windows-latest', job)
+        self.assertIn("!cancelled()", job)
+        self.assertIn("needs.changes.result != 'success' || needs.changes.outputs.gates_windows == 'true'", job)
+        self.assertIn('python wsc.py gates', job)
+        self.assertIn('key: ci-pass-${{ needs.changes.outputs.tree_salt }}-gates_windows-', job)
+
+    def test_notify_and_main_health_wait_for_it(self):
+        for jid in ('notify', 'main_health'):
+            self.assertRegex(self.job(jid), r'needs: \[[^\]]*\bgates-windows\b', jid)
 
 
 # ------------------------------------------------------------------ check-settings (W21, backlog B47): recorded `gh api` answers, 2026-11-03
@@ -657,6 +716,20 @@ class CheckSettings(unittest.TestCase):
         rc, out = self.go(CORE_ANSWERS, CORE_WF)
         self.assertIn('matrix job gates: list its checks in [ci] required_checks', out)
         self.assertFalse(any('`gates' in p for p in self.problems(out)), out)
+
+    def test_a_required_matrix_job_with_a_job_level_if_is_a_problem(self):   # W42: a skipped matrix reports `gates`, so `gates (<value>)` never does
+        def about_if(wf):
+            return [p for p in self.problems(self.go(CORE_ANSWERS, wf, CORE_REQUIRED)[1]) if 'job-level `if:`' in p]
+        guarded = {**CORE_WF, 'gates.yml': CORE_WF['gates.yml'].replace('  gates:\n', '  gates:\n    if: github.ref != 1\n')}
+        ubuntu, windows = about_if(guarded)   # one per required check of the job
+        self.assertIn('`gates (ubuntu-latest)`', ubuntu)
+        self.assertIn('`gates (windows-latest)`', windows)
+        self.assertIn('plain job', windows)
+        self.assertEqual(about_if(CORE_WF), [])
+        step_if = {**CORE_WF, 'gates.yml': CORE_WF['gates.yml'].replace('        os: [a, b]\n', '        os: [a, b]\n    steps:\n      - if: x\n        run: y\n')}
+        self.assertEqual(about_if(step_if), [])   # a step's `if:` skips no job
+        unrequired = {**CORE_WF, 'gates.yml': guarded['gates.yml'].replace('  gates:\n', '  other:\n')}
+        self.assertEqual(about_if(unrequired), [])
 
     def test_issues_disabled_is_a_problem_and_enabled_or_unreported_is_not(self):
         off = {**GAME_ANSWERS, 'repos/o/game': (0, json.dumps({'allow_auto_merge': True, 'has_issues': False}), '')}

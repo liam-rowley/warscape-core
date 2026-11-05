@@ -3,10 +3,20 @@
   "description": "Liam, 2026-11-05, maximum priority: CI is slowing the work down. Measured that day on core: gates (windows-latest) median 9.2 min against 1.9 on ubuntu for the same gates (test step 568 s against 112 s), and at its 10-minute limit: run 42111361880 on docs-only PR #124 was cancelled at 10:00 with no fault. Three changes in ci/gates.yml.in and what renders it, in one job: (1) raise the gates job's timeout-minutes to 20; (2) a change touching only docs (the `changes` job already decides per input tree) does not run gates on Windows, and `gates (windows-latest)` must still satisfy the required check, so check how a skipped matrix leg reports before relying on it (`required_checks` in wsc.toml; `wsc ci check-settings`); (3) B99: netfetch.ci_cache keys on the pins the fetchers read, not the whole UI pin file, so an unrelated key does not empty the cache (napoleon J80, run 42049420263: a Playwright pin sent CI to live lua.org downloads, which timed out; remove B99's row when done). Keep the fail-safe: a slow job runs whenever `changes` did not succeed. Consumers get it through a pin bump.",
   "title": "Faster CI: Windows gates off docs-only changes, a 20-minute limit, a narrower fetch cache key",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",
   "depends_on": [],
-  "brief": "jobs/W42/brief.md"
+  "brief": "jobs/W42/brief.md",
+  "report": "jobs/W42/report.md",
+  "review": "jobs/W42/review.md",
+  "budget_lifts": [
+    {
+      "date": "2026-11-05",
+      "from": 60,
+      "to": 90,
+      "why": "The session's worktree guard refused compound shell commands, so each git add, commit and render was its own call; the probe and decision 6 added more. The code was finished and green when the cap passed."
+    }
+  ]
 }

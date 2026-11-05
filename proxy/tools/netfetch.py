@@ -33,6 +33,7 @@ import layout  # noqa: E402
 TRIES = 4
 DELAYS = (5, 15, 45)
 EOF_MARK = 'NETFETCH_EOF'
+FETCHED = ('repo', 'commit', 'url', 'sha256')   # the fields of a UI pin fetch_ui.py reads
 
 
 def transient(e):
@@ -83,16 +84,29 @@ def _git_ok(d):
         return False
 
 
+def fetched_pins(raw):
+    """The bytes of a UI pin file that decide what fetch_ui.py downloads (W42, B99): the FETCHED fields of its KEYS, so a key or a note no fetcher
+    reads leaves the cache warm. A file that is not the expected shape gives its own bytes: the key still moves, and the fetcher reports the fault."""
+    import fetch_ui
+    try:
+        pins = json.loads(raw)
+    except ValueError:
+        return raw
+    if not isinstance(pins, dict) or not all(isinstance(pins.get(k, {}), dict) for k in fetch_ui.KEYS):
+        return raw
+    return json.dumps({k: {f: pins[k][f] for f in FETCHED if f in pins[k]} if k in pins else None for k in fetch_ui.KEYS}, sort_keys=True).encode()
+
+
 def ci_cache(root=None, cwd=None):
-    """The $GITHUB_OUTPUT text: `key=` sha256 of the three pins (fetch_lua.PIN, the UI pin file's bytes, fetch_dxvk.PIN) and the
+    """The $GITHUB_OUTPUT text: `key=` sha256 of the three pins (fetch_lua.PIN, fetched_pins of the UI pin file, fetch_dxvk.PIN) and the
     multi-line `paths` of the raw downloads, relative to `cwd` (default: the working directory)."""
     import fetch_dxvk
     import fetch_lua
     root = Path(root) if root else layout.game_root()
     pins = layout.ui_pins(root)
-    h = hashlib.sha256(b'netfetch 1\n')
+    h = hashlib.sha256(b'netfetch 2\n')
     h.update(json.dumps(fetch_lua.PIN, sort_keys=True).encode() + b'\n')
-    h.update(pins.read_bytes() if pins.is_file() else b'no ui pin file\n')
+    h.update(fetched_pins(pins.read_bytes()) if pins.is_file() else b'no ui pin file\n')
     h.update(b'\n' + json.dumps(fetch_dxvk.PIN, sort_keys=True).encode() + b'\n')
     here = Path(cwd) if cwd else Path.cwd()
     paths = [root / 'build' / 'downloads', root / 'build' / 'ui' / 'src' / 'downloads', root / 'build' / 'ui' / 'src' / 'rmlui',
