@@ -1,7 +1,7 @@
 ## Round 1 (2026-11-05, branch job/W34 at 994178b)
 **Verdict: merge.**
 
-No blocker and no should-fix. Five later items, filed as B88 to B92 on `plan/W34-review-later`. This round changes nothing outside the job folder and the row.
+No blocker and no should-fix. Five later items, filed as B90 to B94 on `plan/W34-review-later`. This round changes nothing outside the job folder and the row.
 
 **One decision for Liam, not a defect:** the ctl folder's ACE names the game's user SID, not `OW` as decision 15 said. The report names it and I agree with it (below), but it replaces a stated decision, and C36 records the new form.
 
@@ -41,9 +41,9 @@ Not provable here, as the brief says: Alt+F4 in a real window. Napoleon's pin-bu
 ### Findings
 No blocker, no should-fix.
 
-**Later** (B88 to B92 on `plan/W34-review-later`):
-1. **No CI run installs a hook yet.** C5's hook half stays open (`proxy/tests/null_game/registries/engine_sites.jsonl`: the plan checks `null.dummy_hook`, nothing detours it). The brief's open question 5 expects a follow-up row and none existed. B88.
-2. **The flaky test went red on this branch.** `tests/test_job_sh.py` `test_lock_wait_takes_a_lock_released_meanwhile_and_times_out_with_124`; `harness/job.sh:204` sets its deadline from whole seconds, so `--wait 3` can end after about 2.06 s. See run 41934314012. B89.
-3. **`--exe` can say `MATCH` where the DLL refuses.** `proxy/tools/gen_tables.py` `site_line` does not read `.reloc`, so a patch value over a relocated dword reads `MATCH` and fails as `RELOCATED VALUE` on the PC. Documented in `docs/UPGRADING.md`, but it could be a check. B90.
-4. **The core's own text disagrees on designated initialisers.** `proxy/tests/null_game/proxy/null/adapter.cpp:27` says "the designated form is C++20"; `docs/CONSUMING.md:296` says it compiles under the DLL's `-std=c++17`, and napoleon's `adapter.cpp:60` already does it for `DevAdapter`. The `static_assert` message tells people to use a form the core's adapters do not show. B91.
-5. **Two smoke gaps.** The every-500 rotation (`proxy/src/dev.cpp:576`) is a source lint, never run, as the report says. And `--docker smoke` now runs non-root but `proxy/tools/build.sh:407` still copies into `$OUT`: fine on the PC's bind mount, and by reading it would fail on a Linux host where `--docker all` left `$OUT` root-owned (not run). B92.
+**Later** (B90 to B94 on `plan/W34-review-later`):
+1. **No CI run installs a hook yet.** C5's hook half stays open (`proxy/tests/null_game/registries/engine_sites.jsonl`: the plan checks `null.dummy_hook`, nothing detours it). The brief's open question 5 expects a follow-up row and none existed. B90.
+2. **The flaky test went red on this branch.** `tests/test_job_sh.py` `test_lock_wait_takes_a_lock_released_meanwhile_and_times_out_with_124`; `harness/job.sh:204` sets its deadline from whole seconds, so `--wait 3` can end after about 2.06 s. See run 41934314012. B91.
+3. **`--exe` can say `MATCH` where the DLL refuses.** `proxy/tools/gen_tables.py` `site_line` does not read `.reloc`, so a patch value over a relocated dword reads `MATCH` and fails as `RELOCATED VALUE` on the PC. Documented in `docs/UPGRADING.md`, but it could be a check. B92.
+4. **The core's own text disagrees on designated initialisers.** `proxy/tests/null_game/proxy/null/adapter.cpp:27` says "the designated form is C++20"; `docs/CONSUMING.md:296` says it compiles under the DLL's `-std=c++17`, and napoleon's `adapter.cpp:60` already does it for `DevAdapter`. The `static_assert` message tells people to use a form the core's adapters do not show. B93.
+5. **Two smoke gaps.** The every-500 rotation (`proxy/src/dev.cpp:576`) is a source lint, never run, as the report says. And `--docker smoke` now runs non-root but `proxy/tools/build.sh:407` still copies into `$OUT`: fine on the PC's bind mount, and by reading it would fail on a Linux host where `--docker all` left `$OUT` root-owned (not run). B94.
