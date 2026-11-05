@@ -329,14 +329,65 @@ class Fetchers(unittest.TestCase):
             self.assertFalse(any(l.endswith(patched) for l in lines), patched)
         key = lines[0]
         self.assertEqual(netfetch.ci_cache(cwd=self.game.parent).splitlines()[0], key)   # stable
-        pins = self.game / 'viewer' / 'pins.json'
-        pins.write_bytes(pins.read_bytes() + b'\n')
-        self.assertNotEqual(netfetch.ci_cache(cwd=self.game.parent).splitlines()[0], key)   # a UI pin edit
-        pins.write_bytes(pins.read_bytes()[:-1])
         for mod in (fetch_lua, fetch_dxvk):
             with mock.patch.dict(mod.PIN, {'version': 'other'}):
                 self.assertNotEqual(netfetch.ci_cache(cwd=self.game.parent).splitlines()[0], key, mod.__name__)
         self.assertEqual(netfetch.ci_cache(cwd=self.game).splitlines()[2], 'build/downloads')
+
+    def key(self):
+        return netfetch.ci_cache(cwd=self.game.parent).splitlines()[0]
+
+    def edit(self, fn):
+        """The key with the pin file changed by fn(pins); the file is put back."""
+        f = self.game / 'viewer' / 'pins.json'
+        before = f.read_bytes()
+        pins = json.loads(before)
+        fn(pins)
+        f.write_text(json.dumps(pins, indent=1), encoding='utf-8')
+        try:
+            return self.key()
+        finally:
+            f.write_bytes(before)
+
+    def test_ci_cache_ignores_what_no_fetcher_reads(self):   # W42, B99: napoleon J80's playwright key emptied the cache
+        key = self.key()
+        f = self.game / 'viewer' / 'pins.json'
+        before = f.read_bytes()
+        f.write_bytes(before + b'\n')
+        self.assertEqual(self.key(), key)   # the bytes, not the pins
+        f.write_bytes(before)
+        for name, fn in {'_doc': lambda p: p.update(_doc='other'), 'a new key': lambda p: p.update(playwright={'version': '1', 'sha256': 'x'}),
+                         'why': lambda p: p['rmlui'].update(why='other'), 'licence': lambda p: p['lua'].update(licence='other'),
+                         'version': lambda p: p['stb_image'].update(version='9'), 'tag': lambda p: p['freetype'].update(tag='other')}.items():
+            self.assertEqual(self.edit(fn), key, name)
+
+    def test_ci_cache_moves_on_what_a_fetcher_reads(self):   # W42, B99
+        key = self.key()
+        seen = {key}
+        for name, fn in {'rmlui commit': lambda p: p['rmlui'].update(commit='0' * 40), 'rmlui repo': lambda p: p['rmlui'].update(repo='other'),
+                         'freetype commit': lambda p: p['freetype'].update(commit='1' * 40), 'lua url': lambda p: p['lua'].update(url='other'),
+                         'lua sha256': lambda p: p['lua'].update(sha256='2' * 64), 'stb_image sha256': lambda p: p['stb_image'].update(sha256='3' * 64),
+                         'stb_image_write url': lambda p: p['stb_image_write'].update(url='other'), 'a removed key': lambda p: p.pop('stb_image_write'),
+                         'a removed field': lambda p: p['lua'].pop('sha256')}.items():
+            got = self.edit(fn)
+            self.assertNotIn(got, seen, name)
+            seen.add(got)
+
+    def test_ci_cache_fails_safe_on_a_bad_or_missing_pin_file(self):   # W42: a bad file still moves the key, and the fetcher reports the fault
+        key = self.key()
+        f = self.game / 'viewer' / 'pins.json'
+        before = f.read_bytes()
+        keys = set()
+        for bad in (b'{not json', b'{not json either', b'[1, 2]', b'{"rmlui": 1, "lua": null}', b'\xff\xfe'):
+            f.write_bytes(bad)
+            keys.add(self.key())
+        self.assertEqual(len(keys), 5)
+        self.assertNotIn(key, keys)
+        f.unlink()
+        missing = self.key()
+        self.assertNotIn(missing, keys | {key})
+        f.write_bytes(before)
+        self.assertEqual(self.key(), key)
 
 
 class Dxvk(unittest.TestCase):
