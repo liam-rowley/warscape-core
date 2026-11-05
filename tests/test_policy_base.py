@@ -220,6 +220,65 @@ class CoreMode(Branches, unittest.TestCase):
         verdict = [i for i, l in enumerate(lines) if l.startswith('policy: job/W900: ok')]
         self.assertTrue(warn and verdict and warn[0] < verdict[0], out)
 
+    # ------------------------------------------------------------ W36: through the CLI, as CI runs it
+    W36_WF = '.github/workflows/fake.yml'
+    W36_WARN = f"policy: warning: `{W36_WF}` is a workflow input and W900's brief on the base does not name it"
+
+    def w36_job(self, extra):
+        return self.w27_job([('S1', extra), ('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge')})])
+
+    def test_w36_a_head_that_adds_an_unnamed_workflow_is_warned_about(self):
+        rc, out, err = self.w36_job({self.W36_WF: 'name: policy\n'})
+        self.assertEqual(rc, 0, out + err)   # a warning: the scan of the merged job branches (the brief's kill criterion)
+        self.assertIn(self.W36_WARN, out)
+
+    def test_w36_the_heads_own_workflow_paths_do_not_silence_it(self):
+        off = self.toml().replace('workflow_paths = [".github/workflows/**", "ci/**"]', 'workflow_paths = []')
+        self.assertNotEqual(off, self.toml())
+        rc, out, err = self.w36_job({self.W36_WF: 'name: policy\n', 'wsc.toml': off})
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(self.W36_WARN, out)   # the base's config judges (C24)
+
+    def test_w36_a_brief_on_the_head_names_nothing(self):
+        out = self.w36_job({self.W36_WF: 'name: policy\n', 'jobs/W900/brief.md': f'# W900: a test job\n\n`{self.W36_WF}`\n'})[1]
+        self.assertIn(self.W36_WARN, out)   # only the brief on the base counts
+
+    def w36_base(self, name, toml=None):
+        """A branch `name` of main, known as origin/<name>, and meta/w36 cut from it."""
+        self.branch(name, {'wsc.toml': toml if toml is not None else self.toml() + '\n'})
+        git(self.d, 'update-ref', f'refs/remotes/origin/{name}', name)
+        self.branch('meta/w36', {'docs/w36.md': 'x\n'}, start=name)
+
+    def test_w36_a_pull_request_into_another_branch_is_refused(self):
+        for name in ('feature', 'stack/one'):
+            self.w36_base(name)
+            res = self.policy('meta/w36', f'origin/{name}')
+            self.assertRefused(res, f'origin/{name}', '`[policy] bases`', 'retarget the pull request to main', 'policy: meta/w36: REFUSED (not judged)')
+            self.assertNotIn('judged with the rules', res[1])   # nothing of the head was read, no child ran
+
+    def test_w36_main_and_a_sha_are_judged_as_before(self):
+        self.branch('meta/w36', {'docs/w36.md': 'x\n'})
+        for base in ('origin/main', self.sha('main'), 'main'):
+            rc, out, err = self.policy('meta/w36', base)
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn('judged with the rules', out)
+
+    def test_w36_the_bases_own_list_decides(self):
+        for name, value in (('open', 'bases = []'), ('listed', 'bases = ["main", "listed"]')):
+            self.w36_base(name, self.toml().replace('bases = ["main"]', value))
+            rc, out, err = self.policy('meta/w36', f'origin/{name}')
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn(f'judged with the rules of origin/{name}', out)
+
+    def test_w36_a_heads_bases_key_does_not_open_a_base(self):
+        self.w36_base('feature')
+        self.branch('meta/w36', {'wsc.toml': self.toml().replace('bases = ["main"]', 'bases = []')}, start='feature')
+        self.assertRefused(self.policy('meta/w36', 'origin/feature'), '`[policy] bases`')
+
+    def test_w36_a_bad_bases_value_on_the_base_fails_closed(self):
+        self.w36_base('feature', self.toml().replace('bases = ["main"]', 'bases = "main"'))
+        self.assertRefused(self.policy('meta/w36', 'origin/feature'), '[policy] bases is not a list')
+
     def test_bypass_1_a_bootstrap_entry_on_the_head_exempts_nothing(self):
         self.branch('foo', {'wsc.toml': self.toml().replace('[policy]\n', '[policy]\nbootstrap = ["foo"]\n'), 'warscape/extra.py': 'X = 1\n'})
         for res in (self.ci('foo'), self.local('foo')):

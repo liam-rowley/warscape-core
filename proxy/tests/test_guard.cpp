@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
                 if (sh.find(bad) != np) { printf("    sha256.h names %s\n", bad); CHECK(false); }
         }
         for (const char* f : { "pe.h", "sha1.h", "sha256.h", "guard.h", "patch_engine.h", "config.h", "adapter.h", "runtime.h", "dllmain.cpp", "backend.cpp", "crash.cpp",
-                               "log.cpp", "guard_driver.cpp", "patch_driver.cpp", "d3d9.def" }) {
+                               "log.cpp", "guard_driver.cpp", "patch_driver.cpp", "d3d9.def", "dxvk_wndproc.cpp", "wndprocpolicy.h" }) {
             std::string s = tk::ReadFile(std::string("core/") + f);
             CHECK(!s.empty());
             for (size_t k; (k = s.find("empire-remastered")) != std::string::npos;) s.erase(k, 17);   // provenance links are fine
@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
             CHECK(pdd.find("WritePlanAtomic(") != std::string::npos);   // writes go through the all-or-nothing writer
             CHECK(pdd.find("memcpy(") == std::string::npos);            // ... and nowhere else
         }
-        for (const char* f : { "dllmain.cpp", "backend.cpp", "crash.cpp", "guard_driver.cpp", "patch_driver.cpp", "dev.cpp" }) {
+        for (const char* f : { "dllmain.cpp", "backend.cpp", "crash.cpp", "guard_driver.cpp", "patch_driver.cpp", "dev.cpp", "dxvk_wndproc.cpp" }) {
             const std::string s = tk::ReadFile(std::string("core/") + f);
             for (std::sregex_iterator it(s.begin(), s.end(), re), e; it != e; ++it)
                 if (!known.count((*it)[1])) { printf("    %s reads %s, which is not in config_keys\n", f, (*it)[1].str().c_str()); CHECK(false); }

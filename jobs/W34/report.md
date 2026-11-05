@@ -75,7 +75,7 @@ Also checked, with no line printed: `ctl: ping1: ok` and `"pong": true`; a `lua`
 The page protection reads `0x20` under wine both before the DLL loads and after, so the check compares two real reads. The hook row was dropped: see "What was built", A.
 
 ## Decision
-C36 (`docs/DECISIONS.md`), proposed. W35 merged C35 first, so this job took the next number at the final merge. W35 also took launch 11, so the brief's launch 11 is launch 12 here.
+C37 (`docs/DECISIONS.md`), proposed. W35 merged C35 first, so this job took the next number at the final merge (C36 went to W36 meanwhile, so C37). W35 also took launch 11, so the brief's launch 11 is launch 12 here.
 
 ## Deviations from the brief and why
 - **The ACE names the user's SID, not `OW` (decision 15).** The brief expected wine either to accept the DACL or to refuse it. It does neither: it reports success and maps the `OW` ACE to mode 000 (`d---------`), so for a non-root user the folder is shut, to the DLL's own wine process too (`old1.cmd` was never taken). A `chmod` shim in the smoke would not hold, since new files would be mode 000 as well, and skipping the ACL under wine would put test-shaped code in the shipped DLL. Naming the user keeps one protected ACE and advapi32 only (`OpenProcessToken`, `GetTokenInformation`, `ConvertSidToStringSidW`). It also removes a Windows risk: with `OW`, a non-elevated game would lock itself out of a folder an elevated process made, as the owner would be Administrators. **Liam may want to look at this one:** it changes a stated decision. The meaning differs only when the folder's owner is not the game's user.

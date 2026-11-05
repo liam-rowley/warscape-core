@@ -1,6 +1,6 @@
 """The pull-request policy as a verb: the branch name decides what a pull request may change (every change goes through the job queue).
 
-purpose: Refuse a pull request whose branch is not a reviewed job, a brief, a planning change or an infrastructure change, judged with the base's rules (its core, wsc.toml and `policy`-stage gate modules, in a child process); the rules are in warscape/policy.py
+purpose: Refuse a pull request whose branch is not a reviewed job, a brief, a planning change or an infrastructure change, or whose base is not in `[policy] bases`, judged with the base's rules (its core, wsc.toml and `policy`-stage gate modules, in a child process), and warn on a workflow input a job's brief does not name; the rules are in warscape/policy.py
 usage: wsc policy --branch <head branch> [--base origin/main] [--head <rev>, default HEAD]   (CI: --head <the pull request head sha>, on pull_request_target); wsc policy --commit-msg <file>   (the commit-msg hook, C23)
 when: automatic in CI (the `policy` job) and, with `[policy] commit_msg_hook = true`, in .githooks/commit-msg; locally (after `git fetch`) before opening a pull request to see what CI will say; the job steps (`wsc jobs next|review|fix`) name it
 verb: policy
@@ -10,7 +10,7 @@ so a local run and CI print the same lines for the same two shas (CI is the auth
 checkout's). Internal flags of that child, hidden from --help: `--judge` (judge in this process: `--root` is the base tree, the rules are
 its config and gate modules), `--repo <clone>` (where git reads the head; shas only), `--base-ref <name>` (the base's name in messages).
 Their set is versioned by `JUDGE_API` in warscape/policy.py; the parent is warscape/policy_base.py. Warnings (core W27: evidence the clone
-cannot prove, a thin `merge`) print as `policy: warning: ...` lines before the verdict line and never change the exit code.
+cannot prove, a thin `merge`; core W36: an unnamed workflow input) print as `policy: warning: ...` lines before the verdict line and never change the exit code.
 """
 import argparse
 import sys
