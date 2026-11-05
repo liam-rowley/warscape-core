@@ -38,6 +38,7 @@ path_ignore = ["plan/", "brief/", "meta/", "job/", "release/",   # branch-name p
 
 [tests]
 dirs = ["tests", "discovery/tests"]
+timeout_s = 900      # W44: Windows CI ran the suite in 568 s of the default 600 (W42's row), and W42's job limit is 20 minutes; run 42130379419 timed out here
 
 # The core runs its own job queue (napoleon J62): rows in registries/jobs/<id>.json, folders in jobs/<id>/, ids W<n>, the same pipeline a game uses.
 [storage]

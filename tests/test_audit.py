@@ -45,9 +45,9 @@ class Fixture:
         self.td = tempfile.TemporaryDirectory()
         base = Path(self.td.name).resolve()
         self.root, self.origin = base / 'clone', base / 'origin.git'
+        self.only = None                                       # the metrics audit() asks for by default: a test of one rule pays for one metric
         self.root.mkdir()
-        self.git('init', '-q', '--bare', str(self.origin), cwd=base)
-        self.git('init', '-q', '-b', 'main')
+        self.git('init', '-q', '--template=', '-b', 'main')    # no template: the Windows gates sit near [tests] timeout_s, so a fixture stays cheap
         self.git('remote', 'add', 'origin', str(self.origin))
         self.commit('Initial', {'wsc.toml': TOML + extra}, days=40)
 
@@ -87,15 +87,24 @@ class Fixture:
         self.git('merge', '-q', '--no-edit', '-X', 'ours', '--no-ff', 'main', days=days)
 
     def push(self):
+        """A real push to the bare origin, for the tests that read it; the rest mirror their refs with sync()."""
+        if not self.origin.exists():
+            self.git('init', '-q', '--template=', '--bare', str(self.origin), cwd=self.root.parent)
         self.git('push', '-q', '--all', 'origin')
         self.git('fetch', '-q', 'origin')
+
+    def sync(self):
+        """What a push and a fetch leave in this clone, the refs under refs/remotes/origin/, without the transport."""
+        heads = self.git('for-each-ref', '--format=%(refname:strip=2) %(objectname)', 'refs/heads/').split('\n')
+        cmds = ''.join(f'update refs/remotes/origin/{b} {s}\n' for b, s in (l.split() for l in heads if l))
+        subprocess.run(['git', 'update-ref', '--stdin'], cwd=self.root, input=cmds.encode(), check=True, capture_output=True)
 
     def ctx(self):
         return Ctx.load(self.root)
 
     def audit(self, offline=True, since=None, only=None, run=subprocess.run, now=NOW):
-        self.push()
-        return A.record(self.ctx(), since=since, only=only, offline=offline, now=now, run=run)
+        self.sync() if offline else self.push()
+        return A.record(self.ctx(), since=since, only=only or self.only, offline=offline, now=now, run=run)
 
     def ids(self, **kw):
         return sorted(f['id'] for f in self.audit(**kw)['findings'])
@@ -105,11 +114,14 @@ class Fixture:
 
 
 class Case(unittest.TestCase):
+    ONLY = None                                                # the one metric a class tests; None: all of them
+
     def setUp(self):
         os.environ.pop('WSC_PC_STATE', None)
 
     def fixture(self, extra=''):
         f = Fixture(extra)
+        f.only = [self.ONLY] if self.ONLY else None
         self.addCleanup(f.close)
         return f
 
@@ -120,6 +132,8 @@ class Case(unittest.TestCase):
 
 
 class HotFiles(Case):
+    ONLY = 'hot_files'
+
     def test_fires_with_its_share_and_is_high_at_half(self):
         f = self.fixture()
         for n in range(1, 7):
@@ -130,38 +144,41 @@ class HotFiles(Case):
         self.assertIn('5 of 6', x['evidence'])
 
     def test_medium_under_half(self):
-        f = self.fixture()
-        for n in range(1, 16):
-            f.merge_job(n, 3, {'docs/HOT.md': f'{n}\n'} if n <= 5 else {})
+        f = self.fixture('[audit]\nhot_file_min = 2\n')
+        for n in range(1, 6):                                  # 2 of 5
+            f.merge_job(n, 3, {'docs/HOT.md': f'{n}\n'} if n <= 2 else {})
         self.assertEqual(self.finding(f.audit(), 'hot_file:docs/HOT.md')['severity'], 'medium')
 
     def test_quiet_under_the_count_the_share_and_outside_the_window(self):
-        f = self.fixture()
-        for n in range(1, 5):                                  # 4 of 4: the share trips, the count does not
+        f = self.fixture('[audit]\nhot_file_min = 3\n')
+        for n in range(1, 3):                                  # 2 of 2: the share trips, the count does not
             f.merge_job(n, 3, {'docs/FEW.md': f'{n}\n'})
         self.assertEqual([i for i in f.ids() if i.startswith('hot_file')], [])
-        for n in range(5, 35):                                 # 5 of 34: the count trips, the share does not
-            f.merge_job(n, 3, {'docs/FEW.md': f'{n}\n'} if n == 5 else {})
+        f.merge_job(3, 3, {'docs/FEW.md': '3\n'})
+        for n in range(4, 14):                                 # 3 of 13: the count trips, the share does not
+            f.merge_job(n, 3)
         self.assertEqual([i for i in f.ids() if i.startswith('hot_file')], [])
-        g = self.fixture()
-        for n in range(1, 7):
+        g = self.fixture('[audit]\nhot_file_min = 2\n')
+        for n in range(1, 3):
             g.merge_job(n, 20, {'docs/OLD.md': f'{n}\n'})      # older than the 7-day default window
         self.assertEqual([i for i in g.ids() if i.startswith('hot_file')], [])
 
     def test_the_job_folders_rows_and_hot_exempt_do_not_count(self):
-        f = self.fixture('[audit]\nhot_exempt = ["VERSION"]\n')
-        for n in range(1, 7):
+        f = self.fixture('[audit]\nhot_exempt = ["VERSION"]\nhot_file_min = 2\n')
+        for n in range(1, 3):
             f.merge_job(n, 3, {f'jobs/T{n}/report.md': 'r\n', 'jobs/shared.md': f'{n}\n', 'VERSION': f'{n}\n'})
         self.assertEqual([i for i in f.ids() if i.startswith('hot_file')], [])
 
     def test_only_job_merges_count(self):
-        f = self.fixture()
-        for n in range(1, 7):
+        f = self.fixture('[audit]\nhot_file_min = 2\n')
+        for n in range(1, 3):
             f.commit(f'plan: row {n} (#{n})', {'docs/PLAN.md': f'{n}\n'}, 3)
         self.assertEqual([i for i in f.ids() if i.startswith('hot_file')], [])
 
 
 class ConflictFiles(Case):
+    ONLY = 'conflict_files'
+
     def both_sides(self, f, n, path='docs/X.md'):
         """A job branch whose merge from main changed `path` on both sides, and left a result that differs from each."""
         f.commit(f'plan: main side {n} (#{n})', {path: f'base {n}\nmiddle\nend\n'}, 6)
@@ -229,6 +246,8 @@ class ConflictFiles(Case):
 
 
 class JobLifetime(Case):
+    ONLY = 'job_lifetime'
+
     def job(self, f, n, start, merged, files=None, from_main=False):
         f.branch(f'job/T{n}')
         f.commit('work', {f'src/{n}.py': 'x\n'}, start)
@@ -290,6 +309,8 @@ class JobLifetime(Case):
 
 
 class WorkMix(Case):
+    ONLY = 'work_mix'
+
     def test_off_by_default_and_counts_phases(self):
         f = self.fixture()
         for n in range(1, 4):
@@ -316,6 +337,8 @@ class WorkMix(Case):
 
 
 class Queue(Case):
+    ONLY = 'queue'
+
     def test_idle_queue(self):
         f = self.fixture()
         f.commit('plan: rows (#1)', {**f.row('T1', 'queued'), **f.row('T2', 'queued')}, 1)
@@ -411,6 +434,8 @@ ROUND = '## Round {n} (2026-11-01, branch `job/T1` at `abcdef0`)\n\n{body}\n\nVe
 
 
 class ReviewLoop(Case):
+    ONLY = 'review_loop'
+
     def review(self, *verdicts, later=0):
         text = '# Review\n\n' + ''.join(ROUND.format(n=i, verdict=v, body='**Later:** a thing\n' * later) for i, v in enumerate(verdicts, 1))
         return text
@@ -452,6 +477,8 @@ class ReviewLoop(Case):
 
 
 class BriefCost(Case):
+    ONLY = 'brief_cost'
+
     def test_brief_heavy(self):
         f = self.fixture()
         f.merge_job(1, 3, {'jobs/T1/brief.md': 'b' * 400, 'jobs/T1/report.md': 'r' * 100})
@@ -472,6 +499,8 @@ class BriefCost(Case):
 
 
 class StartupRead(Case):
+    ONLY = 'startup_read'
+
     def test_startup_heavy_with_startup_docs(self):
         f = self.fixture('[audit]\nstartup_docs = ["docs/PLAN.md", "docs/GONE.md"]\n')
         f.commit('plan: docs (#1)', {'CLAUDE.md': 'c' * 20480, 'README.md': 'r' * 10240, 'docs/PLAN.md': 'p' * 20480}, 1)
@@ -487,6 +516,8 @@ class StartupRead(Case):
 
 
 class DocCaps(Case):
+    ONLY = 'doc_caps'
+
     def test_fires_at_the_share_and_skips_a_dated_record(self):
         f = self.fixture()
         at = int(30 * 1024 * 0.9)
@@ -503,6 +534,8 @@ class DocCaps(Case):
 
 
 class PinLag(Case):
+    ONLY = 'pin_lag'
+
     def core(self, f, *tags):
         c = f.root / 'core'
         c.mkdir()
@@ -551,6 +584,8 @@ class PinLag(Case):
 
 
 class Throughput(Case):
+    ONLY = 'throughput'
+
     def test_slowdown(self):
         f = self.fixture()
         for n in range(1, 7):
@@ -611,6 +646,8 @@ def gh_runs(minutes):
 
 
 class CiDurations(Case):
+    ONLY = 'ci_durations'
+
     def test_slow_check(self):
         f = self.fixture()
         rec = f.audit(offline=False, run=gh_runs([{'gates': 12, 'proxy': 4, 'other': 99}, {'gates': 14, 'proxy': 5}, {'gates': 2, 'proxy': 6}]))
