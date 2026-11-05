@@ -54,7 +54,7 @@ exempt = ["tests/**", "**/runs/**"]
 max_kb = 30
 
 [cli]
-verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract as warscape/verbs/)
+verb_dirs = []        # e.g. ["adapter/verbs"] for game-specific verbs (same contract; never a core verb's name: reg find gates jobs policy ci discovery crash agent-settings)
 ```
 
 CI in the game repo (`.github/workflows/gates.yml`):
@@ -96,7 +96,7 @@ jobs:
   check out the tag, set `[core] version`, `ci render`): one commit of `core`, `wsc.toml` and the workflows (B9); delete each verb it names. Then `gates`.
 - **A change a game needs** is a PR here with host tests, then a release, then the upgrade above. Never a commit inside `core/`.
 - **Upgrade notes** for a pin bump past 0.24.0 (the `commit-msg` hook, the `run_refs` gate), 0.26.0 (base-judged policy, C24), 0.27.0 (the build id, C25)
-  or 0.34.0 (DLL changes, C29) are in [UPGRADING.md](UPGRADING.md).
+  0.34.0 (DLL changes, C29) or 0.38.0 (crash maps, guarded verbs, C35) are in [UPGRADING.md](UPGRADING.md).
 
 ## Registry storage and views (0.6.0, opt-in)
 Moved to [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "Registry storage and views" on 2026-11-04 (W28, the 30 KB cap): `[storage] dir`, `[views] commit`, `reg migrate`, `reg remove`.
@@ -153,6 +153,8 @@ decision_prefix = "D"
 bootstrap = []                     # exact branch names exempt from the branch-kind rules: only the one pull request that introduces the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" switches the rule off (and W27's rules A-E)
 decisions_cite_job = false         # W27 rule F: a decision row added on job/<id> must contain <id>
+workflow_paths = [...]             # W36: a job's change here its brief does not name warns; [] = off
+bases = ["main"]                   # W36: a pull request into another branch is refused; [] = any
 thin_merge_lines = 500             # W27 rule E: a `merge` on more lines (or thin_merge_files = 20 files) outside jobs/ and the registries citing no evidence warns
 plan = [...]                       # globs a plan/* branch may touch, by path segment (* in one folder, ** across); meta = [...] for meta/*
 [ci]
@@ -183,9 +185,9 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
   branch behind the base on the decisions file is told to merge it. It fails closed, naming the fix: a ref that does not resolve, an unreadable base
   `wsc.toml`, no gitlink, an uninitialised submodule or a missing pin (`git -C core fetch origin <pin>`), or a child with no verdict. A base whose
   core predates W23 (no `JUDGE_API` line) is judged as before, with a note. `--commit-msg` stays a local check of the message being written.
-- **What the `policy` check does not prove.** Anyone with a write token can post a status named `policy`, and GitHub calls same-named jobs in two
-  workflows ambiguous, so a head that adds a workflow with a `policy` job can blur the result. No code in a user-owned repository closes this (an
-  organisation's "require workflows to pass" ruleset would); it is accepted for now (W23), and the reviewer reads any `.github/workflows/` change.
+- **What the `policy` check does not prove.** Anyone with a write token can post a status named `policy`, and same-named jobs in two workflows are
+  ambiguous, so a head that adds a `policy` job can blur the result (accepted, W23). A job that changes a `workflow_paths` file its brief on the base does
+  not name gets a warning (W36), not a refusal: the reviewer must clear it. Still open: a token holder, and `meta/` branches, which Liam reviews.
 - **Workflows are rendered, not called.** A reusable `workflow_call` workflow would rename the checks (`<caller job> / <called job>`), and branch protection
   waits for exact names. `ci/<name>.in` is the workflow with placeholder lines (`{{wsc changes}}`, `{{wsc if <set>}}`, `{{wsc pass_marker <set>}}`,
   `{{wsc fetch_cache}}`, `{{wsc policy}}`, `{{wsc notify ...}}`: `warscape/ci_render.py`); the slow jobs stay in the template. After a change: `wsc ci render`, commit both files.

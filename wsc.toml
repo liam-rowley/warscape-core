@@ -32,6 +32,8 @@ path_ignore = ["plan/", "brief/", "meta/", "job/", "release/",   # branch-name p
                "harness/runs/**", "harness/README.md", "proxy/README.md", "docs/CI_FAILURES.md",   # napoleon: run folders and docs of its own
                "viewer/**", "upscale/**", "shaders/",              # a game's UI pins and player build; a discovery adapter's shaders folder
                "rml_mod/**", "perf_mod/**", "docs/learnings/**",   # empire-remastered
+               "adapter/", "out/", "ui/",                          # the linker map's path labels (W35, PROXY_BUILD.md), not folders
+               ".claude/",                                         # the agent's per-clone settings folder, untracked
                "ctx.root/core/"]                                   # a Python expression in CONSUMING.md, not a path
 
 [tests]
@@ -64,6 +66,8 @@ ref_brief_merge = "C18"
 [policy]
 commit_msg_hook = true     # .githooks/commit-msg refuses a commit without a Claude-Session trailer (C23)
 decisions_cite_job = true  # a C row added on job/<id> names <id> (W27 rule F)
+workflow_paths = [".github/workflows/**", "ci/**"]  # a job's change here that its brief on the base does not name warns (W36)
+bases = ["main"]           # the branches a pull request may target (W36)
 decisions = "docs/DECISIONS.md"
 decision_prefix = "C"
 plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md", "CLAUDE.md"]
@@ -87,3 +91,9 @@ required_checks = ["gates (ubuntu-latest)", "gates (windows-latest)", "policy", 
 [ci.inputs]
 proxy = '^\.github/workflows/|^ci/|^proxy/|^wsc\.toml$'
 harness = '^\.github/workflows/|^ci/|^harness/|^proxy/tools/|^proxy/tests/null_game/|^tests/test_moved_tools\.py$|^warscape/|^wsc\.toml$'
+
+# wsc agent-settings (W35, C35): the read-only command rules an agent may add to a .claude/settings.json without asking; a rule is
+# added only when one of these covers it (itself or a longer prefix), never under a deny rule. Liam decides this list.
+[agent_settings]
+safe = ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(python3 wsc.py find:*)",
+        "Bash(python3 wsc.py jobs view:*)", "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh run view:*)"]

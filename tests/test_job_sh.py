@@ -416,5 +416,95 @@ class JobSh(unittest.TestCase):
         self.assertIn('not running', r.stderr)
 
 
+class VdisplayAside(unittest.TestCase):
+    """W35: `job.sh vdisplay-aside <owner> <session> <why>` moves a stale vdisplay_restore.json into _to_delete with a unique name, prints
+    the saved mode, and refuses with a game running, another owner's lock, no file, an empty why, a dead watcher, or while the watcher's
+    own restore is still pending and fresh. It never deletes and never overwrites."""
+    MODE = '{"name": "Virtual Display Driver", "width": 2560, "height": 1440}'
+
+    def setUp(self):
+        JobSh.setUp(self)   # the same fake state folder, without inheriting JobSh's cases
+        self.a = ['--adapter', str(self.adapter)]
+        self.status()
+        (self.root / 'vdisplay_restore.json').write_text(self.MODE + '\n')
+        self.log('vdisplay: RESTORE FAILED (the game has exited and the lock is released): no mode (display tool exit 2)')
+
+    def tearDown(self):
+        JobSh.tearDown(self)
+
+    def status(self, procs=(), state='not_running', alive_age=0):
+        (self.root / 'watcher.status').write_text(json.dumps({'version': '1', 'processes': [{'image': 'game.exe', 'pid': p} for p in procs],
+                                                               'game_state': {'state': state}}))
+        (self.root / 'watcher.alive').write_text('x')
+        if alive_age:
+            os.utime(self.root / 'watcher.alive', (time.time() - alive_age, time.time() - alive_age))
+
+    def log(self, line, age=0):
+        t = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - age))
+        with open(self.root / 'watcher.log', 'a') as f:
+            f.write(f'[{t}] {line}\n')
+
+    def aside(self, owner='me', session='sess1', why='the restore keeps failing'):
+        return run(self.a + ['vdisplay-aside', owner, session, why], self.env)
+
+    def moved(self):
+        d = self.root / '_to_delete'
+        return sorted(p.name for p in d.glob('vdisplay_restore_*.json.aside')) if d.is_dir() else []
+
+    def test_moves_with_a_unique_name_and_prints_the_saved_mode(self):
+        r = self.aside()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((self.root / 'vdisplay_restore.json').exists())
+        names = self.moved()
+        self.assertEqual(len(names), 1)
+        self.assertRegex(names[0], r'^vdisplay_restore_\d{8}T\d{6}Z(_\d+)?\.json\.aside$')
+        self.assertEqual((self.root / '_to_delete' / names[0]).read_text().strip(), self.MODE)
+        self.assertIn(self.MODE, r.stdout)
+        self.assertIn('the restore keeps failing', (self.root / 'watcher.log').read_text())
+
+    def test_twice_in_one_second_overwrites_nothing(self):
+        self.assertEqual(self.aside().returncode, 0)
+        (self.root / 'vdisplay_restore.json').write_text('{"second": 1}\n')
+        self.log('vdisplay: pending restore dropped (no virtual display: x); record kept at y')
+        r = self.aside()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        names = self.moved()
+        self.assertEqual(len(names), 2, names)
+        texts = sorted((self.root / '_to_delete' / n).read_text().strip() for n in names)
+        self.assertEqual(texts, sorted([self.MODE, '{"second": 1}']))
+
+    def test_a_stale_file_needs_no_failure_line(self):
+        (self.root / 'watcher.log').write_text('')
+        old = time.time() - 1300
+        os.utime(self.root / 'vdisplay_restore.json', (old, old))
+        self.assertEqual(self.aside().returncode, 0)
+
+    def test_refusals_leave_the_file(self):
+        cases = []
+        self.status(procs=[4242], state='running'); cases.append(('game process', self.aside()))
+        self.status(alive_age=100); cases.append(('not running', self.aside()))
+        self.status()
+        (self.root / 'game.lock').write_text('owner=other session=s2 purpose=x started=2026-11-04T00:00:00Z hang_s=0\n')
+        cases.append(("held by 'other'", self.aside()))
+        (self.root / 'game.lock').unlink()
+        cases.append(('why', self.aside(why='')))
+        (self.root / 'watcher.log').write_text('')
+        self.log('vdisplay: RESTORE FAILED (old): x', age=3600)
+        self.log('vdisplay: previous mode restored (later): ok', age=10)
+        cases.append(('pending', self.aside()))
+        for want, r in cases:
+            self.assertNotEqual(r.returncode, 0, want)
+            self.assertIn(want, r.stderr, want)
+        self.assertTrue((self.root / 'vdisplay_restore.json').exists())
+        self.assertEqual(self.moved(), [])
+
+    def test_the_holder_may_and_no_file_refuses(self):
+        self.assertEqual(run(self.a + ['lock', 'me', 'sess1', 'p'], self.env).returncode, 0)
+        self.assertEqual(self.aside().returncode, 0)
+        r = self.aside()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('no vdisplay_restore.json', r.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

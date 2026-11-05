@@ -28,6 +28,16 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
 4. **Behaviour.** CI judges the pull request's head against the base tip, so a branch behind `main` on the decisions file must merge `main`. Globs
    match by path segment: `registries/*` no longer covers `registries/<name>/<row>.json`. Until the bump merges, the game's pull requests are judged
    as before, with the note.
+5. **`[policy] bases` (W36) fails open on an older base.** CI's parent is the base's code, so a branch whose core predates W36 does not know the rule: a pull
+   request into it is not refused. Its merge still reaches `main` only through a pull request judged by main's rules.
+
+## Workflow inputs, bases and the commit match (core W36)
+Nothing is forced; the defaults apply when the keys are absent.
+- **`[policy] bases`** (default `["main"]`): a game whose default branch is not `main` lists it, or sets `[]`, in the pin-bump commit, or its pull requests are refused.
+- **`[policy] workflow_paths`** (default `.github/workflows/**`, `ci/**`): a warning, never a refusal, so a brief that touches CI should name each file, the
+  rendered workflow as well as its template. Set `[]` to switch it off.
+- **`commit_lacks_trailer`** takes the command as typed: global options, `-c alias.X=` and a shell's command string are seen, and an argument (`echo git commit`) is
+  no commit. A hook that normalises first keeps working; `warscape.trailer.COMMIT` is gone (nothing in the core or napoleon read it).
 
 ## The build id names one DLL (0.27.0, W24, C25; [PROXY_BUILD.md](PROXY_BUILD.md))
 - **Rule 79:** a new build id (`core`, `build_sh`, `build_id`, `fetch_lua`, `fetch_ui` changed, `toolchain` new) and new DLL bytes: 20 passes.
@@ -71,3 +81,8 @@ In the pin-bump commit itself, because the render guard and the new facts fail o
   `../` paths are not checked. napoleon-remastered had 56 misses on 2026-11-04 (W28 report): clear them in its pin-bump branch, or skip the gate there
   under a decision id (`"doc_paths:<id>"`) while it does.
 - **`gen_tables.py`** reads `engine_sites` and `config_keys` through the registry loader, so the game's whole `wsc.toml` must load with this core.
+
+## Crash symbolisation and guarded verbs (0.38.0, core W35, C35)
+Pin bump: a new build id (`build.sh` changed: 20 passes); delete game verbs named `crash` or `agent-settings`; put `{{wsc proxy_map step=dll}}`
+after the proxy build step (give it `id: dll`) and `wsc ci render`; attach `d3d9.map` and `d3d9.map.json` to each release; set `[agent_settings] safe` (`exact_only = true`: only those rules).
+What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROXY_HARNESS.md](PROXY_HARNESS.md) "Guarded verbs".
