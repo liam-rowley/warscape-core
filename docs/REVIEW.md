@@ -74,7 +74,7 @@ Commit the review and the row **locally, do not push yet**, then in this order:
 4. `git push`;
 5. `gh pr merge job/<id> --auto --squash`. GitHub merges only when every required check is green on that commit: do not wait or poll. A check that fails leaves the
    pull request open: CI comments on the pull request (`wsc ci notify`) and `wsc jobs next|review|view` list it first, so the next session sees it. Any other
-   verdict is never merged. A `brief/` branch merges the same way without a review; `plan/` and `meta/` branches still wait for the owner.
+   verdict is never merged. A `brief/` or `plan/` branch merges the same way without a review (C40); `meta/` branches still wait for the owner.
 
 The required checks are the job names the rendered workflows define: `gates`, `policy` and any slow job the repo keeps (`docs/CONSUMING.md`, "The job pipeline").
 
