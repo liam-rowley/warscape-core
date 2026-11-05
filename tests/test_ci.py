@@ -721,9 +721,10 @@ class CheckSettings(unittest.TestCase):
         def about_if(wf):
             return [p for p in self.problems(self.go(CORE_ANSWERS, wf, CORE_REQUIRED)[1]) if 'job-level `if:`' in p]
         guarded = {**CORE_WF, 'gates.yml': CORE_WF['gates.yml'].replace('  gates:\n', '  gates:\n    if: github.ref != 1\n')}
-        [p] = about_if(guarded)
-        self.assertIn('`gates`', p)
-        self.assertIn('plain job', p)
+        ubuntu, windows = about_if(guarded)   # one per required check of the job
+        self.assertIn('`gates (ubuntu-latest)`', ubuntu)
+        self.assertIn('`gates (windows-latest)`', windows)
+        self.assertIn('plain job', windows)
         self.assertEqual(about_if(CORE_WF), [])
         step_if = {**CORE_WF, 'gates.yml': CORE_WF['gates.yml'].replace('        os: [a, b]\n', '        os: [a, b]\n    steps:\n      - if: x\n        run: y\n')}
         self.assertEqual(about_if(step_if), [])   # a step's `if:` skips no job
