@@ -31,8 +31,8 @@ def git_bytes(*args, cwd=None):
     return subprocess.run(['git', *args], capture_output=True, check=True, cwd=cwd, env=git_env()).stdout
 
 
-def base_rules(repo, b, base_ref):
-    """(core folder, git cwd of the core commit, core sha, paths to copy from the base beside the core) for the base commit `b`. Raises Refusal."""
+def base_config(repo, b, base_ref):
+    """key(table, name, kind), reading the wsc.toml of the base commit `b` from git: a value, or its default when the key is absent. Raises Refusal."""
     where = f'{base_ref} at {b[:12]}'
     text = show(b, 'wsc.toml', repo)
     try:
@@ -48,6 +48,25 @@ def base_rules(repo, b, base_ref):
         if not isinstance(v, kind) or (kind is list and not all(isinstance(x, str) and x for x in v)):
             raise Refusal(f"the base's wsc.toml ({where}): [{table}] {name} is not a {kind.__name__}; fix it on {base_ref} first")
         return v
+    return key
+
+
+def refuse_unlisted_base(repo, base):
+    """W36: a pull request into `origin/<name>` needs <name> in the base's `[policy] bases`. Stacked pull requests are not part of the pipeline: under
+    pull_request_target the base's code runs with the base's privileges, and C18 merges every change to main. Not an `origin/<name>` ref (a sha,
+    HEAD~3: local and test use), or one that does not resolve (`diff_base` refuses it): nothing to do. Reads only the base. Raises Refusal."""
+    m, b = re.fullmatch(r'origin/(.+)', base), resolve(base, repo)
+    if not m or not b:
+        return
+    bases = base_config(repo, b, base)('policy', 'bases', list)
+    if bases and m.group(1) not in bases:
+        raise Refusal(f"{base} is not a branch pull requests may target: retarget the pull request to {' or '.join(bases)}, or list the branch in `[policy] bases`")
+
+
+def base_rules(repo, b, base_ref):
+    """(core folder, git cwd of the core commit, core sha, paths to copy from the base beside the core) for the base commit `b`. Raises Refusal."""
+    where = f'{base_ref} at {b[:12]}'
+    key = base_config(repo, b, base_ref)
     core, dirs, legacy = key('ci', 'core', str).strip('/'), key('gates', 'dirs', list), key('jobs', 'legacy', str)
     extra = ['wsc.toml', *dirs, *([legacy] if legacy else [])]
     if not core:
@@ -114,6 +133,7 @@ def judge(ctx, branch, base='origin/main', head='HEAD'):
         print(f'policy: {branch}: REFUSED ({n} files changed)' if n is not None else f'policy: {branch}: REFUSED (not judged)')
         return 1
     try:
+        refuse_unlisted_base(repo, base)
         b, h, mb, changed = diff_base(base, head, repo)
         n = len(changed)
         core, cwd, pin, extra = base_rules(repo, b, base)

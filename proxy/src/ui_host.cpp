@@ -390,6 +390,8 @@ Rml::Input::KeyIdentifier Key(WPARAM vk) {
 
 LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     UiEv ev; int button = -1; bool down = false;
+    // W34 (C9): system keys go to the engine before UiDecide, even with text focus: Alt+F4 must close the game. The gesture stage is still told.
+    if (UiIsSystemKey(msg)) { GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, true); return Engine(h, msg, wp, lp); }
     switch (msg) {
     case WM_MOUSEMOVE: ev = UiEv::Move; break;
     case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: ev = UiEv::Down; button = 0; down = true; if (InterlockedIncrement(&s_wmLButton) == 1) LOGI("ui: input: first WM_LBUTTONDOWN through the window procedure"); break;
@@ -399,7 +401,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_RBUTTONUP: ev = UiEv::Up; button = 1; break;
     case WM_MBUTTONUP: ev = UiEv::Up; button = 2; break;
     case WM_MOUSEWHEEL: ev = UiEv::Wheel; break;
-    case WM_KEYDOWN: case WM_KEYUP: case WM_SYSKEYDOWN: case WM_SYSKEYUP: ev = UiEv::Key; break;
+    case WM_KEYDOWN: case WM_KEYUP: ev = UiEv::Key; break;
     case WM_CHAR: ev = UiEv::Char; break;
     case WM_ACTIVATEAPP: { Lock l; UiFocusLost(s_route, s_rmlOwner); Publish(); }   // a release lost to alt-tab
         GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, true);                        // W6: focus loss cancels a gesture; the message passes
@@ -427,7 +429,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             case UiEv::Down: s_ctx->ProcessMouseButtonDown(button, Mods()); break;
             case UiEv::Up: { const std::string before = s_clicks.last; s_ctx->ProcessMouseButtonUp(button, Mods()); if (s_clicks.last != before) LOGI("ui: counted click: %s", s_clicks.last.c_str()); } break;
             case UiEv::Wheel: s_ctx->ProcessMouseWheel(Rml::Vector2f(0.f, -(float)GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA), Mods()); break;
-            case UiEv::Key: if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) s_ctx->ProcessKeyDown(Key(wp), Mods()); else s_ctx->ProcessKeyUp(Key(wp), Mods()); break;
+            case UiEv::Key: if (msg == WM_KEYDOWN) s_ctx->ProcessKeyDown(Key(wp), Mods()); else s_ctx->ProcessKeyUp(Key(wp), Mods()); break;
             case UiEv::Char: if (wp >= 32) s_ctx->ProcessTextInput((Rml::Character)wp); break;
             default: break;
             }

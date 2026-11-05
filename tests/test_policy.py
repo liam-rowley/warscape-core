@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WSC = ROOT / 'wsc.py'
 sys.path.insert(0, str(ROOT))
 from warscape import policy as pp  # noqa: E402
-from warscape.repo import DEFAULTS, Ctx  # noqa: E402
+from warscape.repo import DEFAULTS, ConfigError, Ctx, load_config  # noqa: E402
 
 CFG = pp.settings({**DEFAULTS, 'policy': {**DEFAULTS['policy'], 'decisions': 'docs/DECISIONS.md'}})
 
@@ -192,7 +193,8 @@ def rv(*rounds):
 
 def fake_reads(commits=(), history=(), numstat=(), exists=(), refs=None, shas=None):
     from types import SimpleNamespace
-    return SimpleNamespace(commits=lambda: list(commits), history=lambda p: list(history) if p == REV else [],
+    order = [c[0] for c in commits]   # a linear branch: ancestry is the log's order (a merge needs a real repository: PolicyOnGit)
+    return SimpleNamespace(commits=lambda: list(commits), is_ancestor=lambda a, b: order.index(a) <= order.index(b), history=lambda p: list(history) if p == REV else [],
                            numstat=lambda: list(numstat), exists=lambda p: p in exists,
                            ref_state=lambda r: (refs or {}).get(r, 'missing'), sha_state=lambda s: (shas or {}).get(s, 'missing'))
 
@@ -219,34 +221,92 @@ BUILD = ('c1', 'S1', ['warscape/x.py', 'jobs/J1/report.md'], None)
 FIX1 = ('c3', 'F1', ['warscape/x.py', 'jobs/J1/report.md'], None)
 
 
-class W27ReviewerCode(unittest.TestCase):
-    """Rule A: a round whose own commits change a file outside jobs/<id>/ and the job's row must say `merge after fixes`."""
+class ReviewerCodeCases:
+    """Rule A: a round whose own commits change a file outside jobs/<id>/ and the job's row must say `merge after fixes`. The same steps in both
+    `[policy] reviewer_code` modes (W40): `hit` is where the line lands, `other` is the other list."""
+    mode = None
 
-    def test_a_reviewer_code_commit_under_merge_is_refused_naming_shas_and_paths(self):
-        e, w = w27([BUILD, ('c2', 'R1', ['warscape/y.py', 'registries/jobs/J1.json'], rv((1, 'merge')))])
-        self.assertEqual(e, [])   # a warning since the scan of the merged branches (kill criterion: more than 3 beyond the audit's)
-        self.assertTrue(any('c2' in x and 'warscape/y.py' in x and 'write the verdict `merge after fixes`' in x for x in w), w)
+    def steps(self, steps):
+        e, w = w27(steps, cfg={**CFG, 'reviewer_code': self.mode})
+        return (e, w) if self.mode == 'error' else (w, e)
+
+    def test_a_reviewer_code_commit_under_merge_names_shas_and_paths(self):
+        hit, other = self.steps([BUILD, ('c2', 'R1', ['warscape/y.py', 'registries/jobs/J1.json'], rv((1, 'merge')))])
+        self.assertEqual(other, [])
+        self.assertEqual(len(hit), 1, hit)
+        self.assertTrue(all(x in hit[0] for x in ('c2', 'warscape/y.py', 'write the verdict `merge after fixes`; a fresh round reviews your change')), hit)
 
     def test_a_separate_code_commit_by_the_reviewer_is_part_of_its_round(self):
-        _, w = w27([BUILD, ('c2', 'R1', ['docs/REVIEW.md'], None), ('c3', 'R1', [], rv((1, 'merge')))])
-        self.assertTrue(any('c2' in x and 'docs/REVIEW.md' in x for x in w), w)
+        hit, _ = self.steps([BUILD, ('c2', 'R1', ['docs/REVIEW.md'], None), ('c3', 'R1', [], rv((1, 'merge')))])
+        self.assertTrue(any('c2' in x and 'docs/REVIEW.md' in x for x in hit), hit)
 
     def test_the_same_change_under_merge_after_fixes_passes_rule_a(self):
-        e, w = w27([BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes')))])
-        self.assertFalse(any('a fresh round reviews your change' in x for x in e + w), e + w)
+        hit, other = self.steps([BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes')))])
+        self.assertFalse(any('a fresh round reviews your change' in x for x in hit + other), hit + other)
 
     def test_a_reviewer_commit_of_review_md_and_the_row_only_passes(self):
-        e, w = w27([BUILD, ('c2', 'R1', ['registries/jobs/J1.json', 'jobs/J1/notes.md'], rv((1, 'merge')))])
-        self.assertEqual((e, w), ([], []))
+        self.assertEqual(self.steps([BUILD, ('c2', 'R1', ['registries/jobs/J1.json', 'jobs/J1/notes.md'], rv((1, 'merge')))]), ([], []))
 
     def test_code_written_by_round_1_is_reviewed_by_round_2(self):
         steps = [BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge after fixes'))), FIX1,
                  ('c4', 'R2', ['registries/jobs/J1.json'], rv((2, 'merge'), (1, 'merge after fixes')))]
-        self.assertEqual(w27(steps), ([], []))
+        self.assertEqual(self.steps(steps), ([], []))
 
     def test_an_unattributed_code_commit_after_the_last_round_counts_for_it(self):
-        _, w = w27([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'X9', ['warscape/z.py'], None)])
-        self.assertTrue(any('c3' in x and 'warscape/z.py' in x for x in w), w)
+        hit, _ = self.steps([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'X9', ['warscape/z.py'], None)])
+        self.assertTrue(any('c3' in x and 'warscape/z.py' in x for x in hit), hit)
+
+    def test_a_fresh_round_on_top_clears_a_stranded_merge_round(self):
+        """W40: round 1 cannot be edited once round 2 exists (rule C) and a fresh session may not edit it at all, so a `merge` over reviewer code
+        whose session is gone has this one way out: a fresh round reviews the change. Without it an error could never be cleared."""
+        self.assertEqual(self.steps([BUILD, ('c2', 'R1', ['warscape/y.py'], rv((1, 'merge'))), ('c3', 'R2', [], rv((2, 'merge'), (1, 'merge')))]), ([], []))
+
+    def test_code_after_the_fresh_round_is_not_cleared_by_it(self):
+        hit, _ = self.steps([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'R2', [], rv((2, 'merge'), (1, 'merge'))), ('c4', 'R1', ['warscape/late.py'], None)])
+        self.assertTrue(any('c4' in x and 'warscape/late.py' in x for x in hit), hit)
+
+    def test_only_the_commits_a_later_round_follows_are_cleared(self):
+        hit, _ = self.steps([BUILD, ('c2', 'R1', ['warscape/early.py'], rv((1, 'merge'))), ('c3', 'R2', [], rv((2, 'merge'), (1, 'merge'))),
+                             ('c4', 'R1', ['warscape/late.py'], None)])
+        self.assertTrue(hit and all('warscape/late.py' in x and 'warscape/early.py' not in x for x in hit), hit)
+
+
+    def test_a_rounds_later_edit_of_itself_does_not_clear_code_before_that_edit(self):
+        """W40 review round 1, later 1: only the commit that first writes a round clears; after it that round has reviewed nothing new."""
+        hit, _ = self.steps([BUILD, ('c2', 'R1', [], rv((1, 'merge'))), ('c3', 'R2', [], rv((2, 'merge'), (1, 'merge'))), ('c4', 'R1', ['warscape/late.py'], None),
+                             ('c5', 'R2', [], rv((2, 'merge', 'A typo fixed.'), (1, 'merge')))])
+        self.assertTrue(any('c4' in x and 'warscape/late.py' in x for x in hit), hit)
+
+
+class RuleAWarns(ReviewerCodeCases, unittest.TestCase):
+    mode = 'warn'
+
+
+class RuleARefuses(ReviewerCodeCases, unittest.TestCase):
+    mode = 'error'
+
+
+class ReviewerCodeKey(unittest.TestCase):
+    """`[policy] reviewer_code`: warn (the default) or error, a string enum checked when wsc.toml loads."""
+
+    def load(self, value):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'wsc.toml').write_text(f'[policy]\nreviewer_code = {value}\n', encoding='utf-8')
+            return load_config(Path(d))
+
+    def test_the_default_is_warn(self):
+        self.assertEqual(DEFAULTS['policy']['reviewer_code'], 'warn')
+        self.assertEqual(pp.settings(DEFAULTS)['reviewer_code'], 'warn')
+
+    def test_warn_and_error_load(self):
+        for v in ('warn', 'error'):
+            self.assertEqual(pp.settings(self.load(f'"{v}"'))['reviewer_code'], v)
+
+    def test_anything_else_is_refused_naming_the_key(self):
+        for v in ('"maybe"', 'true', '1'):
+            with self.assertRaises(ConfigError) as e:
+                self.load(v)
+            self.assertIn('policy.reviewer_code', str(e.exception))
 
 
 class W27FreshRounds(unittest.TestCase):
@@ -412,6 +472,87 @@ class W27DecisionsCiteJob(unittest.TestCase):
         self.assertEqual(self.run_f('| D2 | 2026-11-04 | Claude | B. | yes |\n', branch='plan/x')[0], [])
 
 
+class W36WorkflowFiles(unittest.TestCase):
+    """W36 decision 1: a job's change to a workflow input its brief on the base does not name. A warning, not a refusal: the scan of the merged job
+    branches passed the brief's kill criterion (jobs/W36/report.md)."""
+    WF, GATES, TPL = '.github/workflows/x.yml', '.github/workflows/gates.yml', 'ci/gates.yml.in'
+
+    def run_w(self, changed, brief='# J1\n', branch='job/J1', cfg=CFG, extra=None):
+        """(errors, warnings) of `branch` changing `changed`; the job is otherwise mergeable."""
+        warns = []
+        base = files(**{'jobs/J1/brief.md': brief, **(extra or {})})
+        head = files(**{'jobs/J1/report.md': 'r', REV: rv((1, 'merge'))})
+        row = DONE if branch.startswith('job/') else ROW
+        errs = check(branch, list(changed), {'J1': ROW, 'J2': OTHER}, {'J1': row, 'J2': OTHER}, base, head, cfg=cfg, warnings=warns)
+        return errs, warns
+
+    def missing(self, warns):
+        return [w.split('`')[1] for w in warns if 'is a workflow input' in w]
+
+    def test_a_workflow_the_brief_names_passes_and_one_it_does_not_warns(self):
+        self.assertEqual(self.run_w([self.WF], brief=f'# J1\nAdds `{self.WF}`.\n'), ([], []))
+        errs, warns = self.run_w([self.WF])
+        self.assertEqual(errs, [])
+        self.assertEqual(warns, [f"`{self.WF}` is a workflow input and J1's brief on the base does not name it: a job cannot quietly add a check that posts a fake "
+                                 "`policy` status (W36); name the file in the brief (briefs are merged before the job starts) or use a `meta/` branch"])
+
+    def test_one_warning_per_path(self):
+        self.assertEqual(self.missing(self.run_w(['ci/a.txt', 'ci/b.txt', 'warscape/x.py'], brief='`ci/b.txt`')[1]), ['ci/a.txt'])
+
+    def test_a_template_change_must_name_the_rendered_file(self):
+        warns = self.run_w([self.TPL, self.GATES], brief=f'Edit `{self.TPL}`.', extra={self.TPL: 't'})[1]
+        self.assertEqual(self.missing(warns), [self.GATES])
+        self.assertIn(f'`{self.GATES}` renders from `{self.TPL}`: name both', warns[0])
+        self.assertEqual(self.run_w([self.TPL, self.GATES], brief=f'`{self.TPL}` and `{self.GATES}`', extra={self.TPL: 't'})[1], [])
+
+    def test_a_template_change_alone_still_needs_the_rendered_file_named(self):
+        """The re-render changes both; the `ci_render` gate fails the branch that leaves the workflow behind."""
+        self.assertEqual(self.missing(self.run_w([self.TPL], brief=f'`{self.TPL}`', extra={self.TPL: 't'})[1]), [self.GATES])
+
+    def test_a_rendered_file_names_its_template_sibling_only_when_there_is_one(self):
+        self.assertEqual(self.missing(self.run_w([self.GATES], brief=f'`{self.TPL}`', extra={self.TPL: 't'})[1]), [self.GATES])
+        self.assertNotIn('name both', self.run_w([self.WF])[1][0])
+        self.assertNotIn('name both', self.run_w(['ci/helper.sh'])[1][0])
+
+    def test_the_template_folder_comes_from_the_config(self):
+        cfg = {**CFG, 'template_dir': 'tpl', 'workflow_paths': ['.github/workflows/**', 'tpl/**']}
+        warns = self.run_w(['tpl/gates.yml.in', self.GATES], brief='`tpl/gates.yml.in`', cfg=cfg, extra={'tpl/gates.yml.in': 't'})[1]
+        self.assertEqual(self.missing(warns), [self.GATES])
+        self.assertIn('renders from `tpl/gates.yml.in`', warns[0])
+
+    def test_a_delete_and_a_rename_count(self):
+        self.assertEqual(self.missing(self.run_w([self.WF])[1]), [self.WF])   # a delete is a changed path the base has
+        old, new = '.github/workflows/old.yml', '.github/workflows/new.yml'   # --no-renames: a delete and an add
+        self.assertEqual(self.missing(self.run_w([old, new], brief=f'`{new}`')[1]), [old])
+        self.assertEqual(self.missing(self.run_w([old, new], brief=f'`{old}`')[1]), [new])
+
+    def test_an_empty_list_switches_the_rule_off(self):
+        self.assertEqual(self.run_w([self.WF], cfg={**CFG, 'workflow_paths': []}), ([], []))
+
+    def test_other_paths_and_other_branch_kinds_are_unchanged(self):
+        self.assertEqual(self.run_w(['warscape/x.py', '.github/CODEOWNERS', 'docs/ci/x.md']), ([], []))
+        for branch in ('plan/x', 'meta/x', 'brief/J1', 'release/v1.0.0'):
+            with self.subTest(branch):
+                self.assertEqual(self.run_w([self.WF], branch=branch)[1], [])
+        self.assertEqual(self.run_w([self.WF], branch='meta/x', cfg={**CFG, 'meta': ['.github/**']}), ([], []))
+
+    def test_the_default_globs_and_the_core_spells_them_out(self):
+        self.assertEqual(DEFAULTS['policy']['workflow_paths'], ['.github/workflows/**', 'ci/**'])
+        self.assertEqual(DEFAULTS['policy']['bases'], ['main'])
+        for root in (ROOT, ROOT / 'tests' / 'fixture_game'):
+            raw = tomllib.loads((root / 'wsc.toml').read_text(encoding='utf-8'))['policy']
+            self.assertEqual((raw['workflow_paths'], raw['bases']), (['.github/workflows/**', 'ci/**'], ['main']), root)
+
+    def test_the_keys_are_lists_of_strings(self):
+        for key in ('workflow_paths', 'bases'):
+            for bad in ('main', 1, [1], ['']):
+                with self.subTest(key=key, bad=bad), tempfile.TemporaryDirectory() as t:
+                    Path(t, 'wsc.toml').write_text(f'[policy]\n{key} = {json.dumps(bad)}\n', encoding='utf-8')
+                    with self.assertRaises(ConfigError) as e:
+                        load_config(Path(t))
+                    self.assertIn(f'policy.{key}', str(e.exception))
+
+
 class CoreOwnConfig(unittest.TestCase):
     """The core's real wsc.toml (C19): no registry view is committed, so a `brief/W<n>` branch (its brief and its row, nothing else) can pass `policy`
     and the `registries` gate together; before C19 the committed registries/jobs.md made that impossible."""
@@ -494,6 +635,50 @@ class PolicyOnGit(unittest.TestCase):
         self.commit('jobs/J1/brief.md', 'brief')
         self.write_rows([ROW, OTHER], layout)
 
+    def sha(self, rev='HEAD'):
+        return subprocess.run(['git', 'rev-parse', rev], cwd=self.d, check=True, capture_output=True, text=True).stdout.strip()
+
+    def round_1_then_side_round_2(self):
+        """W40 review round 1, should-fix 1: R1 writes round 1 `merge`; R2 writes round 2 on a side branch; R1 commits code on the job branch without
+        having seen it, and merges the side branch (an ordinary `git pull`). The log then lists the code before R2's review commit, though R2 never saw it."""
+        self.git('checkout', '-q', '-B', 'job/J1', 'main')
+        self.commit('jobs/J1/report.md', 'report', 'S1')
+        one = rv((1, 'merge'))
+        self.commit(REV, one, 'R1')
+        self.git('checkout', '-q', '-b', 'side')
+        self.commit(REV, rv((2, 'merge'), (1, 'merge')), 'R2')
+        self.git('checkout', '-q', 'job/J1')
+        self.commit('late.py', 'x = 1\n', 'R1')
+        late = self.sha()
+        self.git('merge', '-q', '--no-edit', 'side')
+        return late
+
+    def rule_a(self):
+        cfg, main, head = {**CFG, 'reviewer_code': 'error'}, self.sha('main'), self.sha()
+        review = (Path(self.d) / REV).read_text(encoding='utf-8')
+        return pp.round_problems('J1', cfg, pp.GitReads(self.d, main, head, main, 'Claude-Session'), {'S1'}, review)
+
+    def test_w40_code_a_fresh_round_never_saw_is_not_cleared_by_its_place_in_the_log(self):
+        late = self.round_1_then_side_round_2()
+        order = subprocess.run(['git', 'log', '--reverse', '--topo-order', '--format=%H', 'main..HEAD'], cwd=self.d, check=True, capture_output=True, text=True).stdout.split()
+        self.assertLess(order.index(late), order.index(self.sha('side')))   # the trap: first in the log, and not an ancestor
+        errs, warns = self.rule_a()
+        self.assertEqual(warns, [])
+        self.assertTrue(len(errs) == 1 and late[:12] in errs[0] and 'late.py' in errs[0], errs)
+
+    def test_w40_a_fresh_round_on_top_of_the_merge_clears_that_code(self):
+        self.round_1_then_side_round_2()
+        self.commit(REV, rv((3, 'merge'), (2, 'merge'), (1, 'merge')), 'R3')
+        self.assertEqual(self.rule_a(), ([], []))
+
+    def test_w40_a_fresh_round_clears_the_code_it_descends_from(self):
+        self.git('checkout', '-q', '-B', 'job/J1', 'main')
+        self.commit('jobs/J1/report.md', 'report', 'S1')
+        self.commit(REV, rv((1, 'merge')), 'R1')
+        self.commit('code.py', 'x = 1\n', 'R1')
+        self.commit(REV, rv((2, 'merge'), (1, 'merge')), 'R2')
+        self.assertEqual(self.rule_a(), ([], []))
+
     def test_rows_at_reads_either_layout_the_same(self):
         dir_rows = pp_rows_at(self.d, 'main')
         self.git('checkout', '-q', '-b', 'old', 'main')
@@ -540,6 +725,51 @@ class PolicyOnGit(unittest.TestCase):
         e = check('plan/x', ['docs/DECISIONS.md'], {'J1': ROW}, {'J1': ROW}, files(**{'docs/DECISIONS.md': base}),
                      files(**{'docs/DECISIONS.md': base.replace('B.', 'Bee.')}))
         self.assertTrue(any('append only' in x for x in e), e)
+
+
+
+def pr(n, branch='job/W1', head='h', merge='m', at='2026-11-04T10:00:00Z'):
+    return {'number': n, 'headRefName': branch, 'headRefOid': head, 'mergeCommit': {'oid': merge}, 'mergedAt': at}
+
+
+class ScanPure(unittest.TestCase):
+    """`wsc policy --scan` (W40): which branches to judge, which rule a line belongs to, the count, the config of an older repo."""
+
+    def test_targets_are_merged_job_branches_oldest_first(self):
+        got = pp.scan_targets([pr(3, at='2026-11-04T12:00:00Z'), pr(2, 'plan/x'), pr(1, at='2026-11-03T12:00:00Z'), {**pr(4), 'mergeCommit': None}])
+        self.assertEqual([p['number'] for p in got], [1, 3])
+
+    def test_since_keeps_the_merge_commits_after_it(self):
+        got = pp.scan_targets([pr(1, merge='old'), pr(2, merge='new')], after={'new'})
+        self.assertEqual([p['number'] for p in got], [2])
+
+    def test_every_rule_message_has_one_letter(self):
+        lines = ['round 1 of jobs/J1/review.md says merge, but its own commits change files outside jobs/J1/ and its row: c2 (x): write',
+                 'round 2 was written by a session that wrote round 1 (R1): a fresh session per round',
+                 'jobs/J1/review.md: round 1 was changed by commit c3 after round 2 existed: review rounds are append only',
+                 'jobs/J1/review.md: round 1 was edited by commit c3 of a session that did not write it (R2): only its own author edits the newest round',
+                 'jobs/J1/report.md cites job/J9: evidence on an unmerged branch cannot be opened from main',
+                 'merge verdict on a large diff cites no evidence (J62, J57): 900 changed lines',
+                 'decision row D1 on job/J1 must name the brief that required it (add `J1` to the row, or move it to a plan/ branch)',
+                 'row J1 must be `done` on the branch']
+        self.assertEqual([pp.scan_rule(x) for x in lines], ['A', 'B', 'C', 'C', 'D', 'E', 'F', None])
+
+    def test_the_tally_counts_branches_per_rule_and_keeps_one_line_each(self):
+        res = [(pr(1, 'job/W1'), ['round 2 was written by x: a fresh session per round', 'a b cites job/W9: evidence', 'c d cites job/W8: evidence']),
+               (pr(2, 'job/W2'), ['row W2 must be `done` on the branch']), (pr(3, 'job/W3'), ['e f cites job/W7: evidence'])]
+        lines, counts = pp.scan_tally(res)
+        self.assertEqual(counts, {'A': 0, 'B': 1, 'C': 0, 'D': 2, 'E': 0, 'F': 0})
+        self.assertEqual(len(lines), 2)
+        self.assertIn('job/W1 (#1, 2026-11-04)', lines[0])
+        lines, counts = pp.scan_tally(res, only='B')
+        self.assertEqual((len(lines), counts), (1, {'B': 1}))
+
+    def test_a_repo_on_an_older_core_keeps_its_rule_keys_and_drops_the_retired_ones(self):
+        cfg = pp.scan_config('registries_dir = "reg"\n[jobs]\nid_prefix = "J"\nhooks = ["old"]\n[policy]\ndecision_prefix = "D"\ngone = 1\n[gates]\ndirs = ["adapter"]\n')
+        got = pp.settings(cfg)
+        self.assertEqual((got['job_prefix'], got['prefix'], got['reg_jobs']), ('J', 'D', 'reg/jobs'))
+        self.assertEqual(cfg['gates']['dirs'], [])   # W27's method: gate modules off
+        self.assertTrue(got['decisions_cite_job'])   # and rule F on
 
 
 if __name__ == '__main__':

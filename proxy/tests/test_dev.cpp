@@ -380,5 +380,79 @@ int main(int argc, char** argv) {
             if (!has) { printf("    shipped ini lacks %s\n", k); CHECK(has); }
         }
     }
+    {   // W34 (C8): which paths `lua` may read. Relative paths resolve against the game folder; only the lua folder and the ctl folder are allowed
+        const std::string g = "C:\\Games\\Some Game\\", l = "mod\\lua\\", c = "C:\\state\\ctl";
+        std::string why;
+        auto ok = [&](const std::string& p) { why.clear(); return LuaPathAllowed(p, g, l, c, why); };
+        for (const char* p : { "mod/lua/ctl/speed.lua", "mod\\lua\\ctl\\speed.lua", "MOD/Lua/Ctl/Speed.LUA", "mod//lua\\.\\x.lua", "./mod/lua/x.lua",
+                               "C:\\Games\\Some Game\\mod\\lua\\x.lua", "c:/games/some game/MOD/lua/x.lua", "\\\\?\\C:\\Games\\Some Game\\mod\\lua\\x.lua",
+                               "C:\\state\\ctl\\chunk1.lua", "c:/STATE/ctl/sub/chunk.lua", "\\\\?\\C:\\state\\ctl\\chunk1.lua" }) {
+            if (!ok(p)) printf("    refused %s: %s\n", p, why.c_str());
+            CHECK(ok(p)); CHECK(why.empty());
+        }
+        for (const char* p : { "", "x.lua", "mod/x.lua", "mod\\lua", "mod\\lua\\", "mod/lua2/x.lua", "mod/luax.lua", "C:\\Games\\Some Game\\x.lua", "D:\\Games\\Some Game\\mod\\lua\\x.lua",
+                               "C:\\state\\ctl2\\x.lua", "C:\\state\\ctl", "C:\\state\\ctl\\", "C:\\Windows\\system32\\x.lua",
+                               "mod/lua/../x.lua", "mod\\lua\\..\\..\\x.lua", "..\\mod\\lua\\x.lua", "C:\\state\\ctl\\..\\x.lua", "mod/lua/.. /x.lua", "mod/lua/... /x.lua", "mod/lua/x.lua.", "mod/lua/x.lua ",
+                               "\\\\server\\share\\mod\\lua\\x.lua", "//server/share/x.lua", "\\\\?\\UNC\\server\\share\\x.lua", "\\\\.\\C:\\state\\ctl\\x.lua", "\\\\?\\mod\\lua\\x.lua",
+                               "\\mod\\lua\\x.lua", "/mod/lua/x.lua", "C:mod\\lua\\x.lua", "mod/lua/x.lua:stream", "mod/lua/x.lua::$DATA", "C:\\state\\ctl\\x.lua:s",
+                               "mod/lua/con", "mod/lua/NUL.lua", "mod/lua/com1.txt", "mod/lua/lpt9" }) {
+            if (ok(p)) printf("    accepted %s\n", p);
+            CHECK(!ok(p));
+            CHECK(why.rfind("lua: ", 0) == 0 && why.find("is outside the lua folder mod\\lua\\ and the ctl folder") != std::string::npos);
+        }
+        CHECK(!ok(std::string("mod/lua/x.lua\0.txt", 18)));
+        CHECK(!LuaPathAllowed("mod/lua/x.lua", "", l, c, why));              // no game folder: nothing relative resolves
+        CHECK(!LuaPathAllowed("x.lua", g, "", "", why));                     // an empty root allows nothing, never the game folder
+        CHECK(!LuaPathAllowed("C:\\Games\\Some Game\\x.lua", g, "", "", why));
+        CHECK(!LuaPathAllowed("C:\\state\\ctl\\x.lua", g, l, "", why));
+        CHECK(LuaPathAllowed("ctl/x.lua", g, l, "ctl", why));                // a relative dev.ctl_dir is the game folder's
+        CHECK(LuaPathAllowed("C:\\Games\\Some Game\\ctl\\x.lua", g, l, "ctl\\", why));
+        CHECK(!LuaPathAllowed("ctl2/x.lua", g, l, "ctl", why));
+        CHECK(LuaPathAllowed("mod/lua/x.lua", g, "mod/lua", c, why));        // the adapter's folder in either form, with or without its last slash
+        // the `lua` verb's message says the rule, and the path check stays out of the pure grammar
+        CHECK(ParseCtl("lua").error == "lua needs a file (under the lua folder or the ctl folder)");
+        CHECK(ParseCtl("lua C:\\x y\\p.lua").error.empty());
+        CHECK(std::string(CtlVerbs()).find("lua <file under the lua or ctl folder>") != std::string::npos);
+    }
+    {   // W34 (C8): rotation. The newest N by write time (ties by name) stay; ids keep their order and their last N
+        using V = std::vector<std::wstring>;
+        CHECK(RotatePlan({}, 2).empty());
+        CHECK(RotatePlan({ { L"a", 1 }, { L"b", 2 } }, 2).empty());
+        CHECK(RotatePlan({ { L"a", 1 }, { L"b", 2 }, { L"c", 3 } }, 2) == V{ L"a" });
+        CHECK(RotatePlan({ { L"c", 3 }, { L"a", 1 }, { L"b", 2 } }, 1) == (V{ L"b", L"a" }));
+        CHECK(RotatePlan({ { L"x", 5 }, { L"y", 5 }, { L"z", 5 } }, 2) == V{ L"x" });   // a tie: the later name counts as newer
+        CHECK(RotatePlan({ { L"a", 1 } }, 0) == V{ L"a" });
+        CHECK_EQ(CountIds(""), (size_t)0); CHECK_EQ(CountIds("a\r\nb\r\n"), (size_t)2); CHECK_EQ(CountIds("a\nb"), (size_t)2); CHECK_EQ(CountIds("\r\n\r\na\r\n\r\n"), (size_t)1);
+        CHECK(TrimIds("", 2) == "");
+        CHECK(TrimIds("a\r\nb\r\n", 2) == "a\r\nb\r\n");                          // exactly at the window: unchanged
+        CHECK(TrimIds("a\r\nb\r\nc\r\n", 2) == "b\r\nc\r\n");                     // one over
+        CHECK(TrimIds("a\nb\n\nc", 2) == "b\r\nc\r\n");                           // bare newlines, a blank line, no last newline
+        const std::string longId(64, 'z');
+        CHECK(TrimIds("a\r\n" + longId + "\r\n", 1) == longId + "\r\n");          // an id is kept whole, never cut to a byte count
+        CHECK(kCtlKeepTaken == 200 && kCtlKeepIds == 4096 && kCtlTrimIdsOver == 8192 && kCtlRotateEvery == 500);
+    }
+    {   // W34 source lints (C8): the ctl folder is restricted in the ctl thread, a refused `lua` never reaches the bridge, rotation spares .done
+        const std::string dv = tk::ReadFile("core/dev.cpp");
+        const size_t np = std::string::npos;
+        const size_t ct = dv.find("DWORD WINAPI CtlThread("), mk = dv.find("CreateDirectoryW(dir.c_str(), nullptr);", ct), acl = dv.find("CtlRestrictFolder(dir);", ct),
+                     ids = dv.find("ReadFileBytes(dir + L\"_ids.txt\"", ct), rot = dv.find("CtlRotate(dir);", ct), watch = dv.find("ctl: watching", ct);
+        CHECK(ct != np && mk != np && acl != np && ids != np && rot != np && watch != np);
+        CHECK(mk < acl && acl < ids && ids < rot && rot < watch);
+        CHECK(dv.find("CtlRotate(dir);", rot + 1) != np);                          // and every kCtlRotateEvery requests
+        const size_t fn = dv.find("void CtlRestrictFolder("), fe = dv.find("\n}\n", fn);
+        CHECK(fn != np && fe != np);
+        const std::string fb = dv.substr(fn, fe - fn);
+        CHECK(fb.find(";;;OW)") == np);   // wine maps OWNER RIGHTS to mode 000: the ACE names the user (W34 report)
+        for (const char* s : { "D:PAI(A;OICI;FA;;;", "ProcessUserSid()", "ConvertStringSecurityDescriptorToSecurityDescriptorW(", "SetFileSecurityW(", "DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION",
+                               "LocalFree(", "ctl: folder %ls is owner-only", "ctl: could not restrict %ls (error %lu): continuing" }) CHECK(fb.find(s) != np);
+        const size_t lv = dv.find("if (r.verb == \"lua\") {"), lc = dv.find("LuaPathAllowed(", lv), lr = dv.find("RunLua(id, r.arg", lv);
+        CHECK(lv != np && lc != np && lr != np && lc < lr);
+        CHECK(dv.substr(lc, lr - lc).find("\"refused\"") != np);
+        const size_t rf = dv.find("void CtlRotate("), re = dv.find("\n}\n", rf);
+        CHECK(rf != np && re != np);
+        const std::string rb = dv.substr(rf, re - rf);
+        CHECK(rb.find("L\"*.cmd.taken\"") != np && rb.find("RotatePlan(") != np && rb.find("TrimIds(") != np && rb.find("WriteFileAtomic(") != np);
+        CHECK(rb.find(".done") == np);
+    }
     return tk::Done("test_dev");
 }

@@ -23,8 +23,11 @@ from pathlib import Path
 
 from _util import CORE, core_source, fixture_game, git
 
+sys.path.insert(0, str(CORE))
+from warscape import policy as pp  # noqa: E402
+
 WSC = CORE / 'wsc.py'
-JUDGED = 'policy: judged with the rules of origin/main at '
+JUDGED ='policy: judged with the rules of origin/main at '
 
 PEEK = '''import subprocess
 from warscape.gates import Result
@@ -178,12 +181,103 @@ class CoreMode(Branches, unittest.TestCase):
     def w27_round(n, v, extra=''):
         return f'## Round {n} (2026-11-04, branch job/W900 at abc123{n})\n\n**Verdict: {v}.**\n{extra}\n'
 
-    def test_w27_a_reviewer_code_commit_under_merge_warns(self):
-        rc, out, err = self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n'})])
-        self.assertEqual(rc, 0, out + err)   # a warning: the scan of the merged job branches (the brief's kill criterion)
+    def reviewer_code(self, mode):
+        """A base branch whose wsc.toml says `reviewer_code = <mode>`, whatever main's says."""
+        name = f'rc-{mode}'
+        text = re.sub(r'^reviewer_code = .*\n', '', self.toml(), flags=re.M).replace('[policy]\n', f'[policy]\nreviewer_code = "{mode}"\n', 1)
+        text = text.replace('bases = ["main"]', f'bases = ["main", "{name}"]')   # W36: else the base itself is refused
+        self.branch(name, {'wsc.toml': text})
+        git(self.d, 'update-ref', f'refs/remotes/origin/{name}', name)
+        return f'origin/{name}'
+
+    def reviewer_job(self, extra=None):
+        self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge'), 'lib/reviewer.py': 'y = 2\n', **(extra or {})})])
+
+    def test_w40_a_reviewer_code_commit_under_merge_warns_with_a_warn_base(self):
+        base = self.reviewer_code('warn')
+        self.reviewer_job()
+        rc, out, err = self.policy('job/W900', base)
+        self.assertEqual(rc, 0, out + err)
         self.assertIn('policy: warning: round 1 of jobs/W900/review.md says merge', out)
         self.assertIn('lib/reviewer.py', out)
         self.assertIn('write the verdict `merge after fixes`; a fresh round reviews your change', out)
+
+    def test_w40_a_reviewer_code_commit_under_merge_is_refused_with_an_error_base(self):
+        base = self.reviewer_code('error')
+        self.reviewer_job()
+        res = self.policy('job/W900', base)
+        self.assertRefused(res, 'policy: round 1 of jobs/W900/review.md says merge', 'lib/reviewer.py', 'REFUSED',
+                           'write the verdict `merge after fixes`; a fresh round reviews your change')
+        self.assertNotIn('policy: warning: round 1', res[1])
+
+    def test_w40_a_head_that_flips_the_key_is_judged_with_the_bases_value(self):
+        base = self.reviewer_code('error')
+        toml = self.text('wsc.toml', base).replace('reviewer_code = "error"', 'reviewer_code = "warn"')
+        self.reviewer_job({'wsc.toml': toml})
+        self.assertRefused(self.policy('job/W900', base), 'policy: round 1 of jobs/W900/review.md says merge', 'REFUSED')
+
+    def test_w40_a_warn_base_stays_a_warning_when_the_head_says_error(self):
+        base = self.reviewer_code('warn')
+        toml = self.text('wsc.toml', base).replace('reviewer_code = "warn"', 'reviewer_code = "error"')
+        self.reviewer_job({'wsc.toml': toml})
+        rc, out, err = self.policy('job/W900', base)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn('policy: warning: round 1 of jobs/W900/review.md says merge', out)
+
+    def test_w40_a_fresh_round_clears_a_stranded_merge_with_an_error_base(self):
+        base = self.reviewer_code('error')
+        r1 = self.w27_round(1, 'merge')
+        self.w27_job([('R1', {'jobs/W900/review.md': '# Review\n\n' + r1, 'lib/reviewer.py': 'y = 2\n'}),
+                      ('R2', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(2, 'merge') + r1})])
+        rc, out, err = self.policy('job/W900', base)
+        self.assertEqual(rc, 0, out + err)
+
+    def scan(self, prs, **kw):
+        """`scan` over this repository with `gh` injected; (exit code, printed lines)."""
+        printed = []
+
+        def fake(cmd, **_):
+            self.assertEqual(cmd[:3], ['gh', 'pr', 'list'])
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(prs), '')
+        rc = pp.scan(self.d, run=fake, out=printed.append, **kw)
+        return rc, printed
+
+    def merged(self, n):
+        """Squash job/W900 onto a throwaway main; the pull request record gh would give."""
+        head, name = self.sha('job/W900'), f'scan-main-{n}'
+        git(self.d, 'checkout', '-q', '-f', '-B', name, 'main')
+        git(self.d, 'commit', '-q', '--allow-empty', '-m', f'squash #{n}')
+        merge = self.sha(name)
+        self.back()
+        git(self.d, 'update-ref', 'refs/remotes/origin/scanned', name)
+        return {'number': n, 'headRefName': 'job/W900', 'headRefOid': head, 'mergeCommit': {'oid': merge}, 'mergedAt': '2026-11-04T10:00:00Z'}
+
+    def test_w40_scan_judges_a_merged_branch_at_its_head_and_counts_the_rule(self):
+        self.reviewer_job()
+        rc, lines = self.scan([self.merged(7)], base='origin/scanned')
+        self.assertEqual(rc, 0, lines)
+        self.assertTrue(any('job/W900 (#7, 2026-11-04)' in x and 'A: round 1 of jobs/W900/review.md says merge' in x for x in lines), lines)
+        self.assertIn('1 branches judged, 0 not judged; A 1,', lines[-1])
+
+    def test_w40_scan_since_leaves_out_what_merged_before_it(self):
+        self.reviewer_job()
+        pr = self.merged(7)
+        rc, lines = self.scan([pr], base='origin/scanned', since=pr['mergeCommit']['oid'])
+        self.assertEqual(rc, 0, lines)
+        self.assertIn('0 branches judged, 0 not judged', lines[-1])
+
+    def test_w40_scan_since_that_does_not_resolve_is_an_error_not_an_empty_count(self):
+        self.reviewer_job()
+        rc, lines = self.scan([self.merged(7)], base='origin/scanned', since=LOST)
+        self.assertEqual(rc, 1, lines)
+        self.assertTrue(any('does not resolve' in x for x in lines), lines)
+
+    def test_w40_scan_a_head_it_cannot_read_is_named_and_exits_1(self):
+        self.reviewer_job()
+        rc, lines = self.scan([{**self.merged(7), 'headRefOid': LOST}], base='origin/scanned')
+        self.assertEqual(rc, 1, lines)
+        self.assertTrue(any('job/W900 (#7' in x and 'not judged' in x for x in lines), lines)
+        self.assertIn('0 branches judged, 1 not judged', lines[-1])
 
     def test_w27_b_round_2_by_the_round_1_session_is_refused(self):
         r1 = self.w27_round(1, 'merge after fixes')
@@ -219,6 +313,65 @@ class CoreMode(Branches, unittest.TestCase):
         warn = [i for i, l in enumerate(lines) if l.startswith('policy: warning: ') and '0badc0ffee1' in l]
         verdict = [i for i, l in enumerate(lines) if l.startswith('policy: job/W900: ok')]
         self.assertTrue(warn and verdict and warn[0] < verdict[0], out)
+
+    # ------------------------------------------------------------ W36: through the CLI, as CI runs it
+    W36_WF = '.github/workflows/fake.yml'
+    W36_WARN = f"policy: warning: `{W36_WF}` is a workflow input and W900's brief on the base does not name it"
+
+    def w36_job(self, extra):
+        return self.w27_job([('S1', extra), ('R1', {'jobs/W900/review.md': '# Review\n\n' + self.w27_round(1, 'merge')})])
+
+    def test_w36_a_head_that_adds_an_unnamed_workflow_is_warned_about(self):
+        rc, out, err = self.w36_job({self.W36_WF: 'name: policy\n'})
+        self.assertEqual(rc, 0, out + err)   # a warning: the scan of the merged job branches (the brief's kill criterion)
+        self.assertIn(self.W36_WARN, out)
+
+    def test_w36_the_heads_own_workflow_paths_do_not_silence_it(self):
+        off = self.toml().replace('workflow_paths = [".github/workflows/**", "ci/**"]', 'workflow_paths = []')
+        self.assertNotEqual(off, self.toml())
+        rc, out, err = self.w36_job({self.W36_WF: 'name: policy\n', 'wsc.toml': off})
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(self.W36_WARN, out)   # the base's config judges (C24)
+
+    def test_w36_a_brief_on_the_head_names_nothing(self):
+        out = self.w36_job({self.W36_WF: 'name: policy\n', 'jobs/W900/brief.md': f'# W900: a test job\n\n`{self.W36_WF}`\n'})[1]
+        self.assertIn(self.W36_WARN, out)   # only the brief on the base counts
+
+    def w36_base(self, name, toml=None):
+        """A branch `name` of main, known as origin/<name>, and meta/w36 cut from it."""
+        self.branch(name, {'wsc.toml': toml if toml is not None else self.toml() + '\n'})
+        git(self.d, 'update-ref', f'refs/remotes/origin/{name}', name)
+        self.branch('meta/w36', {'docs/w36.md': 'x\n'}, start=name)
+
+    def test_w36_a_pull_request_into_another_branch_is_refused(self):
+        for name in ('feature', 'stack/one'):
+            self.w36_base(name)
+            res = self.policy('meta/w36', f'origin/{name}')
+            self.assertRefused(res, f'origin/{name}', '`[policy] bases`', 'retarget the pull request to main', 'policy: meta/w36: REFUSED (not judged)')
+            self.assertNotIn('judged with the rules', res[1])   # nothing of the head was read, no child ran
+
+    def test_w36_main_and_a_sha_are_judged_as_before(self):
+        self.branch('meta/w36', {'docs/w36.md': 'x\n'})
+        for base in ('origin/main', self.sha('main'), 'main'):
+            rc, out, err = self.policy('meta/w36', base)
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn('judged with the rules', out)
+
+    def test_w36_the_bases_own_list_decides(self):
+        for name, value in (('open', 'bases = []'), ('listed', 'bases = ["main", "listed"]')):
+            self.w36_base(name, self.toml().replace('bases = ["main"]', value))
+            rc, out, err = self.policy('meta/w36', f'origin/{name}')
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn(f'judged with the rules of origin/{name}', out)
+
+    def test_w36_a_heads_bases_key_does_not_open_a_base(self):
+        self.w36_base('feature')
+        self.branch('meta/w36', {'wsc.toml': self.toml().replace('bases = ["main"]', 'bases = []')}, start='feature')
+        self.assertRefused(self.policy('meta/w36', 'origin/feature'), '`[policy] bases`')
+
+    def test_w36_a_bad_bases_value_on_the_base_fails_closed(self):
+        self.w36_base('feature', self.toml().replace('bases = ["main"]', 'bases = "main"'))
+        self.assertRefused(self.policy('meta/w36', 'origin/feature'), '[policy] bases is not a list')
 
     def test_bypass_1_a_bootstrap_entry_on_the_head_exempts_nothing(self):
         self.branch('foo', {'wsc.toml': self.toml().replace('[policy]\n', '[policy]\nbootstrap = ["foo"]\n'), 'warscape/extra.py': 'X = 1\n'})

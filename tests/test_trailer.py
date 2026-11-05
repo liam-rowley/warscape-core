@@ -41,6 +41,61 @@ class Trailer(unittest.TestCase):
         self.assertTrue(commit_lacks_trailer(f'git commit -m x --trailer "Claude-Session: {SID}"', SID, 'Agent-Session'))
 
 
+class GlobalOptions(unittest.TestCase):
+    """W36 decision 2: a game's hook asks with the command as typed; git's global options and an alias defined in the command are seen."""
+    OPTIONS = ('-c k=v', '-c "k=v w"', "-c 'k=v w'", '-C dir', '-C "a dir"', "-C 'a dir'", '-C $(pwd)', '--git-dir=p', '--git-dir="a p"', '--git-dir p',
+               '--git-dir "a p"', '--work-tree=p', "--work-tree='a p'", '--work-tree p', '--namespace=n', '--namespace n', '--exec-path', '--exec-path=p',
+               '--super-prefix=p', '--config-env=k=ENV', '--config-env k=ENV', '-p', '-P', '--paginate', '--no-pager', '--no-replace-objects', '--bare',
+               '--literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs', '--no-optional-locks')
+    ALIASES = ('-c alias.ci=commit ci', '-c "alias.ci=commit -q" ci', '-c alias.ci="commit -q" ci', "-c 'alias.ci=commit --amend' ci", '-c alias.CI=commit ci',
+               '-c alias.a=ci -c alias.ci=commit a', '-c "alias.ci=!git commit" ci', '-c "alias.ci=!cd x && git --no-pager commit" ci',
+               '-c "alias.ci=--no-pager commit" ci', '--no-pager -c alias.ci=commit -C d ci')
+    NOT_COMMITS = ('git status', 'git commit-tree abc', 'git commit-graph write', 'echo git commit', 'echo git --no-pager commit', 'git log --grep commit',
+                   'git --no-pager log --grep commit', 'git -c alias.ci=status ci', 'git -c "alias.ci=status -s" ci', 'git -c alias.ci=commit status',
+                   'git -c alias.a=b -c alias.b=a a', 'git config alias.ci commit', 'git help commit', 'git --help commit', 'git -C commit status',
+                   'git --git-dir commit status', 'git -c x=y; commit -m x', 'git\ncommit -m x', 'agit commit', 'git-commit', './git commit', 'ls git commit',
+                   'grep -r "git commit" docs', 'git log --grep "git commit"')
+
+    def test_every_global_option_in_front_of_commit(self):
+        for opt in self.OPTIONS:
+            with self.subTest(opt):
+                self.assertTrue(commit_lacks_trailer(f'git {opt} commit -m x', SID))
+                self.assertTrue(commit_lacks_trailer(f'git.exe {opt} commit -m x', SID))
+                self.assertFalse(commit_lacks_trailer(f'git {opt} commit -m x --trailer "Claude-Session: {SID}"', SID))
+                self.assertFalse(commit_lacks_trailer(f'git {opt} status', SID))
+
+    def test_several_options_together(self):
+        self.assertTrue(commit_lacks_trailer('git --no-pager -c a=b -C "x y" --git-dir=.git -P commit -m x', SID))
+
+    def test_an_alias_defined_in_the_command_is_a_commit(self):
+        for cmd in self.ALIASES:
+            with self.subTest(cmd):
+                self.assertTrue(commit_lacks_trailer(f'git {cmd} -m x', SID))
+                self.assertFalse(commit_lacks_trailer(f'git {cmd} -m x --trailer "Claude-Session: {SID}"', SID))
+
+    def test_no_false_positives_with_a_real_session_id(self):
+        for cmd in self.NOT_COMMITS:
+            with self.subTest(cmd):
+                self.assertFalse(commit_lacks_trailer(cmd, SID))
+
+    def test_a_gitconfig_alias_cannot_be_known_from_the_command(self):
+        self.assertFalse(commit_lacks_trailer('git ci -m x', SID))
+
+    def test_git_at_the_start_of_any_command_in_the_line(self):
+        for cmd in ('cd x && git commit -m y', 'cd x; git commit -m y', 'a || git commit', 'a | git commit', '(git commit -m y)', '$(git commit -m y)', '`git commit`',
+                    '{ git commit; }', 'a\ngit commit', 'if git commit; then b; fi', 'while true; do git commit; done', 'A=1 git commit', 'A="b c" B=2 git commit',
+                    'sudo git commit', 'env git commit', 'command git commit', 'exec git commit', 'time git commit', 'nohup git commit', '! git commit',
+                    '& git commit -m y', 'git status && git --no-pager commit -m y', 'git commit&&git push', 'C:\\Git\\cmd\\git.exe commit -m y'):
+            with self.subTest(cmd):
+                self.assertTrue(commit_lacks_trailer(cmd, SID))
+
+    def test_a_shell_started_with_a_command_string(self):
+        for cmd in ('bash -c "git commit -m y"', "sh -c 'git --no-pager commit -m y'", 'bash -lc "cd x && git commit"', 'cmd /c git commit -m y', 'eval "git commit"',
+                    'powershell -Command "git commit -m y"', 'pwsh -c "git -C d commit"'):
+            with self.subTest(cmd):
+                self.assertTrue(commit_lacks_trailer(cmd, SID))
+
+
 if __name__ == '__main__':
     unittest.main()
 

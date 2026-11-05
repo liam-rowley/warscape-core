@@ -2,11 +2,12 @@
 """Generate the proxy adapter's C++ tables (exe identity, engine sites, config keys) and its default config file from the registries.
 
 purpose: turn the game repo's engine_sites and config_keys registries (read through the core's registry loader, so either storage works) and its proxy adapter's identity.json into <adapter>/generated/tables.h and the shipped default config file, validating every site (hex, lengths, overlaps, config key, exe pin; value_key rows: the key's explicit int/float type, default 0, a max, 4 stock bytes that round-trip) and every key (type, default, release value, min/max range); docs/PROXY_SITES.md
-usage: python3 proxy/tools/gen_tables.py [--adapter <repo-relative adapter folder>] [--check]   (default adapter: proxy/tools/layout.py)
-when: after any change to the engine_sites or config_keys registry or identity.json (then rebuild the DLL); --check runs in the gates (tests/test_proxy_tables.py) and fails when the generated files are stale or a site is invalid
+usage: python3 proxy/tools/gen_tables.py [--adapter <repo-relative adapter folder>] [--check] [--exe <staged exe copy> [--allow-pin-mismatch]]   (default adapter: proxy/tools/layout.py; --exe: one MATCH or MISMATCH line per site from the file's own bytes, writes nothing; exit 0 all match, 1 a mismatch, 2 an unreadable file)
+when: after any change to the engine_sites or config_keys registry or identity.json (then rebuild the DLL); --check runs in the gates (tests/test_proxy_tables.py) and fails when the generated files are stale or a site is invalid; --exe on a staged copy of the exe after a new site or a game update, before a PC run
 not-a-verb: games cannot add wsc verbs for the proxy yet (wsc.toml verb_dirs is empty and the generator moves to warscape-core with proxy/core at the end of phase 1); the gates reach it through tests/
 """
 import argparse
+import hashlib
 import math
 import re
 import struct
@@ -15,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import layout  # noqa: E402  (the game repo and its adapter, before and after the move to warscape-core)
+from exe_info import parse_pe, rva_to_off  # noqa: E402  (W34: --exe reads a staged exe with the one PE parser)
 
 if str(layout.own_root()) not in sys.path:   # the core's library (warscape/), beside this tool's own wsc.toml
     sys.path.insert(1, str(layout.own_root()))
@@ -317,11 +319,72 @@ def render_console(adapter_rel, src):
     return '\n'.join(out)
 
 
+def file_section(pe, rva, n):
+    """The section whose file-backed bytes hold [rva, rva + n), or None: the DLL's SectionOfRva and FileBackedSize (proxy/src/pe.h)."""
+    for s in pe['sections']:
+        backed = s['vsize'] if s['vsize'] and s['vsize'] < s['raw_size'] else s['raw_size']
+        if s['rva'] <= rva and rva - s['rva'] + n <= backed:
+            return s
+    return None
+
+
+def site_line(b, pe, s):
+    """(ok, the one line for this row) against the exe's bytes `b`: the anchor and the stock bytes where the row says they are."""
+    rva, sid = int(s['rva'], 16), s['id']
+    anchor, stock = hexbytes(s['anchor_bytes']), hexbytes(s['stock_bytes'])
+    sec = file_section(pe, rva, len(anchor) + len(stock))
+    off = rva_to_off(pe, rva) if sec else None
+    if off is None or off + len(anchor) + len(stock) > len(b):
+        return False, f'MISMATCH {sid}: rva not in the file'
+    if s['kind'] == 'hook' and not sec['characteristics'] & 0x20000000:   # IMAGE_SCN_MEM_EXECUTE: the DLL refuses it as NOT IN CODE
+        return False, f"MISMATCH {sid} 0x{rva:x}: a hook needs an executable section, {sec['name']} is not"
+    for name, want, at in (('anchor', anchor, off), ('stock', stock, off + len(anchor))):
+        for i, w in enumerate(want):
+            if b[at + i] != w:
+                return False, f'MISMATCH {sid} 0x{rva:x}: {name} byte {i} is {b[at + i]:02x}, the row says {w:02x}'
+    return True, f'MATCH {sid} 0x{rva:x}'
+
+
+def check_exe(path, ident, sites, allow_pin_mismatch=False):
+    """`--exe` (W34, C7): the file against the identity and every row, offline; prints one line per site. Exit code: 0 all match, 1 a
+    mismatch or an identity disagreement, 2 an unreadable file. It writes nothing. --allow-pin-mismatch turns the identity lines into one
+    note and leaves the byte checks as they are: for a file that carries the sites but is not the pinned build (the smoke's stand-in)."""
+    try:
+        b = Path(path).read_bytes()
+        pe = parse_pe(b)
+    except (OSError, ValueError, struct.error) as e:
+        print(f'gen_tables: cannot read {path}: {e}')
+        return 2
+    sha1 = hashlib.sha1(b).hexdigest()
+    print(f"gen_tables: --exe {path}: sha1 {sha1}, TimeDateStamp 0x{pe['time_date_stamp']:08x}, SizeOfImage 0x{pe['size_of_image']:08x}")
+    print('gen_tables: the file is unrelocated, so bytes compare as they stand, an absolute address in an anchor too (the DLL takes the load delta off first)')
+    # validate_sites already holds every row's `exe:` pin to the identity's sha1, so this one compare covers the rows' pins too
+    differs = [(word, got, want) for word, got, want in (
+        ('TimeDateStamp', f"0x{pe['time_date_stamp']:08x}", f"0x{int(ident['time_date_stamp'], 16):08x}"),
+        ('SizeOfImage', f"0x{pe['size_of_image']:08x}", f"0x{int(ident['size_of_image'], 16):08x}"),
+        ('sha1', sha1, ident['sha1'])) if got != want]
+    if differs and allow_pin_mismatch:
+        print('gen_tables: identity differs (--allow-pin-mismatch): ' + ', '.join(w for w, _, _ in differs))
+    elif differs:
+        for word, got, want in differs:
+            print(f'IDENTITY MISMATCH {word}: the file has {got}, the pin says {want}')
+    results = [site_line(b, pe, s) for s in sites]
+    for _, line in results:
+        print(line)
+    bad = sum(not ok for ok, _ in results)
+    print(f'gen_tables: --exe: {len(results) - bad} of {len(results)} sites match')
+    return 1 if bad or (differs and not allow_pin_mismatch) else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description='generate the proxy tables from the registries')
     ap.add_argument('--adapter', help='the adapter folder, relative to the game repo (default: proxy/tools/layout.py proxy-adapter)')
     ap.add_argument('--check', action='store_true', help='fail when a generated file is stale or a row is invalid; write nothing')
+    ap.add_argument('--exe', metavar='PATH', help='check every site against this staged exe copy, offline; write nothing (with --check: both)')
+    ap.add_argument('--allow-pin-mismatch', action='store_true', help='with --exe: a file that is not the pinned build, the bytes still decide')
     a = ap.parse_args()
+    if a.allow_pin_mismatch and not a.exe:
+        ap.error('--allow-pin-mismatch goes with --exe')
     if not a.adapter:
         try:
             a.adapter = layout.proxy_adapter(ROOT).relative_to(ROOT).as_posix()
@@ -343,6 +406,9 @@ def main():
     if errs:
         print('gen_tables: INVALID\n  ' + '\n  '.join(errs))
         return 1
+    exe_rc = check_exe(a.exe, ident, sites, a.allow_pin_mismatch) if a.exe else 0
+    if a.exe and not a.check:
+        return exe_rc
     want = {adapter / 'generated' / 'tables.h': render_header(ident, sites, keys, a.adapter),
             adapter / ident['config_file']: render_ini(ident, keys)}
     if (adapter / 'console_sources.json').exists():
@@ -359,9 +425,9 @@ def main():
     if a.check:
         if stale:
             print('gen_tables: STALE (run python3 proxy/tools/gen_tables.py): ' + ', '.join(stale))
-            return 1
+            return max(1, exe_rc)
         print(f'gen_tables: ok - {len(sites)} engine sites, {len(keys)} config keys, generated files current')
-        return 0
+        return exe_rc
     print(f"gen_tables: {len(sites)} engine sites, {len(keys)} config keys; {'wrote ' + ', '.join(stale) if stale else 'nothing changed'}")
     return 0
 

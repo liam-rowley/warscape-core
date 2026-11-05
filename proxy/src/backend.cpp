@@ -8,6 +8,10 @@
 // Missing or failing DXVK falls back to the system d3d9 with a warning. The backend is loaded at the first export call, never
 // from DllMain (LoadLibrary under the loader lock). The backend is not engine memory: it loads in pass-through too.
 // No D3D hook is installed here yet; when a feature adds one it must ask Rt().plan.d3dHooks (guard.h PlanEngine).
+// proxy.dxvk_wndproc_fix (J16): DXVK's own imports of Get/SetWindowLong (x86: what GetWindowLongPtr compiles to) go through a guard so
+// a foreign subclass above DXVK's window proc cannot close a cycle on a fullscreen re-entry. Only
+// d3d9_dxvk.dll's import table is patched (dxvk_wndproc.cpp, WndProcBook in wndprocpolicy.h): DXVK is the backend, not engine
+// memory, so this holds in pass-through too.
 #include "runtime.h"
 #include "ui_host.h"
 
@@ -88,6 +92,14 @@ BOOL CALLBACK LoadOnce(PINIT_ONCE, PVOID, PVOID*) {
     if (!rt.enabled) LOGI("backend: proxy disabled or second instance -> system d3d9");
     if (want == "dxvk") { s_real = LoadDxvk(); if (!s_real) LOGW("backend: dxvk unavailable, falling back to the system d3d9"); }
     else if (want != "system") LOGW("backend: unknown proxy.backend '%s' (system | dxvk), using system", want.c_str());
+    // on the loaded DLL, not the config string; before the first Direct3DCreate9 into it and before any thread the dev side starts there
+    if (s_real && !strcmp(s_name, "dxvk")) {
+        if (rt.cfg.Bool("proxy.dxvk_wndproc_fix")) {
+            const int slots = DxvkWndProcGuard(s_real);
+            LOGI("backend: wndproc guard on DXVK's imports: %d slots", slots);
+            if (slots < kDxvkWndProcSlots) LOGW("backend: wndproc guard patched %d of %d slots: this DXVK reaches user32 past the guard, an in-game fullscreen re-entry can still loop (J16)", slots, kDxvkWndProcSlots);
+        } else LOGW("backend: proxy.dxvk_wndproc_fix=0: an in-game fullscreen re-entry can loop DXVK's and a foreign window proc (J16)");
+    }
     if (!s_real) s_real = LoadSystem();
     if (!s_real) { LOGE("backend: no d3d9 could be loaded: the game cannot create a device"); return TRUE; }
     p_Create9 = Resolve<PFN_Create9>("Direct3DCreate9");

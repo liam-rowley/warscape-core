@@ -1595,6 +1595,39 @@ class NextWithReviewClaims(unittest.TestCase):
         self.assertEqual(self.run_next(peek=True), [('claims', {'job/J9'}, False), ('next', True)])
 
 
+class UsageRule(unittest.TestCase):
+    """W31: `problems` calls usage_problems; a queue below `usage_from` is untouched."""
+    LINE = 'Usage: 90 tool calls; models: opus; 1 session, by hand\n\n'
+
+    def setUp(self):
+        keep = getattr(jv.S, 'usage_from', 0)
+        jv.S.usage_from = 2
+        self.addCleanup(setattr, jv.S, 'usage_from', keep)
+
+    def errs(self, jid, report, **kw):
+        r = row(jid, status='review', brief=f'jobs/{jid}/brief.md', report=f'jobs/{jid}/report.md', **kw)
+        docs = {f'jobs/{jid}/brief.md': BRIEF.replace('J1', jid), f'jobs/{jid}/report.md': None if report is None else report.replace('J1', jid)}
+        return jv.problems([r], docs.get)
+
+    def test_a_report_with_the_line_passes(self):
+        self.assertEqual(self.errs('J2', REPORT.replace('## What exists', self.LINE + '## What exists')), [])
+
+    def test_a_report_without_it_fails_with_the_job_and_the_file_named(self):
+        (e,) = self.errs('J2', REPORT)
+        self.assertTrue(e.startswith('J2: report: no "Usage:'), e)
+
+    def test_a_row_with_no_report_file_gets_the_old_error_only(self):
+        self.assertEqual(self.errs('J2', None), ['J2: report=jobs/J2/report.md but the file does not exist'])
+
+    def test_a_done_row_below_usage_from_is_untouched(self):
+        r = row('J1', status='done', brief='jobs/J1/brief.md', report='jobs/J1/report.md', review='jobs/J1/review.md')
+        self.assertEqual(jv.problems([r], files(jobs__J1__brief_md=BRIEF, jobs__J1__report_md=REPORT, jobs__J1__review_md=REVIEW)), [])
+
+    def test_default_off_changes_nothing(self):
+        jv.S.usage_from = 0
+        self.assertEqual(self.errs('J2', REPORT), [])
+
+
 class ThisRepo(unittest.TestCase):
     def test_the_queue_passes_jobs_check(self):
         p = subprocess.run([sys.executable, str(ROOT / 'wsc.py'), '--root', str(ROOT), 'jobs', 'check'],

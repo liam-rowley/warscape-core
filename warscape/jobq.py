@@ -22,6 +22,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,8 @@ class Settings:
     ledgers = ''
     failed_results = ''
     semver_from = 0
+    usage_from = 0
+    usage_cmd = ''
     root = None
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
@@ -64,6 +67,7 @@ def configure_from(cfg, root=None, reg_dir='registries'):
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
     S.failed_results, S.root = cfg.get('failed_results', ''), (Path(root) if root is not None else None)
     S.semver_from = cfg.get('semver_from', 0)
+    S.usage_from, S.usage_cmd = cfg.get('usage_from', 0), cfg.get('usage_cmd', '')
     S.text = dict(cfg['text'])
     S.pc_state = cfg.get('pc_state', '')
     S.legacy_rounds = S.legacy_briefs = frozenset()
@@ -151,7 +155,7 @@ def brief_problems(jid, row, text):
             errs.append(f'Semver line says {sv.group(1)}, the row says {row.get("semver")}')
         if re.search(r'^## VERSION\b', text, re.M):
             errs.append('a "## VERSION" section: the release workflow owns VERSION (C27); the Semver line replaces it')
-    if not re.search(r'[Bb]udget\s+about\s+\d+\s+tool\s+calls', text):
+    if brief_budget(text) is None:
         errs.append('no call budget ("Budget about <n> tool calls"' + ref('ref_models', ', {}') + ')')
     kill = re.search(r'^## Kill criteria\s*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     if not kill or not re.search(r'^\s*- ', kill.group(1), re.M):
@@ -172,6 +176,250 @@ def report_problems(jid, text):
         if not re.search(rf'^## {h}\b', text, re.M):
             errs.append(f'no "## {h} ..." section')
     return errs
+
+
+# ------------------------------------------------------------------ usage accounting (W31)
+BUDGET = re.compile(r'[Bb]udget\s+about\s+([0-9]{1,9})\s+tool\s+calls')
+USAGE_SHAPE = 'Usage: <n> tool calls; models: <m1>, <m2>; <free text>'
+USAGE_LINE = re.compile(r'Usage:\s*([0-9]{1,9})\s+tool\s+calls\s*;\s*models:\s*([^;]+?)\s*;\s*(\S.*?)\s*\Z')
+USAGE_MODEL = re.compile(r'[A-Za-z][\w. -]*\Z')
+USAGE_TIMEOUT = 60   # seconds a game's usage_cmd may take
+FENCE = re.compile(r' {0,3}(`{3,}|~{3,})(.*)')
+
+
+class Usage(NamedTuple):
+    """A report's `Usage:` line: its tool calls, its models as written, its free text."""
+    calls: int
+    models: list
+    note: str
+
+
+def brief_budget(text):
+    """The brief's `Budget about <n> tool calls` as an int, or None."""
+    m = BUDGET.search(text or '')
+    return int(m.group(1)) if m else None
+
+
+def is_count(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def effective_budget(row, brief):
+    """The budget a job is held to: `to` of the newest `budget_lifts` entry (the last; lift_problems keeps the chain rising), else the brief's."""
+    lifts = row.get('budget_lifts')
+    if isinstance(lifts, list) and lifts and isinstance(lifts[-1], dict) and is_count(lifts[-1].get('to')):
+        return lifts[-1]['to']
+    return brief_budget(brief)
+
+
+def over_budget(calls, budget):
+    """True above 1.25 x the budget, in whole numbers (150 allows 187, not 188). No budget: never (brief_problems reports that)."""
+    return budget is not None and calls * 4 > budget * 5
+
+
+def model_family(name):
+    """The first word of a model name, lower case: what a report's model and the row's `model` are compared by."""
+    m = re.match(r'[a-z0-9]+', str(name).strip().lower())
+    return m.group(0) if m else ''
+
+
+def unfenced(lines):
+    """(index, line) of each line outside a fenced code block. A backtick run with a backtick after it on the line is inline code, not a fence."""
+    fence = ''
+    for i, l in enumerate(lines):
+        m = FENCE.match(l.rstrip('\r'))
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = ''
+        elif m and not (m.group(1)[0] == '`' and '`' in m.group(2)):
+            fence = m.group(1)
+        else:
+            yield i, l
+
+
+def usage_hits(lines):
+    return [i for i, l in unfenced(lines) if l.startswith('Usage:')]
+
+
+def parse_usage(report):
+    """(Usage, None), or (None, why) for a report with no `Usage:` line, more than one, or one not in the shape. A line in a code fence does not count."""
+    lines = report.split('\n')
+    hits = usage_hits(lines)
+    if not hits:
+        return None, f'no "{USAGE_SHAPE}" line'
+    if len(hits) > 1:
+        return None, 'two "Usage:" lines or more: keep one'
+    line = lines[hits[0]].rstrip()
+    m = USAGE_LINE.match(line)
+    models = [x.strip() for x in m.group(2).split(',')] if m else []
+    if not m or not all(USAGE_MODEL.match(x) for x in models):
+        return None, f'"{line[:80]}" does not parse: the shape is "{USAGE_SHAPE}"'
+    return Usage(int(m.group(1)), models, m.group(3)), None
+
+
+def usage_rule(jid):
+    """True when job `jid` falls under the usage rule (W31): `[jobs] usage_from` is set and the job number is at or above it."""
+    return bool(getattr(S, 'usage_from', 0)) and num(jid) >= S.usage_from
+
+
+def usage_write(jid):
+    """The command that fills a report's line: the game's reader, or by hand with no `[jobs] usage_cmd`."""
+    return f'{S.text["wsc"]} jobs usage {jid} --write' + ('' if getattr(S, 'usage_cmd', '') else ' --from-json <file>')
+
+
+def lift_problems(row, brief):
+    """The chain of a row's `budget_lifts`: each entry raises the budget, starts from the one before it (the brief's budget for the first) and says why."""
+    lifts = row.get('budget_lifts')
+    if lifts is None:
+        return []
+    if not isinstance(lifts, list):
+        return ['budget_lifts is not a list of {date, from, to, why}']
+    errs, prev = [], brief_budget(brief)
+    for i, l in enumerate(lifts):
+        at = f'budget_lifts[{i}]'
+        if not isinstance(l, dict) or not is_count(l.get('from')) or not is_count(l.get('to')):
+            errs.append(f'{at} is not {{date, from, to, why}} with whole numbers')
+            prev = None
+            continue
+        if l['to'] <= l['from']:
+            errs.append(f'{at}: to {l["to"]} is not above from {l["from"]}')
+        if prev is not None and l['from'] != prev:
+            errs.append(f'{at}: from {l["from"]} is not ' + (f"the brief's budget {prev}" if i == 0 else f'the previous to {prev}'))
+        if not isinstance(l.get('why'), str) or not l['why'].strip():
+            errs.append(f'{at}: no why')
+        prev = l['to']
+    return errs
+
+
+def usage_problems(jid, row, brief, report):
+    """The usage rule for one row (W31; pure): from `usage_from` on, a report on a row in review, fix or done has a `Usage:` line, at most 1.25 x
+    the effective budget, naming only the row's model, and the row's `budget_lifts` chain holds. A row with no report file is the row rule's to report."""
+    if not usage_rule(jid) or row.get('status') not in STATUSES_WITH['report'] or report is None:
+        return []
+    errs = lift_problems(row, brief)
+    u, why = parse_usage(report)
+    if why:
+        return errs + [f'{why} (from {S.prefix}{S.usage_from} on; `{usage_write(jid)}` writes it)']
+    budget = effective_budget(row, brief)
+    if over_budget(u.calls, budget):
+        errs.append(f'usage {u.calls} tool calls is over 1.25 x the budget {budget}: correct the line, or add a budget_lifts entry to the row')
+    want = model_family(row.get('model'))
+    errs += [f"usage model {m} is not the row's model {row.get('model')}: correct the line, or the row if it was wrong" for m in u.models if model_family(m) != want]
+    return errs
+
+
+def usage_chip(row, brief, report):
+    """(text, over budget) for a card, from the report's `Usage:` line and the effective budget, or None with no readable line."""
+    u = parse_usage(report)[0] if report is not None else None
+    if u is None:
+        return None
+    budget = effective_budget(row, brief)
+    calls = str(u.calls) if budget is None else f'{u.calls} / {budget}'
+    return f'usage {calls} calls · {", ".join(u.models)}', over_budget(u.calls, budget)
+
+
+def usage_record(data):
+    """A usage command's answer, checked: {calls, models, sessions, note} with models lower case and the note on one line. ValueError names the bad key."""
+    if not isinstance(data, dict):
+        raise ValueError('the usage answer is not a JSON object with calls, models, sessions and note')
+    for k in ('calls', 'sessions'):
+        if not is_count(data.get(k)) or not 0 <= data[k] < 10 ** 9:
+            raise ValueError(f'the usage answer needs {k} as a whole number of at least 0, not {data.get(k)!r}')
+    models = data.get('models')
+    if not isinstance(models, list) or not models or not all(isinstance(m, str) and USAGE_MODEL.match(m.strip()) for m in models):
+        raise ValueError(f'the usage answer needs models as a list of model names, not {models!r}')
+    for m in models:
+        if model_family(m) not in S.models:
+            raise ValueError(f'the usage answer has model {m.strip()!r}: name a family from [jobs] models ({", ".join(S.models)}), not a model id')
+    if not isinstance(data.get('note'), str):
+        raise ValueError(f'the usage answer needs note as text, not {data.get("note")!r}')
+    return {'calls': data['calls'], 'models': list(dict.fromkeys(m.strip().lower() for m in models)), 'sessions': data['sessions'],
+            'note': ' '.join(data['note'].split())}
+
+
+def usage_line(u):
+    """The report line for a checked usage record."""
+    free = f'{u["sessions"]} session{"" if u["sessions"] == 1 else "s"}' + (f', {u["note"]}' if u['note'] else '')
+    return f'Usage: {u["calls"]} tool calls; models: {", ".join(u["models"])}; {free}'
+
+
+def usage_json(text, where):
+    """The checked usage record in `text`, which `where` printed or holds."""
+    try:
+        data = strict_loads(text)
+    except ValueError as e:
+        raise ValueError(f'{where} is not one JSON object: {e}') from None
+    return usage_record(data)
+
+
+def run_usage_cmd(cmd, jid, root, timeout=USAGE_TIMEOUT, run=subprocess.run):
+    """The game's `[jobs] usage_cmd` for job `jid`, as a checked usage record: split into an argv ({id} filled per argument, no shell), run in the repo
+    root. This command is the only way usage reaches the core: the core reads no transcript. Anything but exit 0 and one good JSON object is a ValueError."""
+    try:
+        argv = [a.replace('{id}', jid) for a in shlex.split(cmd)]
+    except ValueError as e:
+        raise ValueError(f'[jobs] usage_cmd does not split into arguments: {e}') from None
+    if not argv:
+        raise ValueError('[jobs] usage_cmd is empty: set it in wsc.toml, or give the numbers with --from-json FILE')
+    try:
+        p = run(argv, cwd=root, capture_output=True, encoding='utf-8', errors='replace', stdin=subprocess.DEVNULL, timeout=timeout, env=git_env())
+    except subprocess.TimeoutExpired:
+        raise ValueError(f'{argv[0]} timed out after {timeout} s') from None
+    except OSError as e:
+        raise ValueError(f'{argv[0]} did not start: {e}') from None
+    if p.returncode:
+        raise ValueError(f'{argv[0]} failed (exit {p.returncode}): {(p.stderr or "").strip()[-300:]}')
+    return usage_json(p.stdout, argv[0] + "'s output")
+
+
+def read_usage_json(path):
+    """The checked usage record in file `path` (`--from-json`). A PowerShell-written BOM is fine."""
+    try:
+        text = Path(path).read_text(encoding='utf-8-sig')
+    except OSError as e:
+        raise ValueError(f'cannot read {path}: {e}') from None
+    return usage_json(text, str(path))
+
+
+def paragraph_end(lines, head):
+    """The index just past the first paragraph under the heading at `head`, or head + 1 when a heading or a code fence comes first."""
+    def stops(l):
+        return not l.strip() or l.startswith('#') or FENCE.match(l)
+    i = head + 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i == len(lines) or stops(lines[i]):
+        return head + 1
+    while i < len(lines) and not stops(lines[i]):
+        i += 1
+    return i
+
+
+def set_usage_line(text, jid, line):
+    """Report `text` with `line` as its one `Usage:` line: replaces the line there, or inserts it after the first paragraph under the `# <id> report`
+    heading. Every other byte stays, line endings too. ValueError for two lines, no heading, or a result parse_usage cannot read."""
+    lines = text.split('\n')
+    eol = '\r' if '\r\n' in text else ''
+    hits = usage_hits(lines)
+    if len(hits) > 1:
+        raise ValueError('the report has two "Usage:" lines: keep one by hand, then run this again')
+    if hits:
+        lines[hits[0]] = line + ('\r' if lines[hits[0]].endswith('\r') else '')
+    else:
+        head = next((i for i, l in unfenced(lines) if re.match(rf'# {re.escape(jid)} report\b', l)), None)
+        if head is None:
+            raise ValueError(f'the report has no "# {jid} report" heading to put the line under')
+        end = paragraph_end(lines, head)
+        if end == len(lines):
+            lines[-1] += eol
+            lines += [eol, line]
+        else:
+            lines[end:end] = [eol, line + eol] + ([eol] if lines[end].strip() else [])
+    out = '\n'.join(lines)
+    why = parse_usage(out)[1]
+    if why:
+        raise ValueError(f'the line would not read back: {why}')
+    return out
 
 
 RUN_CITE = re.compile(r'(?:[\w.-]+/)*runs/[\w.-]*\w')  # ends on a word char: a sentence's '.' or '-' is not part of the path
@@ -301,6 +549,7 @@ def problems(rows, read, folders=()):
                 errs.append(f'{jid}: report.md sits beside a handback: say what the orchestrator added (a "## Orchestrator additions" section)')
             if S.failed_results and S.root is not None:
                 errs += [f'{jid}: report: {e}' for e in failed_results_problems(jid, report, S.root, S.failed_results)]
+            errs += [f'{jid}: report: {e}' for e in usage_problems(jid, r, brief, report)]
         review = read(f'{S.jobs_dir}/{jid}/review.md')
         if review is not None:
             if not DATED.search('\n'.join(review.split('\n')[:5])):
@@ -965,6 +1214,18 @@ def panel_html(r):
     return f'<p class="muted">{"<br>".join(html.escape(str(x)) for x in lines)}</p>' if lines else ''
 
 
+def card_lines(results):
+    """{job id: [HTML]}: the `cards` of `view`-stage Results, text escaped, {'html': ...} as is (W31). A malformed value is skipped: a card line never fails the page."""
+    out = {}
+    for r in results:
+        cards = getattr(r, 'cards', None)
+        for jid, v in (cards.items() if isinstance(cards, dict) else ()):
+            line = html.escape(v) if isinstance(v, str) else v.get('html') if isinstance(v, dict) else None
+            if isinstance(line, str):
+                out.setdefault(jid, []).append(line)
+    return out
+
+
 def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None, main_html=''):
     """The queue as one HTML page. `read(path)`: file text or None; `branches`: remote branch names; `generated`: timestamp text;
     `on_branch`: see branch_rows (review and fix buttons need it). Brief, report and review are embedded as escaped Markdown and rendered by
@@ -987,8 +1248,10 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
         head = 'Nothing is ready to pick up or brief.'
     if main_html:
         head += '</p>' + main_html + '<p>'
+    lines = {}
     if ctx is not None:
-        panel = ''.join(panel_html(r) for r in gatemods.run_stage(ctx, 'view', rows=rows))   # a game's own status lines (`view`-stage gate modules)
+        results = gatemods.run_stage(ctx, 'view', rows=rows)
+        panel, lines = ''.join(panel_html(r) for r in results), card_lines(results)   # a game's own status lines (`view`-stage gate modules)
         if panel:
             head += '</p>' + panel + '<p>'
 
@@ -1002,6 +1265,8 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
                        for f in ('brief', 'report', 'review') if (t := read(f'{S.jobs_dir}/{jid}/{f}.md')) is not None)
         deps = ' '.join(dep(d) for d in r.get('depends_on', [])) or '<span class="muted">none</span>'
         tags = [f'phase {r.get("phase", "?")}', r.get('model', '?'), 'needs PC' if r.get('needs_pc') else 'no PC']
+        chip = usage_chip(r, read(f'{S.jobs_dir}/{jid}/brief.md'), read(f'{S.jobs_dir}/{jid}/report.md'))
+        extra = (f'<p class="usage{" over" if chip[1] else ""}">{e(chip[0])}</p>' if chip else '') + ''.join(f'<p class="cardline">{l}</p>' for l in lines.get(jid, []))
         acts = [a for a in PROMPTS if not_ready(a, jid, by, branches, on_branch) is None]
         buttons = (('<div class="acts">' + ''.join(
             f'<button class="launch" data-id="{e(jid)}" data-act="{a}" data-cmd="{e(command_line(launch_argv("claude", jid, a, r), root))}">'
@@ -1011,7 +1276,7 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
                 f'{e(r.get("status", ""))}</span></header>'
                 + (f'<p class="note">{e(note)}</p>' if note else '')
                 + f'<p class="desc">{e(r.get("description", ""))}</p>'
-                f'<p class="meta">{" · ".join(e(t) for t in tags)} · depends on {deps}</p>{buttons}{docs}</article>')
+                f'<p class="meta">{" · ".join(e(t) for t in tags)} · depends on {deps}</p>{extra}{buttons}{docs}</article>')
 
     counts = ''.join(f'<a class="count" href="#lane-{k}"><b>{len(placed[k])}</b> {e(h)}</a>' for k, h, _ in LANES)
     lanes = ''.join(f'<section class="lane" id="lane-{k}"><h2>{e(h)} <span class="muted">({len(placed[k])})</span></h2>'
@@ -1072,7 +1337,8 @@ input {{ width:100%; padding:8px 10px; border:1px solid var(--line); border-radi
 .status, .dep {{ font-size:12px; border-radius:10px; padding:1px 8px; border:1px solid currentColor; text-decoration:none; }}
 .s-done {{ color:var(--done); }} .s-review, .s-fix {{ color:var(--review); }} .s-queued {{ color:var(--queued); }}
 .s-needs_brief {{ color:var(--needs); }} .s-blocked, .s-unknown {{ color:var(--blocked); }}
-.note {{ color:var(--review); font-size:14px; }} .desc {{ margin:6px 0; }} .meta {{ color:var(--muted); font-size:13px; }}
+.note {{ color:var(--review); font-size:14px; }} .desc {{ margin:6px 0; }} .meta, .usage, .cardline {{ color:var(--muted); font-size:13px; }}
+.usage.over {{ color:var(--blocked); font-weight:600; }}
 .doc {{ margin-top:6px; }} .doc summary {{ cursor:pointer; color:var(--accent); }}
 .doc pre.md {{ white-space:pre-wrap; font:13px/1.45 ui-monospace, Consolas, monospace; }}
 .doc .rendered {{ border-left:3px solid var(--line); padding:0 0 0 12px; overflow-wrap:anywhere; }}
@@ -1441,12 +1707,17 @@ def policy_cmd(jid_branch):
     return S.text['policy'].replace('{wsc}', S.text['wsc']) + f' --branch {jid_branch} --base origin/main'
 
 
+def usage_step(jid, tail=''):
+    """The step text that fills the report's usage line, for a job under the rule (W31)."""
+    return f'{usage_write(jid)}{tail}, then ' if usage_rule(jid) else ''
+
+
 def build_steps(r, sha=None, why=''):
     """`sha`: where `jobs next` claimed job/<id> (W26); None prints the push that would claim it."""
     jd = S.jobs_dir
     return (f'{r["id"]}: {r["title"]} (model {r["model"]}, needs_pc {"yes" if r["needs_pc"] else "no"})\n'
             f'{take_it("job/" + r["id"], sha, why)}, then follow {jd}/{r["id"]}/brief.md.\n'
-            f'Finish: {jd}/{r["id"]}/report.md, then wsc reg set jobs {r["id"]} status=review report={jd}/{r["id"]}/report.md, pushed; '
+            f'Finish: {jd}/{r["id"]}/report.md, then {usage_step(r["id"])}wsc reg set jobs {r["id"]} status=review report={jd}/{r["id"]}/report.md, pushed; '
             f'CI\'s policy check runs locally as {policy_cmd("job/" + r["id"])}.\n'
             + draft_pr_step(r['id'], r['title']))
 
@@ -1493,7 +1764,7 @@ def fix_steps(jid, n, title='', handback=False):
             + (f'(and {jd}/{jid}/handback.md, the builder\'s own words) ' if handback else '') +
             f'and address its blockers and should-fix items, one commit each where you can, with a test where the code allows.\n'
             f'Then append "## Fix round {n}" to the end of {jd}/{jid}/report.md: for each finding what you changed (commit sha), what you '
-            f'left and why. Run {S.text["wsc"]} gates and {policy_cmd("job/" + jid)} (only '
+            f'left and why. Run {usage_step(jid, " (the line counts fix sessions too)")}{S.text["wsc"]} gates and {policy_cmd("job/" + jid)} (only '
             f'the missing merge verdict and done row may fail), then wsc reg set jobs {jid} status=review and push. '
             f'Never touch review.md or earlier report sections, and never merge: the next review round is a fresh session.\n'
             + draft_pr_step(jid, title or '<title>'))

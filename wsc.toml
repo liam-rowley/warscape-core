@@ -51,6 +51,7 @@ commit = false
 [jobs]
 id_prefix = "W"
 semver_from = 40     # W29 (C27): from W40 on a row carries `semver`, its brief a `Semver:` line, and its job/ branch leaves VERSION to the release workflow
+usage_from = 42      # W31: from W42 on a report needs its `Usage:` line. No usage_cmd here (the core has no transcripts): `wsc jobs usage <id> --write --from-json <file>`
 
 [jobs.text]
 wsc = "python3 wsc.py"
@@ -66,6 +67,9 @@ ref_brief_merge = "C18"
 [policy]
 commit_msg_hook = true     # .githooks/commit-msg refuses a commit without a Claude-Session trailer (C23)
 decisions_cite_job = true  # a C row added on job/<id> names <id> (W27 rule F)
+reviewer_code = "error"    # reviewer code under a `merge` verdict is refused (W27 rule A; W40)
+workflow_paths = [".github/workflows/**", "ci/**"]  # a job's change here that its brief on the base does not name warns (W36)
+bases = ["main"]           # the branches a pull request may target (W36)
 decisions = "docs/DECISIONS.md"
 decision_prefix = "C"
 plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "README.md", "CLAUDE.md"]

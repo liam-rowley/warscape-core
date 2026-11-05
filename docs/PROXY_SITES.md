@@ -69,6 +69,7 @@ ranges render byte-identically to before (`tests/test_gen_tables.py`).
 
 ## How a game adds a site
 Find the bytes in the game's exe, add the `engine_sites` row (and its key) with `python3 core/wsc.py reg add`, run
-`python3 core/proxy/tools/gen_tables.py`, rebuild the DLL and read the start-up site check in `proxy.log`. For a value row: the key with
+`python3 core/proxy/tools/gen_tables.py`, check it offline with `python3 core/proxy/tools/gen_tables.py --exe <staged exe copy>` (every site `MATCH`: [UPGRADING.md](UPGRADING.md)),
+rebuild the DLL and read the start-up site check in `proxy.log`. For a value row: the key with
 `type`, `default` 0, `min` 0 (or below), `max` at the top of the tested steps, a `release_value`; the row with `value_key` and, where
 needed, `value_scale` and `value_floor_stock: true`.

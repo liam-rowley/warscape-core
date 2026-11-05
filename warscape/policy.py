@@ -8,7 +8,9 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
               every commit touching the report or the review must carry that trailer (fails closed). From job number `[jobs] semver_from`
               on (W29, C27) it may not change VERSION: the release workflow owns it.
               Review integrity (core W27), read from the branch's commits by sha:
-                A  (warning) a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict. A round's commits:
+                A  a round's own commits change a file outside <jobs dir>/<id>/ and row <id> under a `merge` verdict, and no commit that first wrote a newer
+                   round descends from them (a fresh round has then reviewed the change: W40, the one way out, as rule C keeps the old verdict). A warning,
+                   or with `[policy] reviewer_code = "error"` (W40; the core's own wsc.toml) a refusal. A round's commits:
                    the review.md commits whose review.md holds round N as its newest, any other commit by a session of those, and a commit by nobody
                    known (no trailer, or a session neither the builder's nor a round's) after the first review commit, which goes to the round of
                    the next review commit (the newest round when none follows). The builder's sessions are every report.md writer (fix sessions too).
@@ -24,7 +26,12 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
                 E  (warning) a `merge` on more than `[policy] thin_merge_lines` changed lines or `thin_merge_files` files outside the jobs folder and
                    the registries whose newest round cites no evidence (EVIDENCE: a run id, an actions URL, `run <digits>`, a test name, a runs/ path).
                 F  with `[policy] decisions_cite_job`, a decisions row added on job/<id> contains <id>.
-              Rules A and D's branch cites warn, not refuse: the W27 scan of the merged job branches (its report) passed the brief's kill criterion.
+              Rule A warns by default and D's branch cites warn: the W27 scan of the merged job branches (its report) passed the brief's kill
+              criterion; the W40 scan (its report) put the core's rule A at error.
+              Workflow inputs (core W36): a changed path matching `[policy] workflow_paths`, and the rendered file of a changed `<template_dir>/<name>.in`
+              (the re-render changes both), that <id>'s brief on the base does not contain as a plain substring is a warning per path, so a job
+              cannot quietly add a check that posts a fake `policy` status. It warns, not refuses: the W36 scan passed the brief's kill criterion. `brief/`,
+              `plan/` and `release/` cannot touch these paths; `meta/` is the sanctioned route, which Liam reviews.
   release/vX.Y.Z  only VERSION, whose content is X.Y.Z, exactly one patch, minor or major step above the base's VERSION (W29, C27: the
               branch the release workflow opens; the workflow re-derives the version before it tags, so a hand-made one tags nothing).
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
@@ -37,9 +44,10 @@ the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatem
 Result's details are policy errors. Their facts carry `added_decision_rows` ([{id, text}], W27). Warnings print as `policy: warning: ...` lines
 before the verdict line and never change the exit code.
 
-A pull request is judged with its base's rules (core W23, C24). The verb's parent (warscape/policy_base.py `judge`) writes the base's rule
-inputs into a fresh temporary folder outside every repository and runs the base's code there in a child process (`wsc policy --judge`,
-which calls `run_check` here):
+A base given as `origin/<name>` must be listed in the base's `[policy] bases` (core W36; [] accepts any, a sha or other ref is not judged by this):
+a stacked pull request is refused before the head is read. A pull request is judged with its base's rules (core W23, C24). The verb's parent
+(warscape/policy_base.py `judge`) writes the base's rule inputs into a fresh temporary folder outside every repository and runs the base's code
+there in a child process (`wsc policy --judge`, which calls `run_check` here):
   - the base tree: inside the core, the base commit's tree; in a game, the core commit the base's gitlink pins at the base's `[ci] core`, read
     from the submodule's object store (never `core/` on disk, never the head's gitlink), plus the base's wsc.toml, every `[gates] dirs`
     folder and the `[jobs] legacy` file. Git cannot find a repository from inside it (GIT_CEILING_DIRECTORIES);
@@ -51,14 +59,19 @@ which calls `run_check` here):
     error, or a child that gives no verdict (any other exit, a crash, a timeout) is a refusal that names the fix;
   - a base whose core has no `JUDGE_API` line predates W23: it is judged in-process with this checkout's code and configuration, with a note.
 `JUDGE_API` versions the child's arguments; a later core may only add optional ones, passed when the base's number allows them.
+
+`scan` (`wsc policy --scan`, W40) re-measures the rules over history, so a warning's move to an error rests on a number: W27's method, every merged
+job/ pull request judged at its head against its merge commit's first parent with this checkout's rules, gate modules off and rule F on.
 """
+import copy
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 from . import gatemods
-from .repo import DEFAULTS, git_env, matches
+from .repo import DEFAULTS, Ctx, git_env, matches
 
 # The judge's interface (the `--judge` child's arguments), read from a base core's text by warscape/policy_base.py: keep it on a line of its own.
 JUDGE_API = 1
@@ -75,8 +88,8 @@ def settings(config):
             'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'semver_from': j.get('semver_from', 0), 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text']),
-            'decisions_cite_job': bool(p.get('decisions_cite_job', False)), 'thin_lines': p.get('thin_merge_lines', 500),
-            'thin_files': p.get('thin_merge_files', 20)}
+            'decisions_cite_job': bool(p.get('decisions_cite_job', False)), 'reviewer_code': p.get('reviewer_code', 'warn'), 'thin_lines': p.get('thin_merge_lines', 500),
+            'thin_files': p.get('thin_merge_files', 20), 'workflow_paths': list(p['workflow_paths']), 'template_dir': config['ci']['template_dir']}
 
 
 def git(*args, cwd=None):
@@ -213,6 +226,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         if sf and 'VERSION' in changed and int(jid[len(cfg['job_prefix']):]) >= sf:
             errs.append(f'{jid} changes VERSION: the release workflow owns VERSION (C27); from {cfg["job_prefix"]}{sf} on a job states its '
                         f'level as `semver` on its row and leaves VERSION alone (git checkout origin/main -- VERSION)')
+        warns += workflow_warnings(jid, changed, base_file, cfg)
         if sessions and trailer:
             # fail closed: a commit with no trailer could be anyone's, so it can prove nothing about who reviewed
             by = {n: sessions(f'{jd}/{jid}/{n}') for n in ('report.md', 'review.md')}
@@ -266,6 +280,27 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         errs.append(f'branch "{branch}" is not job/{cfg["job_prefix"]}<n>, brief/{cfg["job_prefix"]}<n>, plan/*, meta/* or release/vX.Y.Z: all work goes through the job queue'
                     + (f" ({T['rules_ref']})" if T.get('rules_ref') else '') + '. Rename the branch, or add the work as a job first.')
     return errs
+
+
+def workflow_warnings(jid, changed, base_file, cfg):
+    """One warning per workflow input job `jid` changes and its brief on the base does not name (W36; the module docstring). A deletion and both
+    halves of a rename are changed paths (`diff_base` uses --no-renames). A template's rendered file is required even when it is not yet changed."""
+    globs, tdir, wf = cfg.get('workflow_paths') or [], cfg.get('template_dir') or 'ci', '.github/workflows/'
+    template = lambda p: p.startswith(f'{tdir}/') and p.endswith('.in') and '/' not in p[len(tdir) + 1:]
+    rendered = lambda p: f'{wf}{p[len(tdir) + 1:-3]}'
+    hits = [p for p in changed if matches(p, globs)]
+    need = sorted({*hits, *(r for r in map(rendered, filter(template, hits)) if matches(r, globs))})
+    brief = base_file(f"{cfg['jobs_dir']}/{jid}/brief.md") or ''
+    out = []
+    for p in need:
+        if p in brief:
+            continue
+        pair = (rendered(p), p) if template(p) else (p, f'{tdir}/{p[len(wf):]}.in') if p.startswith(wf) else None
+        both = pair and (pair[1] in changed or base_file(pair[1]) is not None)
+        out.append(f"`{p}` is a workflow input and {jid}'s brief on the base does not name it: a job cannot quietly add a check that posts a fake "
+                   '`policy` status (W36); name the file in the brief (briefs are merged before the job starts) or use a `meta/` branch'
+                   + (f' (`{pair[0]}` renders from `{pair[1]}`: name both)' if both else ''))
+    return out
 
 
 def release_problems(branch, changed, base_file, head_file):
@@ -343,20 +378,23 @@ def append_only_problems(path, base_text, history, head_text, base_ref):
 
 
 def round_problems(jid, cfg, reads, builder, head_review):
-    """(errors, warnings): rule B's errors and rule A's warnings (A warns: the W27 scan of the merged job branches found reviewer code
-    under `merge` on 5 core and 27 napoleon branches, past the brief's kill criterion of 3 beyond the audit's), over the commits of the branch (`reads.commits()`, `reads.history(review.md)`). A review commit belongs to the newest
+    """(errors, warnings): rule B's errors, and rule A's lines in the list `[policy] reviewer_code` names (warn by default: the W27 scan of the
+    merged job branches found reviewer code under `merge` on 5 core and 27 napoleon branches, past the brief's kill criterion of 3 beyond the
+    audit's; W40 added the key), over the commits of the branch (`reads.commits()`, `reads.history(review.md)`). A review commit belongs to the newest
     round its review.md holds; any other commit by a round's session belongs to that round; a commit by nobody known (no trailer, or a
     session that is neither the builder's nor a round's) after the first review commit belongs to the round of the next review commit, or to
     the newest round when none follows. Commits before the first review commit and the builder's own (report.md writers: the builder and
-    every fix session) are never a round's."""
+    every fix session) are never a round's. A commit that the first commit of a newer round descends from has been reviewed by that round, so rule A skips it: ancestry, not the
+    log's order (`reads.is_ancestor`; a merge lists a side branch's commits in either order), and a round's later edits of itself clear nothing."""
     jd, T = cfg['jobs_dir'], cfg['text']
     rev = f'{jd}/{jid}/review.md'
     hist = reads.history(rev)
     wrote = {sha: max(rounds_of(text), default=0) for sha, _, text in hist}
-    by_round = {}
+    by_round, opened = {}, {}
     for sha, who, _ in hist:
         if wrote[sha]:
             by_round.setdefault(wrote[sha], set()).update(who)
+            opened.setdefault(wrote[sha], sha)
     errs, doc = [], f" ({T['review_doc']})" if T.get('review_doc') else ''
     for n in sorted(by_round):   # rule B; the builder's sessions are the own-review rule's message
         for j in sorted(k for k in by_round if k < n):
@@ -379,12 +417,14 @@ def round_problems(jid, cfg, reads, builder, head_review):
             if i < first:
                 continue
             n = next((wrote[c[0]] for c in commits[i + 1:] if wrote.get(c[0])), max(by_round))
-        hits.setdefault(n, []).append((sha, code))
+        if not any(k > n and reads.is_ancestor(sha, first_sha) for k, first_sha in opened.items()):   # W40: else a fresh round (rule B) reviewed it
+            hits.setdefault(n, []).append((sha, code))
     head_r = rounds_of(head_review)
+    rule_a = errs if cfg.get('reviewer_code') == 'error' else warns
     for n, got in sorted(hits.items()):   # rule A
         if verdict(head_r.get(n)) == 'merge':
             shown = '; '.join(f"{s[:12]} ({', '.join(c[:6])}{' and more' if len(c) > 6 else ''})" for s, c in got[:6])
-            warns.append(f'round {n} of {rev} says merge, but its own commits change files outside {jd}/{jid}/ and its row: {shown}: '
+            rule_a.append(f'round {n} of {rev} says merge, but its own commits change files outside {jd}/{jid}/ and its row: {shown}: '
                          'write the verdict `merge after fixes`; a fresh round reviews your change')
     return errs, warns
 
@@ -481,6 +521,10 @@ class GitReads:
             sha, *who = first.split('\x1f')
             recs.append((sha, self._who(who), [p for p in paths if p.strip()]))
         return recs
+
+    def is_ancestor(self, sha, of):
+        """True when `sha` is `of` or in its history; a git error is False, so rule A keeps the hit."""
+        return self._ok('merge-base', '--is-ancestor', sha, of)
 
     def history(self, path):
         """[(sha, sessions, text or None)] of the commits of mb..h that touch `path`, oldest first."""
@@ -590,3 +634,120 @@ def rule_input_note(config, changed, base_ref):
         return ''
     shown = ', '.join(hit[:8]) + (f' and {len(hit) - 8} more' if len(hit) > 8 else '')
     return f"policy: note: this branch changes {shown}: they judge pull requests after this one merges; this one was judged with {base_ref}'s"
+
+
+# What marks a rule's line, first match wins: E before D, its line says "cites" too. A line of no rule (the branch kind, the row) is not counted.
+SCAN_MARKS = (('A', 'says merge, but its own commits change files'), ('B', 'a fresh session per round'), ('C', 'review rounds are append only'),
+              ('C', 'only its own author edits'), ('E', 'merge verdict on a large diff'), ('D', ' cites '), ('F', 'must name the brief that required it'))
+SCAN_RULES = 'ABCDEF'
+
+
+def scan_rule(line):
+    """The rule letter of a policy line, or None."""
+    return next((r for r, mark in SCAN_MARKS if mark in line), None)
+
+
+def scan_config(text):
+    """A config for `scan` from a repo's wsc.toml text: the defaults plus the keys the rules read, gate modules off and rule F on. Not load_config:
+    a repo pinned to an older core has keys this core refuses, and the scan judges its history, not its setup."""
+    raw, cfg = tomllib.loads(text), copy.deepcopy(DEFAULTS)
+    jobs = raw.get('jobs', {})
+    cfg['jobs'].update({k: jobs[k] for k in ('id_prefix', 'dir', 'semver_from') if k in jobs})
+    cfg['jobs']['text'].update(jobs.get('text', {}))
+    cfg['policy'].update({k: v for k, v in raw.get('policy', {}).items() if k in cfg['policy']})
+    cfg['policy']['decisions_cite_job'] = True
+    cfg['registries_dir'] = raw.get('registries_dir', cfg['registries_dir'])
+    cfg['registries'] = raw.get('registries', {})
+    cfg['gates']['dirs'] = []
+    return cfg
+
+
+def merged_prs(repo, run=subprocess.run):
+    """The merged pull requests of job/ branches, from `gh` run in the clone. Raises Refusal."""
+    try:
+        p = run(['gh', 'pr', 'list', '--state', 'merged', '--search', 'head:job/', '--limit', '1000', '--json', 'number,headRefName,headRefOid,mergeCommit,mergedAt'],
+                cwd=repo, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise Refusal(f'gh could not list the merged pull requests: {e}') from None
+    if p.returncode:
+        raise Refusal(f'gh could not list the merged pull requests: {p.stderr.strip()}')
+    return json.loads(p.stdout)
+
+
+def scan_targets(prs, after=None):
+    """The merged job/ pull requests to judge, oldest first; with `after` (a set of commit shas), those whose merge commit is in it."""
+    got = [p for p in prs if p['headRefName'].startswith('job/') and p.get('mergeCommit')]
+    return sorted((p for p in got if after is None or p['mergeCommit']['oid'] in after), key=lambda p: p['mergedAt'])
+
+
+def scan_label(p):
+    return f"{p['headRefName']} (#{p['number']}, {p['mergedAt'][:10]})"
+
+
+def scan_tally(results, only=None):
+    """(one line per branch a rule hit, {rule: branches}) of `results` ([(pull request, policy lines)]); `only`: that rule alone."""
+    rules = only or SCAN_RULES
+    counts, lines = dict.fromkeys(rules, 0), []
+    for p, got in results:
+        by = {}
+        for x in got:
+            r = scan_rule(x)
+            if r in counts:
+                by.setdefault(r, []).append(x)
+        for r in by:
+            counts[r] += 1
+        if by:
+            lines.append(f'{scan_label(p)}: ' + ' | '.join(f"{r}: {v[0]}{f' (and {len(v) - 1} more)' if len(v) > 1 else ''}" for r, v in sorted(by.items())))
+    return lines, counts
+
+
+def scan_shas(p, repo):
+    """(base, head) of a merged pull request: its merge commit's first parent and its head, fetching a head whose branch was deleted (objects only:
+    no ref and no FETCH_HEAD change in the clone); None when either cannot be read."""
+    head, sha = None, p['headRefOid']
+    for fetch in (False, True):
+        if fetch:
+            subprocess.run(['git', 'fetch', '--quiet', '--no-write-fetch-head', 'origin', f"refs/pull/{p['number']}/head"], cwd=repo, env=git_env(), capture_output=True)
+        head = resolve(sha, repo)
+        if head:
+            break
+    base = resolve(f"{p['mergeCommit']['oid']}^1", repo)
+    return (base, head) if base and head else None
+
+
+def scan(root, base='origin/main', since=None, rule=None, run=subprocess.run, out=print):
+    """`wsc policy --scan`: print one line per merged job/ branch a rule refuses or warns about, then the branches per rule. Reads `root`'s clone; its
+    rules are this checkout's and its configuration `base`'s wsc.toml. Exit 1 when it could not run or a branch was not judged: a count that left
+    a branch out is not the number a decision needs."""
+    repo = str(Path(root).resolve())
+    try:
+        text = show(base, 'wsc.toml', repo)
+        if text is None:
+            raise Refusal(f'{base} has no wsc.toml in {repo}: `git fetch` first')
+        after = None
+        if since:
+            s = resolve(since, repo)
+            if not s:
+                raise Refusal(f'--since {since} does not resolve in {repo}: `git fetch` first')
+            after = set(git('rev-list', f'{s}..{base}', cwd=repo).split())
+        ctx, targets = Ctx(root=Path(repo), config=scan_config(text)), scan_targets(merged_prs(repo, run), after)
+    except (Refusal, ValueError) as e:   # ValueError: gh's JSON or the TOML
+        out(f'policy: scan: {e}')
+        return 1
+    results, lost = [], 0
+    for p in targets:
+        shas = scan_shas(p, repo)
+        try:
+            if not shas:
+                raise Refusal('its head or merge commit is not in this clone and could not be fetched')
+            warns = []
+            errs, _ = run_check(ctx, p['headRefName'], shas[0], shas[1], repo, base_ref=base, warnings=warns)
+            results.append((p, errs + warns))
+        except (Refusal, subprocess.CalledProcessError, ValueError, KeyError) as e:
+            lost += 1
+            out(f'policy: scan: {scan_label(p)}: not judged: {e}')
+    lines, counts = scan_tally(results, rule)
+    for x in lines:
+        out(f'policy: scan: {x}')
+    out(f"policy: scan: {len(results)} branches judged, {lost} not judged; {', '.join(f'{r} {n}' for r, n in counts.items())} (branches per rule)")
+    return 1 if lost else 0
