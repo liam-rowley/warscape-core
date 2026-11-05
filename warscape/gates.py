@@ -26,6 +26,7 @@ class Result:
     details: list = field(default_factory=list)
     seconds: float = 0.0
     html: str = ''      # a `view`-stage game gate's HTML for the status page, drawn as is (warscape/gatemods.py); every other reader ignores it
+    cards: dict = field(default_factory=dict)   # W31, same stage: {job id: text (escaped) or {'html': drawn as is}}, one line on that job's card
 
 
 def _read(ctx, p):

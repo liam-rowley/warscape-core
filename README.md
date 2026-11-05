@@ -88,6 +88,7 @@ after the core gates or a rule of `wsc jobs check`, `wsc policy` or the `jobs vi
 | `docs/CONSUMING.md` | how a game repo pins and uses the core |
 | `docs/UPGRADING.md` | what a game changes when its core pin crosses 0.24.0, 0.26.0, 0.27.0 or 0.34.0 |
 | `docs/BACKLOG.md` | agreed core changes not yet built |
+| `docs/USAGE.md` | usage accounting: the report's `Usage:` line, `wsc jobs usage`, `budget_lifts`, the view's cards |
 | `docs/PROXY_ORDERS.md` | the proxy's battle unit orders (`dev.orders`): entry points, Lua, `ctl.py order`, the adapter |
 | `docs/PROXY_SITES.md` | engine sites: the byte layout, the all-or-nothing checks, boolean keys, value rows from numeric keys, the generator's refusals |
 | `wsc.py`, `warscape/` | the CLI launcher and the library; verbs in `warscape/verbs/` |

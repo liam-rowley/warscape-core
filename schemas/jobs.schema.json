@@ -19,7 +19,22 @@
     "brief": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/brief\\.md$"},
     "report": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/report\\.md$"},
     "review": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/review\\.md$"},
-    "blocked_by": {"type": "string", "minLength": 1, "description": "why, when status is blocked"}
+    "blocked_by": {"type": "string", "minLength": 1, "description": "why, when status is blocked"},
+    "budget_lifts": {
+      "type": "array",
+      "description": "W31: each raise of the job's call budget, oldest first (`wsc reg set jobs <id> budget_lifts:='[...]'`). The brief stays as written; the newest `to` is the budget `wsc jobs check` holds the report's Usage line to, and each `from` is the previous `to`, the brief's budget for the first",
+      "items": {
+        "type": "object",
+        "required": ["date", "from", "to", "why"],
+        "additionalProperties": false,
+        "properties": {
+          "date": {"type": "string", "format": "date"},
+          "from": {"type": "integer", "minimum": 0},
+          "to": {"type": "integer", "minimum": 0},
+          "why": {"type": "string", "pattern": "\\S"}
+        }
+      }
+    }
   },
   "allOf": [
     {"if": {"properties": {"status": {"enum": ["queued", "review", "fix", "done"]}}}, "then": {"required": ["brief"]}},
