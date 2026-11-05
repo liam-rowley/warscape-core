@@ -20,7 +20,8 @@ A module defines:
                        `warscape.policy.show(sha, path, cwd=repo)`; never 'HEAD', never git in ctx.root, never import or run the
                        head's files. An `error` Result's details are policy errors
                view    `wsc jobs view`. ctx.rows. Drawn at the top of the page: the Result's `html` as is when it is not empty,
-                       else its escaped summary and details as a muted paragraph (an empty Result draws nothing)
+                       else its escaped summary and details as a muted paragraph (an empty Result draws nothing). Its `cards`
+                       ({job id: text, or {'html': ...} drawn as is}) each add a line to that job's card (W31); anything malformed is skipped
              An unknown stage is a load error: a typo must never switch a rule off silently.
     FAST     optional bool, default True: a `gates`-stage module is in the `--fast` set (or when `[gates] fast` names it)
 

@@ -1,8 +1,8 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
 purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
-usage: wsc jobs check | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune]
-when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo.
+usage: wsc jobs check | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE]
+when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo; `usage` to fill a report's `Usage:` line before status=review.
 verb: jobs
 
 The rules are code in warscape/jobq.py (moved from napoleon-remastered `tools/verbs/jobs.py` in napoleon J62; the story of each rule is in that
@@ -24,6 +24,8 @@ W26: `next` claims before it prints: a create-only `git push` of origin/main to 
 won moves on to the next ready job (at most 5 tries); `--peek` and `--offline` claim and release nothing. It orders by (phase, number) and, with `[jobs] pc_state`
 or `WSC_PC_STATE`, skips a needs_pc build where that folder is absent. `--auto` starts a review only on a green head, a fix once CI has finished,
 one needs_pc row at a time, and prunes dead worktree registrations each tick. `worktrees` prints the stale-worktree warnings (warscape/worktrees.py).
+W31: `usage` prints a report's `Usage:` line from the game's `[jobs] usage_cmd` (no shell, 60 s, repo root as cwd; the core reads no transcript) or from
+`--from-json FILE`, the same JSON by hand; `--write` puts it in `jobs/<id>/report.md`, changing nothing else there.
 The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
 """
 import sys
@@ -35,11 +37,12 @@ from .. import jobq as J
 from .. import worktrees as W
 
 NAME = 'jobs'
-HELP = 'the job queue: check it, claim the next job to build (next), to review (review) or to fix (fix), view it, its stale worktrees (worktrees)'
+HELP = 'the job queue: check it, claim the next job to build (next), to review (review) or to fix (fix), view it, its stale worktrees (worktrees), a report\'s usage line (usage)'
 
 
 def add_arguments(p):
-    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees'])
+    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees', 'usage'])
+    p.add_argument('job', nargs='?', help='usage: the job id (every other action takes --id)')
     p.add_argument('--offline', action='store_true', help='use local remote-tracking refs instead of asking origin (a single-branch or shallow clone sees only the branches it fetched)')
     p.add_argument('--id', help='next, review, fix: this job only (J<n>): its steps when it is ready, else exit 1 with the reason')
     p.add_argument('--all', action='store_true', help='review, fix, view: also read the job branches of jobs done on main (skipped by default)')
@@ -52,6 +55,8 @@ def add_arguments(p):
     p.add_argument('--peek', action='store_true', help='next: print what would be picked and the push that would claim it; claim nothing')
     p.add_argument('--prune', action='store_true', help='worktrees: run git worktree prune (registrations whose folder is gone) and say how many it removed')
     p.add_argument('--interval', type=int, default=300, help='view --serve --auto: seconds between autopilot ticks (default %(default)s)')
+    p.add_argument('--write', action='store_true', help='usage: put the line in jobs/<id>/report.md (replaces the one there, or goes after the first paragraph)')
+    p.add_argument('--from-json', metavar='FILE', help='usage: the numbers from this file, the JSON [jobs] usage_cmd prints, instead of running the command')
     p.add_argument('--session', help='review: the name the round is claimed for (default $WSC_SESSION_ID, $CLAUDE_CODE_SESSION_ID, then user@host)')
 
 
@@ -60,7 +65,32 @@ def refuse(why):
     return 1
 
 
+def usage(args, ctx, by):
+    """`jobs usage <id>`: print the report line from the game's command or `--from-json`; `--write` puts it in the report. Any failure writes nothing."""
+    jid = args.job
+    if not jid:
+        return refuse('usage needs a job id: wsc jobs usage <id> [--write] [--from-json FILE]')
+    if jid not in by:
+        return refuse(f'{jid} is not a row of the jobs registry')
+    report = ctx.root / J.S.jobs_dir / jid / 'report.md'
+    rel = report.relative_to(ctx.root).as_posix()
+    if args.write and not report.is_file():
+        return refuse(f'{rel} does not exist: --write changes a report, it never starts one')
+    try:
+        line = J.usage_line(J.read_usage_json(args.from_json) if args.from_json else J.run_usage_cmd(J.S.usage_cmd, jid, ctx.root))
+        if args.write:
+            report.write_bytes(J.set_usage_line(report.read_bytes().decode('utf-8'), jid, line).encode('utf-8'))   # bytes: a CRLF report stays CRLF
+    except ValueError as x:
+        return refuse(f'usage {jid}: {x}')
+    print(line)
+    if args.write:
+        print(f'jobs usage: wrote {rel}')
+    return 0
+
+
 def run(args, ctx):
+    if getattr(args, 'job', None) and args.action != 'usage':   # `jobs next W31` must not pick some other job
+        return refuse(f'{args.action} takes its job as --id {args.job}')
     J.configure(ctx)
     reg_dir = ctx.config['registries_dir']
     rows = J.main_rows(ctx)
@@ -86,6 +116,9 @@ def run(args, ctx):
             print(f'jobs: warning: {w}', file=sys.stderr)
         print(f'jobs check: {len(rows)} rows, {"%d problems" % len(errs) if errs else "ok"}{extra}')
         return 1 if errs else 0
+
+    if args.action == 'usage':
+        return usage(args, ctx, by)
 
     if args.action == 'worktrees':   # W26: what a game's setup verb prints (warscape.worktrees.report); --prune removes dead registrations only
         if getattr(args, 'prune', False):
