@@ -7,7 +7,7 @@
 # wsc.toml [ci]: edit this template, then run `python3 wsc.py ci render` and commit both files (the `ci_render` gate compares them).
 # One run per commit (napoleon J42, W21): push only, never pull_request. Checks attach to the commit, so a pull request shows this push run's
 # checks on its head; `policy` needs the pull request and lives in policy.yml. A newer push cancels an older run on the same branch, never on main.
-# Pass markers (napoleon J54, J57): `proxy` and `harness-windows` run only when their inputs (wsc.toml [ci] inputs) changed and that input tree
+# Pass markers (napoleon J54, J57): `gates-windows`, `proxy` and `harness-windows` run only when their inputs (wsc.toml [ci] inputs) changed and that input tree
 # has not passed already; a skipped job counts as passed for required checks and auto-merge, so a docs-only branch does not wait for them.
 # Main health (W22): a push to main has no diff base, so a set runs unless a pass marker proves its tree passed (a red set is rerun by the next
 # push), and the `main_health` job (from the notify block) opens, updates or closes one issue per red required job (`wsc ci main-health`).
@@ -23,13 +23,13 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
 {{wsc changes}}
+  # gates (W42): two plain jobs and not a matrix, so the Windows one can be skipped: a job-level `if:` cannot see `matrix`, and a required check
+  # has to report under its own name when skipped. `name:` keeps the check names main's ruleset requires. 20 minutes: Windows took 9.2 at the
+  # median and hit the old limit of 10 with no fault (run 42111361880).
   gates:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    name: gates (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with:
@@ -39,6 +39,24 @@ jobs:
           python-version: '3.12'
       - name: wsc gates (full set)
         run: python wsc.py gates
+
+  # gates-windows (W42): the same gates, skipped when only paperwork changed (wsc.toml [ci] inputs gates_windows) or its input tree already passed.
+  gates-windows:
+    name: gates (windows-latest)
+    needs: changes
+{{wsc if gates_windows}}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: wsc gates (full set)
+        run: python wsc.py gates
+{{wsc pass_marker gates_windows shell=bash}}
 
   # proxy (napoleon J12): the proxy core moved here. Build the DLL with the null game (proxy/tests/null_game), run every C++ host test,
   # prove the DLL does not depend on the checkout path, and smoke it under wine. The DLL carries the null game's real build id: build_id.py
@@ -141,4 +159,4 @@ jobs:
 
   # notify: the last job; a failure in any job above, on a branch with an open pull request, comments once there (a failed check leaves the
   # pull request open: this makes it impossible to miss). The only job with write access, and only to pull requests.
-{{wsc notify gates needs=changes,gates,proxy,harness-windows}}
+{{wsc notify gates needs=changes,gates,gates-windows,proxy,harness-windows}}
