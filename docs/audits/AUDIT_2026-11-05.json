@@ -1,0 +1,996 @@
+{
+ "version": 1,
+ "repo": "warscape-core",
+ "date": "2026-11-05",
+ "main": "6e0263e76dc32ee1c7f76211eec6abd3f440a686",
+ "window": {
+  "since": "2026-10-29",
+  "until": "2026-11-05",
+  "job_merges": 39
+ },
+ "metrics": {
+  "hot_files": {
+   "value": {
+    "docs/CONSUMING.md": 33,
+    "VERSION": 28,
+    "docs/BACKLOG.md": 25,
+    "registries/tools.jsonl": 23,
+    "docs/DECISIONS.md": 18,
+    "warscape/repo.py": 15,
+    "wsc.toml": 12,
+    "README.md": 11,
+    ".github/workflows/gates.yml": 10,
+    "ci/gates.yml.in": 10,
+    "proxy/tools/build.sh": 10,
+    "warscape/jobq.py": 10,
+    "tests/test_ci.py": 8,
+    "warscape/gates.py": 8,
+    "docs/UPGRADING.md": 7,
+    "proxy/tests/null_game/proxy/null/nullgame.ini": 7,
+    "proxy/tests/null_game/registries/config_keys.jsonl": 7,
+    "tests/test_jobs.py": 7,
+    "tests/test_moved_tools.py": 7,
+    "warscape/policy.py": 7
+   },
+   "details": {
+    "job_merges": 39,
+    "files": 250
+   }
+  },
+  "conflict_files": {
+   "value": {
+    "docs/CONSUMING.md": 56,
+    "docs/BACKLOG.md": 34,
+    "registries/tools.jsonl": 30,
+    "VERSION": 29,
+    "docs/DECISIONS.md": 29,
+    "warscape/repo.py": 18,
+    "wsc.toml": 15,
+    "README.md": 10,
+    "docs/UPGRADING.md": 9,
+    "proxy/tools/build.sh": 7,
+    ".github/workflows/gates.yml": 6,
+    "ci/gates.yml.in": 6,
+    "warscape/jobq.py": 6,
+    "docs/PROXY_CTL.md": 5,
+    "docs/PROXY_HARNESS.md": 5,
+    "tests/test_jobs.py": 5,
+    "warscape/ci_render.py": 5,
+    "warscape/policy.py": 5,
+    "docs/PROXY_BUILD.md": 4,
+    "harness/ctl.py": 4,
+    "harness/job.sh": 4,
+    "jobs/W26/report.md": 4,
+    "tests/test_ci.py": 4,
+    "docs/REVIEW.md": 3,
+    "jobs/W15/report.md": 3,
+    "proxy/src/dllmain.cpp": 3,
+    "tests/test_ctl.py": 3,
+    "tests/test_moved_tools.py": 3,
+    "CLAUDE.md": 2,
+    "discovery/README.md": 2,
+    "docs/CONSUMING_OPTIONS.md": 2,
+    "docs/PROXY_SITES.md": 2,
+    "docs/RELEASES.md": 2,
+    "harness/shot.sh": 2,
+    "jobs/W29/report.md": 2,
+    "jobs/W3/report.md": 2,
+    "jobs/W4/report.md": 2,
+    "proxy/src/dev.cpp": 2,
+    "proxy/src/devcore.h": 2,
+    "proxy/src/runtime.h": 2,
+    "proxy/tests/null_game/proxy/null/nullgame.ini": 2,
+    "proxy/tests/null_game/registries/config_keys.jsonl": 2,
+    "proxy/tests/null_game_no_gesture/proxy/null/nullgame.ini": 2,
+    "proxy/tests/null_game_no_gesture/registries/config_keys.jsonl": 2,
+    "proxy/tests/smoke_host.cpp": 2,
+    "proxy/tests/test_dev.cpp": 2,
+    "tests/test_core_bump.py": 2,
+    "tests/test_policy_base.py": 2,
+    "warscape/gatemods.py": 2,
+    "warscape/gates.py": 2,
+    "warscape/minidump.py": 2,
+    "warscape/verbs/policy.py": 2,
+    ".github/workflows/policy.yml": 1,
+    "ci/policy.yml.in": 1,
+    "docs/CONSUMING_UPGRADES.md": 1,
+    "harness/acceptance.py": 1,
+    "harness/tests/Test-Integration.ps1": 1,
+    "harness/tests/Test-Unit.ps1": 1,
+    "harness/watcher.ps1": 1,
+    "jobs/W16/review.md": 1,
+    "jobs/W27/report.md": 1,
+    "jobs/W28/review.md": 1,
+    "jobs/W33/report.md": 1,
+    "jobs/W34/report.md": 1,
+    "jobs/W35/report.md": 1,
+    "jobs/W36/report.md": 1,
+    "jobs/W5/report.md": 1,
+    "proxy/tests/null_game/README.md": 1,
+    "proxy/tests/null_game/proxy/null/generated/tables.h": 1,
+    "proxy/tests/null_game/registries/engine_sites.jsonl": 1,
+    "proxy/tests/null_game_no_gesture/proxy/null/generated/tables.h": 1,
+    "proxy/tests/null_game_no_gesture/registries/engine_sites.jsonl": 1,
+    "proxy/tests/test_guard.cpp": 1,
+    "proxy/tests/test_patch_engine.cpp": 1,
+    "proxy/tools/build_id.py": 1,
+    "proxy/tools/layout.py": 1,
+    "proxy/tools/toolchain.py": 1,
+    "registries/jobs/W16.json": 1,
+    "registries/jobs/W29.json": 1,
+    "tests/test_pc_deploy.py": 1,
+    "tests/test_policy.py": 1,
+    "warscape/cli.py": 1,
+    "warscape/policy_base.py": 1,
+    "warscape/registry.py": 1,
+    "warscape/verbs/jobs.py": 1
+   },
+   "details": {
+    "merges": 86,
+    "branches": 81
+   }
+  },
+  "job_lifetime": {
+   "value": {
+    "W42": {
+     "hours": 0.61,
+     "merges_from_main": 0,
+     "files": 12
+    },
+    "W31": {
+     "hours": 19.64,
+     "merges_from_main": 2,
+     "files": 19
+    },
+    "W40": {
+     "hours": 17.83,
+     "merges_from_main": 3,
+     "files": 14
+    },
+    "W34": {
+     "hours": 16.61,
+     "merges_from_main": 3,
+     "files": 34
+    },
+    "W39": {
+     "hours": 16.49,
+     "merges_from_main": 2,
+     "files": 22
+    },
+    "W36": {
+     "hours": 15.04,
+     "merges_from_main": 2,
+     "files": 18
+    },
+    "W35": {
+     "hours": 4.72,
+     "merges_from_main": 3,
+     "files": 28
+    },
+    "W15": {
+     "hours": 3.56,
+     "merges_from_main": 5,
+     "files": 20
+    },
+    "W26": {
+     "hours": 2.78,
+     "merges_from_main": 5,
+     "files": 13
+    },
+    "W29": {
+     "hours": 2.24,
+     "merges_from_main": 4,
+     "files": 28
+    },
+    "W28": {
+     "hours": 2.38,
+     "merges_from_main": 3,
+     "files": 25
+    },
+    "W27": {
+     "hours": 1.99,
+     "merges_from_main": 2,
+     "files": 26
+    },
+    "W16": {
+     "hours": 1.22,
+     "merges_from_main": 2,
+     "files": 26
+    },
+    "W33": {
+     "hours": 1.17,
+     "merges_from_main": 2,
+     "files": 30
+    },
+    "W25": {
+     "hours": 0.68,
+     "merges_from_main": 1,
+     "files": 15
+    },
+    "W38": {
+     "hours": 2.6,
+     "merges_from_main": 1,
+     "files": 10
+    },
+    "W22": {
+     "hours": 7.5,
+     "merges_from_main": 2,
+     "files": 18
+    },
+    "W10": {
+     "hours": 6.81,
+     "merges_from_main": 3,
+     "files": 23
+    },
+    "W20": {
+     "hours": 6.79,
+     "merges_from_main": 2,
+     "files": 17
+    },
+    "W37": {
+     "hours": 0.49,
+     "merges_from_main": 0,
+     "files": 14
+    },
+    "W24": {
+     "hours": 1.25,
+     "merges_from_main": 1,
+     "files": 29
+    },
+    "W23": {
+     "hours": 0.68,
+     "merges_from_main": 1,
+     "files": 24
+    },
+    "W30": {
+     "hours": 0.44,
+     "merges_from_main": 1,
+     "files": 10
+    },
+    "W12": {
+     "hours": 0.42,
+     "merges_from_main": 1,
+     "files": 37
+    },
+    "W21": {
+     "hours": 1.93,
+     "merges_from_main": 2,
+     "files": 18
+    },
+    "W19": {
+     "hours": 1.81,
+     "merges_from_main": 4,
+     "files": 11
+    },
+    "W13": {
+     "hours": 2.13,
+     "merges_from_main": 4,
+     "files": 25
+    },
+    "W8": {
+     "hours": 1.95,
+     "merges_from_main": 4,
+     "files": 17
+    },
+    "W17": {
+     "hours": 0.66,
+     "merges_from_main": 2,
+     "files": 15
+    },
+    "W11": {
+     "hours": 0.79,
+     "merges_from_main": 2,
+     "files": 13
+    },
+    "W14": {
+     "hours": 0.57,
+     "merges_from_main": 1,
+     "files": 13
+    },
+    "W7": {
+     "hours": 0.71,
+     "merges_from_main": 0,
+     "files": 25
+    },
+    "W1": {
+     "hours": 1.28,
+     "merges_from_main": 0,
+     "files": 4
+    },
+    "W4": {
+     "hours": 15.54,
+     "merges_from_main": 4,
+     "files": 62
+    },
+    "W5": {
+     "hours": 15.23,
+     "merges_from_main": 4,
+     "files": 11
+    },
+    "W3": {
+     "hours": 19.03,
+     "merges_from_main": 3,
+     "files": 6
+    },
+    "W6": {
+     "hours": 0.75,
+     "merges_from_main": 0,
+     "files": 30
+    },
+    "W2": {
+     "hours": 10.93,
+     "merges_from_main": 2,
+     "files": 37
+    }
+   },
+   "details": {
+    "jobs": 38,
+    "no_branch": [],
+    "median_hours": 2.06,
+    "p90_hours": 16.61,
+    "exposed_share": 0.8684
+   }
+  },
+  "work_mix": {
+   "value": null,
+   "details": {
+    "jobs": 20,
+    "phases": {
+     "1": 20
+    }
+   }
+  },
+  "queue": {
+   "value": {
+    "progress": 1,
+    "review": 1,
+    "fix": 0,
+    "ready": 2,
+    "waiting": 0,
+    "brief": 4,
+    "blocked": 1,
+    "done": 38
+   },
+   "details": {
+    "ready": [
+     "W9",
+     "W18"
+    ],
+    "ready_needs_pc": 2,
+    "gating": {
+     "W41": 2,
+     "W43": 3,
+     "W44": 3,
+     "W45": 2,
+     "W46": 1
+    }
+   }
+  },
+  "review_loop": {
+   "value": 0.8158,
+   "details": {
+    "rounds": {
+     "W1": 1,
+     "W2": 1,
+     "W3": 1,
+     "W4": 1,
+     "W5": 1,
+     "W6": 1,
+     "W7": 1,
+     "W8": 1,
+     "W10": 1,
+     "W11": 1,
+     "W12": 1,
+     "W13": 1,
+     "W14": 1,
+     "W15": 1,
+     "W16": 1,
+     "W17": 1,
+     "W19": 1,
+     "W20": 2,
+     "W21": 1,
+     "W22": 1,
+     "W23": 1,
+     "W24": 1,
+     "W25": 1,
+     "W26": 1,
+     "W27": 1,
+     "W28": 2,
+     "W29": 1,
+     "W30": 2,
+     "W31": 2,
+     "W33": 1,
+     "W34": 1,
+     "W35": 2,
+     "W36": 1,
+     "W37": 1,
+     "W38": 1,
+     "W39": 2,
+     "W40": 2,
+     "W42": 1
+    },
+    "no_review": [],
+    "later": 25
+   }
+  },
+  "brief_cost": {
+   "value": 1.337,
+   "details": {
+    "median_brief": 15422.0,
+    "median_report": 11534.5,
+    "brief_merges": 39,
+    "job_merges": 39
+   }
+  },
+  "startup_read": {
+   "value": 13.42,
+   "details": {
+    "bytes": {
+     "CLAUDE.md": 4948,
+     "README.md": 8789
+    },
+    "missing": []
+   }
+  },
+  "doc_caps": {
+   "value": 7,
+   "details": {
+    "docs": 145,
+    "near": {
+     "docs/CONSUMING.md": 30716,
+     "docs/DECISIONS.md": 29108,
+     "jobs/W23/brief.md": 30323,
+     "jobs/W24/brief.md": 28620,
+     "jobs/W33/brief.md": 30325,
+     "jobs/W34/brief.md": 30202,
+     "jobs/W9/brief.md": 30476
+    }
+   }
+  },
+  "throughput": {
+   "value": null,
+   "details": {
+    "days": 7.0,
+    "jobs": 39,
+    "briefs": 39,
+    "prior_jobs": 0,
+    "prior_briefs": 0,
+    "per_day": 11.14,
+    "prior_per_day": 0.0,
+    "kinds": {
+     "job": 39,
+     "brief": 39,
+     "plan": 18,
+     "meta": 1,
+     "release": 3,
+     "other": 14
+    }
+   }
+  },
+  "ci_durations": {
+   "value": {
+    "gates (ubuntu-latest)": 1.75,
+    "gates (windows-latest)": 8.64,
+    "harness-windows": 7.97,
+    "proxy": 10.27
+   },
+   "details": {
+    "runs": {
+     "gates (ubuntu-latest)": 19,
+     "gates (windows-latest)": 18,
+     "harness-windows": 7,
+     "proxy": 7
+    }
+   }
+  }
+ },
+ "findings": [
+  {
+   "id": "hot_file:VERSION",
+   "metric": "hot_files",
+   "subject": "VERSION",
+   "severity": "high",
+   "value": 0.7179,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "VERSION was touched by 28 of 39 job merges in the window (72%)."
+  },
+  {
+   "id": "hot_file:docs/BACKLOG.md",
+   "metric": "hot_files",
+   "subject": "docs/BACKLOG.md",
+   "severity": "high",
+   "value": 0.641,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "docs/BACKLOG.md was touched by 25 of 39 job merges in the window (64%)."
+  },
+  {
+   "id": "hot_file:docs/CONSUMING.md",
+   "metric": "hot_files",
+   "subject": "docs/CONSUMING.md",
+   "severity": "high",
+   "value": 0.8462,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "docs/CONSUMING.md was touched by 33 of 39 job merges in the window (85%)."
+  },
+  {
+   "id": "hot_file:registries/tools.jsonl",
+   "metric": "hot_files",
+   "subject": "registries/tools.jsonl",
+   "severity": "high",
+   "value": 0.5897,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "registries/tools.jsonl was touched by 23 of 39 job merges in the window (59%)."
+  },
+  {
+   "id": "branch_exposure",
+   "metric": "job_lifetime",
+   "subject": "",
+   "severity": "medium",
+   "value": 0.8684,
+   "threshold": 0.5,
+   "direction": "above",
+   "evidence": "33 of 38 jobs merged main into their branch before merging (87%)."
+  },
+  {
+   "id": "conflict_file:.github/workflows/gates.yml",
+   "metric": "conflict_files",
+   "subject": ".github/workflows/gates.yml",
+   "severity": "medium",
+   "value": 6,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": ".github/workflows/gates.yml changed on both sides of 6 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:README.md",
+   "metric": "conflict_files",
+   "subject": "README.md",
+   "severity": "medium",
+   "value": 10,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "README.md changed on both sides of 10 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:VERSION",
+   "metric": "conflict_files",
+   "subject": "VERSION",
+   "severity": "medium",
+   "value": 29,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "VERSION changed on both sides of 29 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:ci/gates.yml.in",
+   "metric": "conflict_files",
+   "subject": "ci/gates.yml.in",
+   "severity": "medium",
+   "value": 6,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "ci/gates.yml.in changed on both sides of 6 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/BACKLOG.md",
+   "metric": "conflict_files",
+   "subject": "docs/BACKLOG.md",
+   "severity": "medium",
+   "value": 34,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/BACKLOG.md changed on both sides of 34 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/CONSUMING.md",
+   "metric": "conflict_files",
+   "subject": "docs/CONSUMING.md",
+   "severity": "medium",
+   "value": 56,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/CONSUMING.md changed on both sides of 56 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/DECISIONS.md",
+   "metric": "conflict_files",
+   "subject": "docs/DECISIONS.md",
+   "severity": "medium",
+   "value": 29,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/DECISIONS.md changed on both sides of 29 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/PROXY_BUILD.md",
+   "metric": "conflict_files",
+   "subject": "docs/PROXY_BUILD.md",
+   "severity": "medium",
+   "value": 4,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/PROXY_BUILD.md changed on both sides of 4 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/PROXY_CTL.md",
+   "metric": "conflict_files",
+   "subject": "docs/PROXY_CTL.md",
+   "severity": "medium",
+   "value": 5,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/PROXY_CTL.md changed on both sides of 5 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/PROXY_HARNESS.md",
+   "metric": "conflict_files",
+   "subject": "docs/PROXY_HARNESS.md",
+   "severity": "medium",
+   "value": 5,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/PROXY_HARNESS.md changed on both sides of 5 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/REVIEW.md",
+   "metric": "conflict_files",
+   "subject": "docs/REVIEW.md",
+   "severity": "medium",
+   "value": 3,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/REVIEW.md changed on both sides of 3 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:docs/UPGRADING.md",
+   "metric": "conflict_files",
+   "subject": "docs/UPGRADING.md",
+   "severity": "medium",
+   "value": 9,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "docs/UPGRADING.md changed on both sides of 9 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:harness/ctl.py",
+   "metric": "conflict_files",
+   "subject": "harness/ctl.py",
+   "severity": "medium",
+   "value": 4,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "harness/ctl.py changed on both sides of 4 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:harness/job.sh",
+   "metric": "conflict_files",
+   "subject": "harness/job.sh",
+   "severity": "medium",
+   "value": 4,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "harness/job.sh changed on both sides of 4 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:jobs/W15/report.md",
+   "metric": "conflict_files",
+   "subject": "jobs/W15/report.md",
+   "severity": "medium",
+   "value": 3,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "jobs/W15/report.md changed on both sides of 3 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:jobs/W26/report.md",
+   "metric": "conflict_files",
+   "subject": "jobs/W26/report.md",
+   "severity": "medium",
+   "value": 4,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "jobs/W26/report.md changed on both sides of 4 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:proxy/src/dllmain.cpp",
+   "metric": "conflict_files",
+   "subject": "proxy/src/dllmain.cpp",
+   "severity": "medium",
+   "value": 3,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "proxy/src/dllmain.cpp changed on both sides of 3 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:proxy/tools/build.sh",
+   "metric": "conflict_files",
+   "subject": "proxy/tools/build.sh",
+   "severity": "medium",
+   "value": 7,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "proxy/tools/build.sh changed on both sides of 7 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:registries/tools.jsonl",
+   "metric": "conflict_files",
+   "subject": "registries/tools.jsonl",
+   "severity": "medium",
+   "value": 30,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "registries/tools.jsonl changed on both sides of 30 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:tests/test_ci.py",
+   "metric": "conflict_files",
+   "subject": "tests/test_ci.py",
+   "severity": "medium",
+   "value": 4,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "tests/test_ci.py changed on both sides of 4 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:tests/test_ctl.py",
+   "metric": "conflict_files",
+   "subject": "tests/test_ctl.py",
+   "severity": "medium",
+   "value": 3,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "tests/test_ctl.py changed on both sides of 3 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:tests/test_jobs.py",
+   "metric": "conflict_files",
+   "subject": "tests/test_jobs.py",
+   "severity": "medium",
+   "value": 5,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "tests/test_jobs.py changed on both sides of 5 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:tests/test_moved_tools.py",
+   "metric": "conflict_files",
+   "subject": "tests/test_moved_tools.py",
+   "severity": "medium",
+   "value": 3,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "tests/test_moved_tools.py changed on both sides of 3 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:warscape/ci_render.py",
+   "metric": "conflict_files",
+   "subject": "warscape/ci_render.py",
+   "severity": "medium",
+   "value": 5,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "warscape/ci_render.py changed on both sides of 5 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:warscape/jobq.py",
+   "metric": "conflict_files",
+   "subject": "warscape/jobq.py",
+   "severity": "medium",
+   "value": 6,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "warscape/jobq.py changed on both sides of 6 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:warscape/policy.py",
+   "metric": "conflict_files",
+   "subject": "warscape/policy.py",
+   "severity": "medium",
+   "value": 5,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "warscape/policy.py changed on both sides of 5 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:warscape/repo.py",
+   "metric": "conflict_files",
+   "subject": "warscape/repo.py",
+   "severity": "medium",
+   "value": 18,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "warscape/repo.py changed on both sides of 18 of the 86 branch merges read."
+  },
+  {
+   "id": "conflict_file:wsc.toml",
+   "metric": "conflict_files",
+   "subject": "wsc.toml",
+   "severity": "medium",
+   "value": 15,
+   "threshold": 3,
+   "direction": "above",
+   "evidence": "wsc.toml changed on both sides of 15 of the 86 branch merges read."
+  },
+  {
+   "id": "doc_cap:docs/CONSUMING.md",
+   "metric": "doc_caps",
+   "subject": "docs/CONSUMING.md",
+   "severity": "medium",
+   "value": 30.0,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "docs/CONSUMING.md is 30.0 KB of the 30 KB cap."
+  },
+  {
+   "id": "doc_cap:docs/DECISIONS.md",
+   "metric": "doc_caps",
+   "subject": "docs/DECISIONS.md",
+   "severity": "medium",
+   "value": 28.43,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "docs/DECISIONS.md is 28.4 KB of the 30 KB cap."
+  },
+  {
+   "id": "doc_cap:jobs/W23/brief.md",
+   "metric": "doc_caps",
+   "subject": "jobs/W23/brief.md",
+   "severity": "medium",
+   "value": 29.61,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "jobs/W23/brief.md is 29.6 KB of the 30 KB cap."
+  },
+  {
+   "id": "doc_cap:jobs/W24/brief.md",
+   "metric": "doc_caps",
+   "subject": "jobs/W24/brief.md",
+   "severity": "medium",
+   "value": 27.95,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "jobs/W24/brief.md is 27.9 KB of the 30 KB cap."
+  },
+  {
+   "id": "doc_cap:jobs/W33/brief.md",
+   "metric": "doc_caps",
+   "subject": "jobs/W33/brief.md",
+   "severity": "medium",
+   "value": 29.61,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "jobs/W33/brief.md is 29.6 KB of the 30 KB cap."
+  },
+  {
+   "id": "doc_cap:jobs/W34/brief.md",
+   "metric": "doc_caps",
+   "subject": "jobs/W34/brief.md",
+   "severity": "medium",
+   "value": 29.49,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "jobs/W34/brief.md is 29.5 KB of the 30 KB cap."
+  },
+  {
+   "id": "doc_cap:jobs/W9/brief.md",
+   "metric": "doc_caps",
+   "subject": "jobs/W9/brief.md",
+   "severity": "medium",
+   "value": 29.76,
+   "threshold": 27.0,
+   "direction": "above",
+   "evidence": "jobs/W9/brief.md is 29.8 KB of the 30 KB cap."
+  },
+  {
+   "id": "hot_file:.github/workflows/gates.yml",
+   "metric": "hot_files",
+   "subject": ".github/workflows/gates.yml",
+   "severity": "medium",
+   "value": 0.2564,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": ".github/workflows/gates.yml was touched by 10 of 39 job merges in the window (26%)."
+  },
+  {
+   "id": "hot_file:README.md",
+   "metric": "hot_files",
+   "subject": "README.md",
+   "severity": "medium",
+   "value": 0.2821,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "README.md was touched by 11 of 39 job merges in the window (28%)."
+  },
+  {
+   "id": "hot_file:ci/gates.yml.in",
+   "metric": "hot_files",
+   "subject": "ci/gates.yml.in",
+   "severity": "medium",
+   "value": 0.2564,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "ci/gates.yml.in was touched by 10 of 39 job merges in the window (26%)."
+  },
+  {
+   "id": "hot_file:docs/DECISIONS.md",
+   "metric": "hot_files",
+   "subject": "docs/DECISIONS.md",
+   "severity": "medium",
+   "value": 0.4615,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "docs/DECISIONS.md was touched by 18 of 39 job merges in the window (46%)."
+  },
+  {
+   "id": "hot_file:proxy/tools/build.sh",
+   "metric": "hot_files",
+   "subject": "proxy/tools/build.sh",
+   "severity": "medium",
+   "value": 0.2564,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "proxy/tools/build.sh was touched by 10 of 39 job merges in the window (26%)."
+  },
+  {
+   "id": "hot_file:warscape/jobq.py",
+   "metric": "hot_files",
+   "subject": "warscape/jobq.py",
+   "severity": "medium",
+   "value": 0.2564,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "warscape/jobq.py was touched by 10 of 39 job merges in the window (26%)."
+  },
+  {
+   "id": "hot_file:warscape/repo.py",
+   "metric": "hot_files",
+   "subject": "warscape/repo.py",
+   "severity": "medium",
+   "value": 0.3846,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "warscape/repo.py was touched by 15 of 39 job merges in the window (38%)."
+  },
+  {
+   "id": "hot_file:wsc.toml",
+   "metric": "hot_files",
+   "subject": "wsc.toml",
+   "severity": "medium",
+   "value": 0.3077,
+   "threshold": 0.25,
+   "direction": "above",
+   "evidence": "wsc.toml was touched by 12 of 39 job merges in the window (31%)."
+  },
+  {
+   "id": "slow_check:proxy",
+   "metric": "ci_durations",
+   "subject": "proxy",
+   "severity": "medium",
+   "value": 10.27,
+   "threshold": 10,
+   "direction": "above",
+   "evidence": "proxy took a median 10.27 minutes over its last 7 runs on main."
+  },
+  {
+   "id": "wide_job:W4",
+   "metric": "job_lifetime",
+   "subject": "W4",
+   "severity": "medium",
+   "value": 62,
+   "threshold": 60,
+   "direction": "above",
+   "evidence": "W4 merged 62 files in one squash commit."
+  }
+ ],
+ "skipped": [
+  {
+   "metric": "pin_lag",
+   "reason": "[ci] core is empty: this repo pins no core"
+  }
+ ],
+ "failed": []
+}
