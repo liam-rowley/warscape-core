@@ -1,10 +1,15 @@
 """Host tests for proxy/tools/gen_tables.py (W7): typed config keys (type, min, max), value_key engine-site rows, every generator refusal
 on in-memory rows, the stock round trip, byte-identical output for tables without the new fields, and the schema rules behind them.
 The generator finds its game through proxy/tools/layout.py, so WSP_GAME_ROOT points at the null game as build.sh does."""
+import hashlib
 import importlib.util
 import json
 import os
+import shutil
+import struct
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -266,6 +271,175 @@ class Schemas(unittest.TestCase):
         for bad in (vkey(type='double'), vkey(type=None), vkey(type='string'), vkey(max='600')):
             with self.subTest(bad=bad):
                 self.assertNotEqual(validate(bad, self.keys), [])
+
+
+
+def make_pe(sections, tds=0x5F000000, size_of_image=0x4000, image_base=0x400000):
+    """A minimal PE32 file: `sections` = (name, rva, data, characteristics, virtual size or None). exe_info.parse_pe reads it."""
+    lfanew, opt_size, raw_at = 0x40, 224, 0x400
+    head = bytearray(raw_at)
+    head[0:2] = b'MZ'
+    struct.pack_into('<I', head, 0x3C, lfanew)
+    head[lfanew:lfanew + 4] = b'PE\0\0'
+    struct.pack_into('<HHIIIHH', head, lfanew + 4, 0x14C, len(sections), tds, 0, 0, opt_size, 0x102)
+    opt = lfanew + 24
+    struct.pack_into('<H', head, opt, 0x10B)
+    struct.pack_into('<I', head, opt + 28, image_base)
+    struct.pack_into('<II', head, opt + 56, size_of_image, raw_at)
+    struct.pack_into('<I', head, opt + 92, 16)
+    sh, body, at = opt + opt_size, b'', raw_at
+    for name, rva, data, chars, vsize in sections:
+        head[sh:sh + 8] = name.encode().ljust(8, b'\0')
+        struct.pack_into('<IIII', head, sh + 8, vsize if vsize is not None else len(data), rva, len(data), at)
+        struct.pack_into('<I', head, sh + 36, chars)
+        sh, at, body = sh + 40, at + len(data), body + data
+    return bytes(head) + body
+
+
+class ExeCheck(unittest.TestCase):
+    """W34 (C7): `gen_tables.py --exe <staged copy>` checks every row against a file, offline. One site per kind, a value row and an anchor
+    holding an absolute address: the file is unrelocated, so a plain compare is right (the DLL takes the load delta off first)."""
+    CODE, DATA = 0x60000020, 0xC0000040
+
+    def image(self, patch=None):
+        text, data = bytearray(0x200), bytearray(0x200)
+        text[0x00:0x07] = bytes.fromhex('cccc558bec83ec')           # t.hook: int3 int3 | push ebp ; mov ebp,esp ; sub esp
+        text[0x40:0x47] = bytes.fromhex('c7414800080000')           # t.patch: mov [ecx+0x48], 0x800
+        text[0x80:0x8a] = bytes.fromhex('c70500a0400001000000')     # t.abs: mov dword [0x40a000], 1
+        data[0x10:0x18] = bytes.fromhex('112233440000c842')         # t.value: tag, then 100.0f
+        for at, val in (patch or {}).items():
+            (text if at < 0x2000 else data)[at - (0x1000 if at < 0x2000 else 0x2000)] = val
+        return make_pe([('.text', 0x1000, bytes(text), self.CODE, None), ('.data', 0x2000, bytes(data), self.DATA, 0x800)])
+
+    def rows(self, sha1):
+        pin = {'exe': f'sha1:{sha1}', 'purpose': 'x', 'description': 'x', 'owner': 'proxy'}
+        return [dict(pin, id='t.hook', kind='hook', hook='x', rva='0x1000', anchor_bytes='cc cc', stock_bytes='55 8b ec 83 ec'),
+                dict(pin, id='t.patch', kind='patch', rva='0x1040', anchor_bytes='c7 41 48', stock_bytes='00 08 00 00', patch_bytes='00 20 00 00'),
+                dict(pin, id='t.abs', kind='patch', rva='0x1080', anchor_bytes='c7 05 00 a0 40 00', stock_bytes='01 00 00 00', patch_bytes='02 00 00 00'),
+                dict(pin, id='t.value', kind='patch', rva='0x2010', anchor_bytes='11 22 33 44', stock_bytes='00 00 c8 42', value_key='null.distance')]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.game = Path(self.tmp.name) / 'game'
+        shutil.copytree(NULL_GAME / 'registries', self.game / 'registries')
+        shutil.copytree(NULL_GAME / 'proxy' / 'null', self.game / 'proxy' / 'null')
+        self.exe = Path(self.tmp.name) / 'staged.exe'
+        self.stage(self.image())
+
+    def stage(self, data, rows=None, **ident):
+        """The file and the game's identity and rows, all agreeing on the file unless `ident` or `rows` says otherwise."""
+        self.exe.write_bytes(data)
+        p = self.game / 'proxy' / 'null' / 'identity.json'
+        i = json.loads(p.read_text(encoding='utf-8'))
+        i.update({'sha1': hashlib.sha1(data).hexdigest(), 'time_date_stamp': '0x5f000000', 'size_of_image': '0x00004000'})
+        i.update(ident)
+        p.write_text(json.dumps(i), encoding='utf-8')
+        rows = rows if rows is not None else self.rows(i['sha1'])
+        (self.game / 'registries' / 'engine_sites.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows), encoding='utf-8')
+
+    def run_exe(self, *args):
+        env = {**os.environ, 'WSP_GAME_ROOT': str(self.game)}
+        env.pop('WSP_PROXY_ADAPTER', None)
+        p = subprocess.run([sys.executable, str(ROOT / 'proxy' / 'tools' / 'gen_tables.py'), *args], env=env, capture_output=True, text=True)
+        return p.returncode, p.stdout + p.stderr
+
+    def test_every_kind_matches(self):
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 0, out)
+        for line in ('MATCH t.hook 0x1000', 'MATCH t.patch 0x1040', 'MATCH t.abs 0x1080', 'MATCH t.value 0x2010'):
+            self.assertIn(line, out.splitlines())
+        self.assertIn('unrelocated', out)   # the header says why the plain compare is right
+
+    def test_wrong_anchor_byte(self):
+        data = self.image({0x1041: 0x42})
+        self.stage(data)
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('MISMATCH t.patch 0x1040: anchor byte 1 is 42, the row says 41', out.splitlines())
+        self.assertIn('MATCH t.hook 0x1000', out.splitlines())   # every row is still reported
+
+    def test_wrong_stock_byte(self):
+        data = self.image({0x2016: 0x48})
+        self.stage(data)
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('MISMATCH t.value 0x2010: stock byte 2 is 48, the row says c8', out.splitlines())
+
+    def extra_row(self, **over):
+        data = self.image()
+        rows = self.rows(hashlib.sha1(data).hexdigest())
+        self.stage(data, rows + [dict(rows[1], **over)])
+
+    def test_rva_outside_every_section(self):
+        self.extra_row(id='t.gone', rva='0x9000')
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('MISMATCH t.gone: rva not in the file', out.splitlines())
+
+    def test_rva_in_a_sections_zero_fill_is_not_in_the_file(self):
+        self.extra_row(id='t.bss', rva='0x2400')   # .data: 0x200 raw, 0x800 virtual
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('MISMATCH t.bss: rva not in the file', out.splitlines())
+
+    def test_a_hook_outside_code_mismatches_as_the_dll_refuses_it(self):
+        data = self.image()
+        rows = self.rows(hashlib.sha1(data).hexdigest())
+        self.stage(data, rows[:3] + [dict(rows[0], id='t.datahook', rva='0x2010', anchor_bytes='11 22 33 44', stock_bytes='00 00 c8 42 00')])
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('MISMATCH t.datahook 0x2010: a hook needs an executable section, .data is not', out.splitlines())
+
+    def test_wrong_identity(self):
+        data = self.image()
+        for field, value, word in (('time_date_stamp', '0x00000001', 'TimeDateStamp'), ('size_of_image', '0x00010000', 'SizeOfImage')):
+            self.stage(data, **{field: value})
+            rc, out = self.run_exe('--exe', str(self.exe))
+            self.assertEqual(rc, 1, out)
+            self.assertIn(f'IDENTITY MISMATCH {word}', out)
+        self.stage(data, sha1='1' * 40)
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('IDENTITY MISMATCH sha1', out)
+        self.assertIn('MATCH t.hook 0x1000', out.splitlines())   # the bytes are still checked
+
+    def test_allow_pin_mismatch_reports_the_identity_and_passes_on_the_bytes(self):
+        self.stage(self.image(), sha1='1' * 40, time_date_stamp='0x00000001', size_of_image='0x00010000')
+        rc, out = self.run_exe('--exe', str(self.exe), '--allow-pin-mismatch')
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('IDENTITY MISMATCH', out)
+        self.assertIn('identity differs (--allow-pin-mismatch)', out)
+        self.stage(self.image({0x1002: 0x90}), sha1='1' * 40)
+        self.assertEqual(self.run_exe('--exe', str(self.exe), '--allow-pin-mismatch')[0], 1)   # never the bytes
+
+    def test_unreadable_file(self):
+        rc, out = self.run_exe('--exe', str(self.exe) + '.missing')
+        self.assertEqual(rc, 2, out)
+        self.exe.write_bytes(b'not a PE at all')
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 2, out)
+        self.assertIn('cannot read', out)
+
+    def test_invalid_rows_refuse_before_the_file_is_read(self):
+        data = self.image()
+        rows = self.rows(hashlib.sha1(data).hexdigest())
+        rows[1]['patch_bytes'] = rows[1]['stock_bytes']
+        self.stage(data, rows)
+        rc, out = self.run_exe('--exe', str(self.exe))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('INVALID', out)
+        self.assertNotIn('MATCH', out)
+
+    def test_writes_nothing(self):
+        files = [self.game / 'proxy' / 'null' / 'generated' / 'tables.h', self.game / 'proxy' / 'null' / 'nullgame.ini']
+        before = [f.read_bytes() for f in files]   # stale against the rows staged above: a write would show
+        self.assertEqual(self.run_exe('--exe', str(self.exe))[0], 0)
+        self.assertEqual([f.read_bytes() for f in files], before)
+        rc, out = self.run_exe('--exe', str(self.exe), '--check')   # with --check the stale files still fail, and still are not written
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STALE', out)
+        self.assertEqual([f.read_bytes() for f in files], before)
 
 
 if __name__ == '__main__':

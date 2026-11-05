@@ -38,3 +38,4 @@
 {"id": "ui.show", "description": "dev: a document under ui.dir shown once the main device is ready (a test document); empty shows nothing", "default": "", "release_value": "", "owner": "proxy"}
 {"id": "ui.dump_dir", "description": "where ctl ui dump writes lossless PNGs of the back buffer, outside the game folder (D25) so the uninstall stays byte-exact", "default": "C:\\nullgame_pc\\ui_dumps", "release_value": "C:\\nullgame_pc\\ui_dumps", "owner": "proxy"}
 {"id": "null.distance", "description": "the null game's value key (W7, docs/PROXY_SITES.md): null.value_distance writes it x1.5 as a float32, floored at stock; 0 = stock", "type": "float", "default": 0, "min": 0, "max": 600, "release_value": 0, "owner": "proxy"}
+{"id": "null.smoke_patch", "description": "the null game's fixed patch row null.smoke_patch (W34): only the smoke's launch 12 turns it on", "default": false, "release_value": false, "owner": "proxy"}

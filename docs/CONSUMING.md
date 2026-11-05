@@ -292,11 +292,15 @@ when `WSC_SESSION_ID` is unset) and drop `--owner`. With no session id and no `-
 - `kill` returns when `watcher.status` already says `not_running`; the prefs overlay sets every copy of a duplicated key; `pc_deploy set --state` waits up to `--wait-restore` (30 s) for a pending profile restore, else refuses.
 
 ## pc_deploy takes the lock; exe_check is a start-time setting (0.33.0, core W25, C28)
-- `pc_deploy install|uninstall|set|sync-lua` take the game lock through `job.sh` (`--owner`, `--session`, `--job-sh`; defaults as above) or use the caller's; held by another: exit 2.
-  `--assume-closed` skips only the running check, which `set` now makes too. The ini and `install.json` are replaced atomically; `owned` is the union of installed kits.
-- Nothing installed but the mod's config file or folder present: `status` fails, `install` refuses (`--move-stray` moves it to `<state>/_to_delete`).
-- Watcher **1.5.0**: neither a `watcher.ini` reload nor a `restart`/`update` job weakens `exe_check`; for `warn`, Liam stops the watcher and starts it by hand.
-- `esf_edit.set_value` takes the `@N` child position (as `esf_dump` prints), not the Val-only index.
+Moved to [UPGRADING.md](UPGRADING.md) (2026-11-04, the cap).
+
+## DLL changes from W34's tag (W34, C37)
+- **`GameAdapter`:** size asserted (`proxy/src/adapter.h`). A new field goes at the **end**, defaulted. Initialise by name (`.gameName = ...`, a GNU extension
+  in the DLL's `-std=c++17`): a positional list compiles but shifts silently.
+- **ctl `lua`:** reads only under `luaDir` and the ctl folder ([PROXY_CTL.md](PROXY_CTL.md)).
+- **The ctl folder is owner-only:** say so in the pin-bump report if another user drives.
+- **System keys** always reach the game, text focus too ([PROXY_UI.md](PROXY_UI.md)).
+- **`gen_tables.py --exe <staged copy>`:** add it to the exe-update checklist after `exe_info.py`, before a PC run (new build id).
 
 ## Discovery (optional extras)
 From 0.15.0 (napoleon J64, C20) the core carries the discovery passes (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`; old-to-new paths in `discovery/README.md`).

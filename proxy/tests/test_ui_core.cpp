@@ -179,6 +179,22 @@ int main(int argc, char** argv) {
         const size_t lockOpen = host.rfind("Lock l;", dec);
         CHECK(lockOpen != std::string::npos && lockOpen > wp);
     }
+    {   // W34 (C9): the three system-key messages, and their neighbours are not
+        for (uint32_t m : { 0x0104u, 0x0105u, 0x0106u }) CHECK(UiIsSystemKey(m));
+        for (uint32_t m : { 0x0000u, 0x0100u, 0x0101u, 0x0102u, 0x0103u, 0x0107u, 0x0108u }) CHECK(!UiIsSystemKey(m));   // 0x100 WM_KEYDOWN, 0x101 WM_KEYUP, 0x102 WM_CHAR
+    }
+    {   // W34 source lint (C9): a system key never meets UiDecide: WndProc hands it to the engine first, the gesture stage still told, and no case maps it to a Key
+        const std::string host = tk::ReadFile("core/ui_host.cpp");
+        const size_t np = std::string::npos, wp = host.find("LRESULT CALLBACK WndProc("), sys = host.find("if (UiIsSystemKey(msg)) {", wp), sw = host.find("switch (msg) {", wp), dec = host.find("r = UiDecide(", wp);
+        CHECK(wp != np && sw != np && dec != np && sys != np && sys < sw && sw < dec);
+        if (sys != np) {
+            const std::string block = host.substr(sys, host.find("\n", sys) - sys);
+            CHECK(block.find("GestureMessage(h, msg, (uint32_t)wp, (intptr_t)lp, true);") != np && block.find("return Engine(h, msg, wp, lp);") != np);
+        }
+        const std::string body = host.substr(wp, host.find("// ---- input: DirectInput", wp) - wp);
+        CHECK(body.find("WM_SYSKEYDOWN") == np && body.find("WM_SYSKEYUP") == np && body.find("WM_SYSCHAR") == np);
+        CHECK(body.find("case WM_KEYDOWN: case WM_KEYUP: ev = UiEv::Key; break;") != np && body.find("case WM_CHAR: ev = UiEv::Char; break;") != np);
+    }
     {   // frame-cost percentiles (nearest rank)
         std::vector<double> v; for (int i = 100; i >= 1; --i) v.push_back(i * 0.01);
         UiCost c = UiCostOf(v); CHECK_EQ(c.n, (size_t)100); CHECK(std::fabs(c.p50 - 0.50) < 1e-9 && std::fabs(c.p99 - 0.99) < 1e-9 && std::fabs(c.max - 1.0) < 1e-9);

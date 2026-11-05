@@ -11,14 +11,15 @@ static const wchar_t* const kModDir = L"nullgame";
 static const wchar_t* const kInstanceMutex = L"nullgame_proxy_instance";
 static const Identity kIdentity = { "Game.exe", "1111111111111111111111111111111111111111", 0x00000000u, 0x00010000u };
 
-static const size_t kSiteCount = 2;
+static const size_t kSiteCount = 3;
 static const SiteDef kSites[kSiteCount + 1] = {   // id, kind, rva, anchorLen, anchor, len, stock, patch, configKey [, valueKey, valueType, valueFloorStock, valueScale]
     { "null.dummy_hook", kHook, 0x1000u, 4, { 0xde, 0xad, 0xbe, 0xef }, 6, { 0x55, 0x8b, 0xec, 0x83, 0xec, 0x10 }, { 0 }, "dev.camera" },
     { "null.value_distance", kPatch, 0x1100u, 3, { 0xc7, 0x41, 0x48 }, 4, { 0x00, 0x00, 0xc8, 0x42 }, { 0 }, nullptr, "null.distance", kValueF32, 1, 1.5 },
+    { "null.smoke_patch", kPatch, 0x1180u, 3, { 0x90, 0x90, 0xb8 }, 4, { 0x01, 0x00, 0x00, 0x00 }, { 0x02, 0x00, 0x00, 0x00 }, "null.smoke_patch" },
     { nullptr, 0, 0, 0, { 0 }, 0, { 0 }, { 0 }, nullptr }   // sentinel (keeps the array non-empty)
 };
 
-static const size_t kKeyCount = 40;
+static const size_t kKeyCount = 41;
 static const KeySpec kKeys[kKeyCount + 1] = {
     { "controls.gestures", kBool, "0" },
     { "dev.autostart", kStr, "" },
@@ -45,6 +46,7 @@ static const KeySpec kKeys[kKeyCount + 1] = {
     { "headless.test_dll_window_ms", kInt, "0" },
     { "headless.test_off_thread", kBool, "0" },
     { "null.distance", kFloat, "0.0", "0.0", "600.0" },
+    { "null.smoke_patch", kBool, "0" },
     { "proxy.backend", kStr, "dxvk" },
     { "proxy.dxvk_path", kStr, "nullgame\\dxvk\\d3d9_dxvk.dll" },
     { "proxy.dxvk_wndproc_fix", kBool, "1" },
