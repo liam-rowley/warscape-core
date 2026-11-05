@@ -5,7 +5,7 @@ W42 makes three CI changes. Both gates jobs get a 20-minute limit. The `gates` m
 Usage: 90 tool calls; models: opus; 1 session, by hand, build only (the brief took about 25 more), 2026-11-05
 
 ## The probe (brief step 2)
-Run 42118898100, 2026-11-05, throwaway branch `probe/W42-skip` (deleted): decision 1 plus every `[ci.inputs]` regex set to `'^nothing$'`, and one extra job with a two-value matrix and `if: ${{ false }}`. Check runs of commit `cfbd2de`:
+Run 42118898100, 2026-11-05, throwaway branch `probe/W42-skip` (deleted): decision 1 plus every `[ci.inputs]` regex set to `'^nothing$'`, and one extra job with a two-value matrix and `if: ${{ false }}`. Check runs of the probe's head commit:
 
 ```
 'gates (windows-latest)' completed skipped
