@@ -1,0 +1,2 @@
+﻿game.lock is held by 'w18' (session 'aac2fd3f-d9f9-409f-8143-3df8abdde693'): w18 holds it
+shot: C:\Users\liamr\repos\warscape-core\.claude\worktrees\W18-fix\jobs\W18\runs\20261106_w18pc2\b1_shot_3840_0.jpg 1280 x 720 (from 3840 x 2160 at 3840,0)
