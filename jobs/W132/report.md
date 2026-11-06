@@ -68,6 +68,9 @@ The refusals of the review's table, re-run in that run with the grant and the ro
 
 Smuggling, all rc 1: a grant added to an existing row (append only), a row in a subfolder, a `.JSON` name, a symlink row, a real `registries/Decisions/` tree entry on `plan/`. Judge tests also refuse: a job not blocked on the head, another blocked reason, `needs_brief` and `done` base rows, no such job, a bad id, `reversible=yes`, a changed grant row.
 
+CI, 2026-11-06, run 42242661250 at 9f8bf6a: `gates (ubuntu-latest)`, `gates (windows-latest)` and `harness-windows` green; `proxy` skipped; `policy` skips a draft.
+origin/main then moved to 4b6720b (W18 and a plan commit), merged cleanly; `python3 wsc.py gates` and the W45 proof were run again on that merge, with the same results (run w45-fix1b).
+
 ### Open questions, fix round 1
 - **For Liam: S1.** `meta/` being the owner's is a rule only. Is that enough, or does a grant need a control a session cannot hold?
 - **For W45's fix session:** merging main conflicts as above. Keep both sides of `warscape/policy.py` (both new function groups, both `errs +=` lines) and the branch's own row. A grant's row needs a `meta/` branch until W45 widens `decide/`.
