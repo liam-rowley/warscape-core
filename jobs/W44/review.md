@@ -1,5 +1,66 @@
 # W44 review
 
+## Round 2 (2026-11-06, branch job/W44 at bb92c56)
+
+**Verdict: merge.**
+
+All five round 1 findings are answered, and I checked each one on the code rather than in the report. The one gap the fix session left open, napoleon never measured on the fixed code, is closed below: I ran it, and every prediction in the report held. No blocker and no should-fix. This round changes nothing outside the job folder and the row.
+
+### CI on the fix commits, Windows included
+- **The fix commits have no CI run of their own.** `15e4de9`, `9eedad8`, `9a46afb`, `bdea080`, `c879f10` and `e2d3f7d` reached origin in one push with `1270eb3`, so GitHub ran only the pushed head. They are covered as part of the head's tree, not one by one. That is enough for a squash merge, which lands only that tree.
+- **The run on `1270eb3` proves nothing:** 42141779919 was cancelled about 85 s in by the next push, on ubuntu and on both Windows jobs.
+- **The run on `bb92c56` is the evidence:** 42141819455 finished `success`. `gates (windows-latest)` ran the full set, 01:10:07 to 01:23:10: 15 ok, 1 warn, 0 failed, 1280 host tests passed, 5 skipped. `harness-windows` passed. `gates (ubuntu-latest)` passed with the same 1280.
+- **The Windows job was a real run, not a pass marker:** the `changes` job says `gates_windows=true` and `Cache not found` for tree `11ed50a6`; the marker it then saved names commit `bb92c56`. `proxy` was skipped, correctly: `proxy=false`, and the branch touches no proxy input.
+- **Nothing differs from what was tested but paperwork:** `git diff 1270eb3 bb92c56` is one line of `jobs/W44/report.md`, and all six fix commits are ancestors of `bb92c56`. The log does not name test files; `test_audit` is inside the 1280 by count, which equals my local run of the same tree.
+- Run 42138672224 on `a681ee3` had Windows skipped before ubuntu finished, so it covered nothing on Windows, but it predates the fixes.
+- Pushing this round adds only this file and the row. If `changes` skips Windows on the same input tree, that skip stands on 42141819455.
+
+### The failure on ubuntu: a flaky test, not W44's
+`test_lock_wait_takes_a_lock_released_meanwhile_and_times_out_with_124` in run 42138672224, `2.0649 not greater than or equal to 2.5`. It is already filed as `W81`.
+- **W44 cannot have caused it.** The branch changes neither `harness/job.sh` nor `tests/test_job_sh.py`. The failing commit `a681ee3` changed only `jobs/W44/review.md` and the row against `1e7244e`, whose run 42137131031 passed. The same test passed on `bb92c56`.
+- **It fails on other branches with the same number.** `job/W31`, run 42075839757, commit `6b7c73e`: `2.0673`. `W81` cites a third, on W34, run 41934314012, which I did not open.
+- **The cause:** `harness/job.sh:204` sets its deadline from `date +%s`, whole seconds, and the loop polls every 2 s. A start late in a second reaches the deadline after one sleep, about 2 s plus process start, while the test wants at least 2.5.
+- **Reproduced in part, 2026-11-06:** `lock --wait 3` started at set points within a second, 20 runs on this PC, gave two bands: 11 at 2.65 to 2.88 s and 9 at 5.04 to 5.14 s. The early band is the early deadline. It stays above 2.5 here because Git Bash starts slowly, which would explain why ubuntu fails and Windows does not. I did not run it on Linux: the 2.06 there is read from the two failure logs. If process start is about 0.06 s, the early band opens for about 6% of starts; that rate is an estimate, not a measurement.
+- **It matters beyond this job:** the check is required, so a red lands on any branch at random, and on a merge push it stops auto-merge. A `plan/` row raises `W81` with the second run.
+
+### Round 1 findings
+| # | Finding | Verdict | How I checked |
+| --- | --- | --- | --- |
+| 1 | `idle_queue` quiet on a parked queue | fixed, `bdea080` | fires on napoleon below, naming `J29` and `J60`; `parked()` read against `lane()`: both pick the same branch for a `progress` row |
+| 2 | report's napoleon claims | fixed, `e2d3f7d` | run, shas, 14 unmatched subjects and the 9 against 12 table are in `## Fix round 1`; the edits to lines 3, 93 and 118 are what round 1 asked for, and the report lists the old wording |
+| 3 | `<id> brief` as job merges | fixed, `15e4de9` | 69 job merges, 78 brief merges on napoleon below |
+| 4 | `pin_lag` depends on the clone | fixed, `9a46afb` | `details.tags_from` is `origin` online and the evidence names the store with `--offline` |
+| 5 | findings on paths gone from main | fixed, `9eedad8` | 4 and 6 paths in `details.gone`, none in the findings; the fixer's `a.tree` is better than my round's `a.sizes`, and a mutation below confirms the gitlink case |
+
+### What I ran
+- `python3 wsc.py gates` at `bb92c56`, 2026-11-06: 14 ok, 2 warn, 0 failed, 1280 host tests passed, 5 skipped. The warns are this clone's absolute `core.hooksPath` and the skips.
+- `python3 wsc.py jobs check`: 116 rows, ok.
+- `python3 wsc.py audit --since 2026-10-28` on the core, online, at main `215f440`, output outside the repo: exit 0, 46 findings, 40 job merges, `ci_durations` read.
+- **Each fix undone in a throwaway copy, `tests/test_audit.py` run each time.** The unmutated baseline passed. All seven mutations failed a named test: the brief subject, `hot_files` gone, `conflict_files` gone, gitlink kept, tags from origin, parked not busy, `max_job_hours` as the limit. My first attempt was void, because the module did not load in the copy and that looks like a kill; I repaired it and added the baseline.
+
+### Napoleon measured on the fixed code
+This is the run the fix session could not do. I made a fresh clone with its `core` submodule inside this worktree's ignored `_scratch/`, deleted afterwards, so no napoleon checkout was touched. `python3 wsc.py --root _scratch/nap audit --since 2026-10-28 --json <outside>` from `bb92c56`, online, at napoleon main `bca3b99`, one commit past the `9550e58` of the earlier run, 2026-11-06: exit 0, 44 findings, 12 metrics, 0 skipped, 0 failed. The same with `--offline --only pin_lag,queue`: exit 0.
+
+| The report predicted | Measured |
+| --- | --- |
+| job merges 75 to 69, brief 72 to 78 | 69 and 78 |
+| `idle_queue` appears, `J29` and `J60` parked | fires, high; parked at 54.6 hours each; ready 9, progress 2 |
+| `pin_lag` reads 12 online | 13, because `v0.43.0` came out after the prediction: pin `v0.30.0`, `tags_from` origin |
+| `--offline` says it read the store | it does, in the evidence line |
+| 4 `hot_file` and 6 `conflict_file` findings move to `details.gone` | both, the same paths |
+| `.github/workflows/gates.yml` may cross 25% | it does: 18 of 69, 26% |
+
+52 findings less those 10, plus `idle_queue` and that `hot_file`, is the 44 measured. `J78` gates 11 rather than 10, and the brief lane is 22 rather than 21: the extra commit is a plan row, `J104`. This satisfies deliverable 4 on the fixed code, and the kill criterion stays untripped.
+
+### Risk-first reading
+I picked `parked()`, `core_tags()` and the `a.tree` split in `warscape/audit.py`, because the first two decide whether a high finding reaches Liam and the third is what every path finding now rests on. `branch` can only name a key of `a.heads`, because `lane()` returned `progress` from that same set. Both fetch paths leave the head sha readable for `git show`. A timed-out `ls-remote` is a `SubprocessError` and lands in `failed`, not in a crash. `git diff origin/main...HEAD` touches no workflow file, so the W36 check does not apply. The rest of the diff since round 1 is the W43 merge, which I skimmed: main's `timeout_s` won, as the report says.
+
+### Later
+- **A fresh claim reads as parked.** The limit the report names in blocker 1 is real: `wsc jobs next` claims by pushing main's sha, so on a main quiet for 24 hours a job claimed a minute ago reads as parked and `idle_queue` can fire falsely. A `plan/` row files it.
+- **`subject_kind` is case-sensitive.** `Job/j1 (#7)` and the two `Plan:` subjects read as `other`, so napoleon's true job count is 70. Outside the default window, so left, in the same row.
+- `doc_cap` on finished briefs and `both_sides_min`: report open questions 2 and 3 stay for W45, as round 1 said.
+- Brief open question 1 (`VERSION` in `hot_files`) has its default date on 2026-11-10; nothing here changes the recommendation.
+
 ## Round 1 (2026-11-06, branch job/W44 at 1e7244e)
 
 **Verdict: merge after fixes.**
