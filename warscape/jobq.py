@@ -12,8 +12,10 @@ verdict each; the reviewer sets the row (merge -> done, otherwise fix, or blocke
 Review claims (core W27): `jobs review` and the autopilot claim round n with the remote ref refs/claims/<id>/round-<n> (warscape/claims.py)
 before a reviewer starts; a refused claim names its holder. A job may carry jobs/<id>/handback.md (the builder subagent's own words); its
 report.md then has a "## Orchestrator additions" section.
-`claude agents --json` (Claude Code 2.1.316, read on the PC 2026-10-31, napoleon J52): lists background sessions with `state` "working", "blocked"
-(waiting for input) or "done" (finished sessions stay listed until removed); interactive sessions carry no state. Live = working or blocked.
+`claude agents --json --all` (Claude Code 2.1.319, read on the PC 2026-11-06, W41; plain `--json` no longer lists finished sessions): a background row has
+`kind` "background", `id`, `state` "working", "blocked" (waiting for input), "done", "stopped" or "failed", and `pid` while it has a process, which a
+session can lose in any state and keep after it is done; an interactive row has a `pid` but no `id` or `state`. Live (the same-name and PC holder checks)
+= working or blocked. The session cap (`[jobs] max_sessions`, W41) counts something else: a background row with a pid, because the cap is for memory (napoleon D59).
 """
 import base64
 import hashlib
@@ -36,6 +38,7 @@ from typing import NamedTuple, Optional
 
 from . import ci, gatemods
 from .checks import strict_loads
+from .gitbash import git_bash
 from .policy import verdict
 from .repo import DEFAULTS, git_env
 
@@ -56,6 +59,7 @@ class Settings:
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
     pc_state = ''   # [jobs] pc_state: the PC state folder a needs_pc build needs ('' = no gating; WSC_PC_STATE overrides it, W26)
+    max_sessions = 0   # [jobs] max_sessions: background sessions with a process that a launch may not reach (0 = no cap, W41)
     text = dict(DEFAULTS['jobs']['text'])
 
 
@@ -70,6 +74,7 @@ def configure_from(cfg, root=None, reg_dir='registries'):
     S.usage_from, S.usage_cmd = cfg.get('usage_from', 0), cfg.get('usage_cmd', '')
     S.text = dict(cfg['text'])
     S.pc_state = cfg.get('pc_state', '')
+    S.max_sessions = cfg.get('max_sessions', 0)
     S.legacy_rounds = S.legacy_briefs = frozenset()
     if root is not None:
         if cfg['legacy']:
@@ -1137,7 +1142,9 @@ PROMPTS = {'brief': 'Write the brief for job {id}: git pull, then run {wsc} jobs
            'review': 'Review job {id}: git pull, then run {wsc} jobs review --id {id} and follow {review_doc}.',
            'fix': 'Fix job {id}: git pull, then run {wsc} jobs fix --id {id} and follow it.'}
 LABELS = {'brief': 'Write brief', 'build': 'Implement', 'review': 'Review', 'fix': 'Fix'}
-LIVE_STATES = {'working', 'blocked'}   # `claude agents --json` states of a session that has not ended ("done" stays listed: J52)
+LIVE_STATES = {'working', 'blocked'}   # `claude agents --json --all` states of a session that has not ended (module docstring)
+ACCEPTANCE_PURPOSE = 'acceptance'      # how the purpose of harness/acceptance.py's game lock starts (a host test holds the two together)
+JOB_SH = Path(__file__).resolve().parent.parent / 'harness' / 'job.sh'
 
 
 def launch_argv(claude, jid, action, row):
@@ -1451,17 +1458,105 @@ def _claude(*args, timeout=120, cwd=None):
 
 
 def list_agents():
-    """`claude agents --json` as a list of sessions; ValueError when it cannot be read (the launch then fails closed)."""
-    rc, out, err = _claude('agents', '--json', timeout=60)
+    """`claude agents --json --all` as a list of sessions; ValueError when it cannot be read (the launch then fails closed). `--all`: a
+    finished session can still hold a process, which the cap counts and `jobs sessions --stop-finished` stops."""
+    rc, out, err = _claude('agents', '--json', '--all', timeout=60)
     if rc != 0:
-        raise ValueError(f'claude agents --json exited {rc}: {err.strip()[:200]}')
+        raise ValueError(f'claude agents --json --all exited {rc}: {err.strip()[:200]}')
     try:
         agents = json.loads(out)
     except ValueError:
-        raise ValueError('claude agents --json did not print JSON')
+        raise ValueError('claude agents --json --all did not print JSON')
     if not isinstance(agents, list):
-        raise ValueError('claude agents --json did not print a list')
+        raise ValueError('claude agents --json --all did not print a list')
     return agents
+
+
+def stop_session(sid):
+    """`claude stop <id>`; ValueError when it fails. Read on the PC 2026-11-05 and 2026-11-06: on a done row with a pid it ends the process, the
+    row stays done and the pid clears; on a done row with no pid it exits 0 and changes nothing. Never `claude rm`: that deletes the worktree."""
+    rc, out, err = _claude('stop', sid, timeout=60)
+    if rc != 0:
+        raise ValueError(f'claude stop {sid} exited {rc}: {(err or out).strip()[:200]}')
+
+
+def capped_sessions(agents):
+    """The rows the session cap counts: a background row with a process, whatever its state (Liam, 2026-11-06). The cap is for memory (D59), and a
+    row with no process uses none: a blocked session with no pid that resumes can take the count over the cap by one for a while."""
+    return [a for a in agents if isinstance(a, dict) and a.get('kind') == 'background' and a.get('pid')]
+
+
+def cap_line(agents):
+    """Why no session may start, or None: under the cap, or no cap set."""
+    held = capped_sessions(agents)
+    if not S.max_sessions or len(held) < S.max_sessions:
+        return None
+    names = ', '.join(str(a.get('name') or a.get('id') or '?') for a in held[:5])
+    return f'{len(held)} of {S.max_sessions} background sessions are live ({names}); wait or run wsc jobs sessions --stop-finished'
+
+
+def next_sessions(named):
+    """What `jobs next` prints about the cap: (lines, stop before claiming). A list that cannot be read is said and blocks nothing: `next` is the
+    interactive path, only launches fail closed. `named` (`--id`) goes on at the cap: a session the view launched runs `next --id`, is itself one
+    of the live rows, and passed the cap when it was launched."""
+    if not S.max_sessions:
+        return [], False
+    try:
+        agents = list_agents()
+    except ValueError as x:
+        return [f'sessions: cannot read the session list ({x})'], False
+    lines = [f'sessions: {len(capped_sessions(agents))} live of {S.max_sessions}']
+    if named or cap_line(agents) is None:
+        return lines, False
+    return lines + ['The session cap is full, so no job was claimed: wait for one to end, or run wsc jobs sessions --stop-finished.'], True
+
+
+def session_rows(agents, by):
+    """`jobs sessions`: the background rows in every state, those with a process first. `counts`: the cap counts it."""
+    rows = [{'name': str(a.get('name') or ''), 'id': a.get('id'), 'state': a.get('state'), 'pid': a.get('pid'), 'job': _session_job(a, by),
+             'counts': bool(a.get('pid'))} for a in agents if isinstance(a, dict) and a.get('kind') == 'background']
+    return sorted(rows, key=lambda r: not r['counts'])
+
+
+def stop_finished(rows, stop):
+    """Stop each `done` row of session_rows that still has a process: (one result per stop, how many done rows had already exited). A failed
+    stop does not end the pass. Only `done`, so never a working or blocked session; an exited row is not tried, so it is never a failure."""
+    stops = []
+    for r in rows:
+        if r['state'] == 'done' and r['pid']:
+            try:
+                if not r['id']:
+                    raise ValueError('the row has no id to stop it by')
+                stop(r['id'])
+                stops.append({'name': r['name'], 'id': r['id'], 'stopped': True, 'error': None})
+            except ValueError as x:
+                stops.append({'name': r['name'], 'id': r['id'], 'stopped': False, 'error': str(x)})
+    return stops, sum(1 for r in rows if r['state'] == 'done' and not r['pid'])
+
+
+def _job_sh(argv):
+    flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+    p = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=flags)
+    return p.returncode, p.stdout + p.stderr
+
+
+def read_pc_lock(sh=_job_sh):
+    """The game lock as the watcher reports it (`lock` of `job.sh status`: owner, session, purpose, age_s, stale), the reader harness/ctl.py and
+    harness/acceptance.py use; job.sh finds the adapter itself. None: the lock is free, or there is no harness here (job.sh exits 64: no adapter
+    or watcher root, as in the core; no bash). ValueError: a harness that cannot answer, so whether a run holds the PC is unknown. The message
+    carries nothing that changes between reads, so a deferral on it logs once."""
+    bash = git_bash()
+    if not bash:
+        return None
+    rc, out = sh([bash, str(JOB_SH), 'status'])
+    if rc == 64:
+        return None
+    if rc != 0:
+        raise ValueError(f'job.sh status exited {rc}: run it to see why')
+    try:
+        return json.loads(out[out.index('{'):out.rindex('}') + 1]).get('lock')
+    except ValueError:
+        raise ValueError('job.sh status did not print JSON')
 
 
 def start_session(argv, root):
@@ -1525,18 +1620,18 @@ def utc_now():
 class JobServer(ThreadingHTTPServer):
     """`wsc jobs view --serve` on 127.0.0.1: GET / renders the queue fresh, POST /launch starts one session after the checks of
     launch_request; with --auto, run_auto() ticks in a thread. Seams (the tests pass fakes): snapshot() -> (rows, read, branches,
-    on_branch), read fresh each time; agents() -> the `claude agents --json` list; launch(argv) -> session id; which(name) -> path or
-    None; log_path: the autopilot's log file (None: stderr only)."""
+    on_branch), read fresh each time; agents() -> the `claude agents --json --all` list; launch(argv) -> session id; which(name) -> path or
+    None; log_path: the autopilot's log file (None: stderr only); pc_lock() -> read_pc_lock's answer (None = no lock is read)."""
     daemon_threads = True
     log = True   # one stderr line per request
 
     def __init__(self, snapshot, agents, launch, which=shutil.which, port=0, dry_run=False, root=None, log_path=None, ctx=None,
-                 main_line=None, clock=time.monotonic, ci=None, prune=None, claim=None):
+                 main_line=None, clock=time.monotonic, ci=None, prune=None, claim=None, pc_lock=None):
         super().__init__(('127.0.0.1', port), _Handler)
         self.snapshot, self.agents, self.launch, self.which, self.dry_run, self.root = snapshot, agents, launch, which, dry_run, root
         # W26 seams: ci(sha) -> (state, lines) (branch_ci; None = read it with gh in `root`); prune() -> (removed, error) (None = no prune)
         self.ci = ci if ci is not None else (lambda sha: branch_ci(root or '.', sha, False))
-        self.prune = prune
+        self.prune, self.pc_lock = prune, pc_lock
         self.deferred = {}   # (id, action) -> the (head, reason) last logged as a deferral: one line per head and reason
         self.log_path = log_path
         self.ctx = ctx
@@ -1565,9 +1660,9 @@ class JobServer(ThreadingHTTPServer):
     def start(self, jid, action, by, branches, on_branch, family=False, agents=None):
         """The one launch path (buttons and --auto): (code, message, extra). Readiness 409; a live session of the same name 429 (with
         `family`, any live J<n>-* session: a build or fix that pushed status=review but has not ended must not race its reviewer);
-        an agent list that cannot be read 503 (fail closed); claude missing 503; for a review, the round's claim (W27): held by another
-        session 409 naming it, unprovable 503; then the launch (no count cap). A dry run claims nothing. `agents`: a list already read this
-        tick, else it is read here."""
+        an agent list that cannot be read 503 (fail closed); at the session cap 429 (W41); claude missing 503; for a review, the round's
+        claim (W27): held by another session 409 naming it, unprovable 503; then the launch. A dry run claims nothing. `agents`: a list
+        already read this tick, else it is read here."""
         why = not_ready(action, jid, by, branches, on_branch)
         if why:
             return 409, f'refused: {why}', {}
@@ -1581,6 +1676,9 @@ class JobServer(ThreadingHTTPServer):
             clash = [n for n in live if (n.lower().startswith(f'{jid.lower()}-') if family else n.lower() == name.lower())]
             if clash:
                 return 429, (f'refused: {clash[0]} is still running' if family else f'refused: {name} is already running'), {}
+            full = cap_line(agents)
+            if full:
+                return 429, f'refused: {full}', {}
             claude = self.which('claude')
             if not claude:
                 return 503, 'refused: claude is not on PATH', {}
@@ -1621,7 +1719,9 @@ class JobServer(ThreadingHTTPServer):
         process's: a restarted server may start such a job once more. Returns the (id, action, code, message) of every attempt.
         W26: the tick first prunes dead worktree registrations (decision 13); a review starts only on a green head and a fix waits while CI
         runs or has not reported (decision 11: one check-runs read per candidate head); a needs_pc row waits while another needs_pc row
-        has a live session or was started this tick (decision 12). A deferral is logged once per head and reason, and is not a start."""
+        has a live session or was started this tick (decision 12). A deferral is logged once per head and reason, and is not a start.
+        W41: a start counts against the session cap at once, in this tick's copy of the list; a full cap is one line per tick, not one per
+        job; while an acceptance run holds the PC lock no needs_pc session starts (its window would land on the virtual display)."""
         if self.auto is not None:
             self.auto['last'] = utc_now()
         try:
@@ -1631,10 +1731,11 @@ class JobServer(ThreadingHTTPServer):
             return []
         self.prune_tick()
         try:
-            agents = self.agents()
+            agents = list(self.agents())
         except Exception as x:
             self.auto_log(f'tick skipped: cannot list the running sessions ({x})')
             return []
+        busy, capped = self.pc_busy(), False
         by = {r['id']: r for r in rows}
         pc_holders = [m for m in (_session_job(a, by) for a in agents if isinstance(a, dict) and a.get('state') in LIVE_STATES)
                       if m and by[m].get('needs_pc')]
@@ -1648,7 +1749,14 @@ class JobServer(ThreadingHTTPServer):
                     self.auto_log(f'{jid}-{action}: started at {(head or "unknown head")[:12]}, waiting for a push to job/{jid}')
                     waiting += 1
                     continue
-                why = self.defer_reason(jid, action, head, by, pc_holders)
+                full = cap_line(agents)
+                if full:
+                    if not capped:
+                        capped = True
+                        self.auto_log(f'deferred, {full}')
+                    waiting += 1
+                    continue
+                why = self.defer_reason(jid, action, head, by, pc_holders, busy)
                 if why:
                     if self.deferred.get((jid, action)) != (head, why):
                         self.deferred[(jid, action)] = (head, why)
@@ -1659,6 +1767,7 @@ class JobServer(ThreadingHTTPServer):
                 if code == 200:
                     self.started[(jid, action)] = head
                     self.deferred.pop((jid, action), None)
+                    agents.append({'name': f'{jid}-{action}', 'kind': 'background', 'state': 'working', 'pid': 'started this tick'})
                     if by[jid].get('needs_pc'):
                         pc_holders.append(jid)
                 self.auto_log(f'{jid}-{action}: {msg}')
@@ -1667,12 +1776,27 @@ class JobServer(ThreadingHTTPServer):
             self.auto_log(f'tick: nothing ready for review or fix ({len(on_branch or {})} job branches)')
         return done
 
-    def defer_reason(self, jid, action, head, by, pc_holders):
-        """Why the autopilot holds `jid`'s `action` this tick, or None. The PC rule first (no network), then the head's CI."""
+    def pc_busy(self):
+        """Why this tick starts no needs_pc session, or None: an acceptance run holds the game lock (J64 run 20261104_j64pc4 lost a pass to a
+        window on the virtual display), or the harness cannot say (fail closed, as for the agent list). A stale lock is on its way out."""
+        if self.pc_lock is None:
+            return None
+        try:
+            lock = self.pc_lock()
+        except Exception as x:
+            return f'cannot read the PC lock ({x})'
+        if isinstance(lock, dict) and not lock.get('stale') and str(lock.get('purpose') or '').startswith(ACCEPTANCE_PURPOSE):
+            return f"an acceptance run holds the PC lock ({lock.get('owner')})"
+        return None
+
+    def defer_reason(self, jid, action, head, by, pc_holders, busy=None):
+        """Why the autopilot holds `jid`'s `action` this tick, or None. The PC rules first (no network), then the head's CI."""
         if by[jid].get('needs_pc'):
             other = [m for m in pc_holders if m != jid]
             if other:
                 return f'{other[0]} holds the PC'
+            if busy:
+                return busy
         state, _ = self.ci(head)
         if (state != 'green') if action == 'review' else (state in ('running', 'none')):
             return f'CI {state} at {(head or "unknown")[:7]}'
@@ -1708,7 +1832,7 @@ class JobServer(ThreadingHTTPServer):
 
     def launch_request(self, headers, body):
         """(HTTP code, message, extra JSON fields), checked in this order: token 403, Origin and Host 403, content type 415, id and
-        action 400, then start(): readiness 409, a same-name session 429, the launch (no count cap)."""
+        action 400, then start(): readiness 409, a same-name session 429, the session cap 429, the launch."""
         try:
             req = json.loads(body.decode('utf-8'))
         except ValueError:

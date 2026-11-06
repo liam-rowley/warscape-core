@@ -146,6 +146,7 @@ ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows nam
 pc_state = "$LOCALAPPDATA/game_state"  # optional (W26): a needs_pc build is not ready where this folder is absent; WSC_PC_STATE overrides ("" = no PC here)
 failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
 claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
+max_sessions = 4                   # W41: no launch at this many background sessions with a pid, any state; 0 = no cap
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only table, or "registry:<name>" (CONSUMING_OPTIONS.md)
@@ -164,16 +165,16 @@ workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc c
 required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.22.0)
 ```
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
-  jobs view (`[views] commit = true`; the core's view is `_scratch/registries/jobs.md`, never committed) changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
+  jobs view (`[views] commit = true`) changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
   branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
-  plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination (`[views] commit = true` with a `jobs` registry, C19) and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
-- **The `jobs view` page** loads marked 12.0.2 from cdnjs with its Subresource Integrity hash (`jobq.MARKED_SRI`), shows raw HTML in a brief, report or
-  review as text (marked's `html` renderer escapes it), and carries a Content-Security-Policy (W28; `jobq.py` owns it).
+  plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
+- **The `jobs view` page** pins marked by its integrity hash, shows raw HTML as text and carries a Content-Security-Policy (W28; `jobq.py` owns it).
 - **Claim and autopilot (core W26, C32).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
   (`brief/<id>`); a lost race moves on, any other failure exits 1. `--peek` and `--offline` claim nothing. Order is (phase, number). An empty claim
   older than 24 h is listed with its release command. `--auto` starts a review only on a green head, a fix once CI has finished, one `needs_pc` row
   at a time, and prunes dead worktrees each tick. A game: sets `[jobs] pc_state` and has its `setup` verb print
   `warscape.worktrees.report(root, rows, branches)`; `wsc jobs worktrees [--prune]` prints the same.
+- **Sessions (W41):** `wsc jobs sessions [--stop-finished] [--json]` lists background sessions; the flag runs `claude stop` on `done` rows with a pid.
 - **Usage accounting (W31):** the `Usage:` line, `[jobs] usage_from`, `usage_cmd`, `budget_lifts`, `Result.cards`: [USAGE.md](USAGE.md).
 - **A game's own rules** are gate modules with the `jobs`, `policy` and `view` stages ("Game gates", below; `[jobs] hooks` is gone since 0.20.0).
 - **A pull request is judged with its base's rules (0.26.0, W23, C24).** `wsc policy --branch B --base origin/main [--head REV]` (`--head` defaults to
