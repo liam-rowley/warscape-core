@@ -1,0 +1,12 @@
+{
+  "id": "W78",
+  "description": "**`warscape/trailer.py` follow-ups of W36**: (a) add `--no-advice`, `--no-lazy-fetch` and `--attr-source` (both forms) to the option sets; (b) add `timeout`, `nice`, `time -p` and `env -i` to `GIT`'s wrappers, and let `WORD` take a nested `$(...)`; (c) name wrappers as unseen in `commit_lacks_trailer`'s docstring; (d) ignore an alias that shadows a builtin (`git -c alias.status=commit status` is no commit); (e) follow a line continuation (`git \\<newline> commit`) Why: each fails open except (d), and none reaches napoleon, which passes a canonical string, but a hook passing the command as typed would miss these commits Raised: W36 review, round 1, 2026-11-05",
+  "title": "`warscape/trailer.py` follow-ups of W36",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B88",
+  "area": "core"
+}

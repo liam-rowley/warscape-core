@@ -1,0 +1,12 @@
+{
+  "id": "W63",
+  "description": "**The gesture layer without the RmlUi host**: decide whether `ui_host.cpp` may install its device hooks and window subclass when `controls.gestures=1` and `ui.enabled=0` (no RmlUi started), relaxing the `test_ui_core.cpp` lint \"ui.enabled=0: UiInit returns before any hook\", or keep gestures needing `ui.enabled=1` Why: W6 rides on the host's one subclass and Present hook (no second `SetWindowLong`); W2's lint keeps the host unhooked with the UI off, so a game that ships gestures must also ship `ui.enabled=1` Raised: W6 report, 2026-11-03",
+  "title": "The gesture layer without the RmlUi host",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B57",
+  "area": "core"
+}

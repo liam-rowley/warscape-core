@@ -1,0 +1,12 @@
+{
+  "id": "W55",
+  "description": "**Renderer seam in the proxy**: the `IDirect3DDevice9`-specific code (`backend.cpp`, the device-slot hooks in `capture.cpp`, `headless.cpp` and `dev.cpp`, and the RmlUi render interface napoleon J30 builds) behind a backend interface, so a `dxgi`/`d3d11` flavour can be added without touching game adapters Why: Shogun 2's players run its DX11 renderer; shipping it on the DX9 path through DXVK would be a visual regression, and today the renderer, not the game, is the unabstracted half of the proxy; cheapest to cut when J30's render interface is written Raised: planning chat, 2026-11-01",
+  "title": "Renderer seam in the proxy",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B36",
+  "area": "core"
+}

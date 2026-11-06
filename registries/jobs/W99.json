@@ -1,0 +1,12 @@
+{
+  "id": "W99",
+  "description": "**`acceptance.py` reads the build id after the first launch of a fresh install** (`harness/acceptance.py` `build_info`) Why: with no `proxy.log` yet it fell back to `install.json` and labelled a pass with the kit id, not the DLL's; napoleon hand-corrected the ledger line from the pass's `proxy.log` Raised: napoleon J8 fix round 1, 2026-11-01",
+  "title": "`acceptance.py` reads the build id after the first launch of a fresh install",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B31",
+  "area": "harness"
+}

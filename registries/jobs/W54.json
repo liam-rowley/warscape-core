@@ -1,0 +1,12 @@
+{
+  "id": "W54",
+  "description": "**A `watch` site kind for the dev channel**: log an engine function's return value through a generic return detour (prologue copy, a per-thread return stack, an executable thunk), behind the same key and exe-identity guard as the other sites; Opus work (a code write in the game) Why: a return value that is never stored cannot be read by `peek` (W17 built the read-only `peek` half, docs/PROXY_CTL.md); build it only if a `peek` probe leaves napoleon's `napoleon.console.transport_to_region_no_move` open Raised: napoleon J40 review, 2026-11-01; reworded by W17, 2026-11-03",
+  "title": "A `watch` site kind for the dev channel",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B25",
+  "area": "core"
+}

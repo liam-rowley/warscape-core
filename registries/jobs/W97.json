@@ -1,0 +1,12 @@
+{
+  "id": "W97",
+  "description": "**`VERSION` off the Windows gates**: add it to the exclusions of `[ci.inputs] gates_windows` and move it out of the code list in `tests/test_ci.py` `test_gates_windows_skips_paperwork_only` Why: each release runs Windows on its `release/vX.Y.Z` branch and again on its merge to `main`, for a one-line file ubuntu's `core_pin` already checks (8 minutes on the v0.41.0 branch) Raised: W42 review round 1 Later 2, 2026-11-05",
+  "title": "`VERSION` off the Windows gates",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B108",
+  "area": "core"
+}

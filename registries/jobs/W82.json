@@ -1,0 +1,12 @@
+{
+  "id": "W82",
+  "description": "**`gen_tables.py --exe` reads relocations**: `proxy/tools/gen_tables.py` `site_line` does not read `.reloc`, so a patch value over a relocated dword reads `MATCH` and the DLL refuses it as `RELOCATED VALUE` on the PC Why: the one known false `MATCH`; today only `docs/UPGRADING.md` says so Raised: W34 review Later 3, 2026-11-05",
+  "title": "`gen_tables.py --exe` reads relocations",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B92",
+  "area": "core"
+}

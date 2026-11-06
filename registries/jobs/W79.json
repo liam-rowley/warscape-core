@@ -1,0 +1,12 @@
+{
+  "id": "W79",
+  "description": "**A `merge` round must name each unnamed workflow path, and the false-positive scan becomes a tool**: W36's workflow rule only warns and the reviewer clears it by hand (`docs/REVIEW.md`); `policy` could refuse a `merge` round that does not name each such path, which asks the reviewer to speak and so does not depend on past briefs. W27 and W36 each ran an uncommitted scan; a host-tested one lets the warn or error split be re-measured Why: closes more of the forged-status residual without the 14 false positives a brief-only refusal has Raised: W36 review, round 1, 2026-11-05",
+  "title": "A `merge` round must name each unnamed workflow path, and the false-positive scan becomes a tool",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B89",
+  "area": "core"
+}

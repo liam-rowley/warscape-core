@@ -1,0 +1,11 @@
+{
+  "id": "W115",
+  "description": "**Shorten the long `later` row titles**: At least eight imported rows have titles past 75 characters (B31, B58, B64, B68, B71, B73, B78, B89), as the title is the whole bold lead. Nothing is lost, as the description holds the text. Tidy each when it is promoted. Raised: W43 review round 1, item 7, 2026-11-06",
+  "title": "Shorten the long `later` row titles",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}

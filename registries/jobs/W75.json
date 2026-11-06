@@ -1,0 +1,12 @@
+{
+  "id": "W75",
+  "description": "**`gen_tables.py` skips `config_keys` owners other than `proxy`**: `proxy/tools/gen_tables.py`: only rows whose `owner` is `proxy` belong in the generated tables; napoleon's `proxy.dxvk_path` description and the adapter's `dxvk_conf` path are also wrong (a napoleon fix). **Not safe as written (W34):** napoleon's 14 `gfx.*` keys carry job owners (`J24`, `J27`), and its `engine_sites` rows name them, some ship on; fix those owners first Why: found by napoleon J23; after napoleon re-owns those keys Raised: napoleon J23 review Later 1, 2026-11-04",
+  "title": "`gen_tables.py` skips `config_keys` owners other than `proxy`",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B80",
+  "area": "core"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "W70",
+  "description": "**`wsc jobs check`: the report's `Model:` line against the row, and a brief that names `proxy/` or `harness/` code without an acceptance line**: `warscape/jobq.py` (the `jobs check` verb and its game hook): (a) compare the report's `Model:` line with the row's `model` and require the difference to be named under Deviations; (b) flag a brief whose files list names `proxy/` or `harness/` code without a line on acceptance passes, so the brief writer decides rule 79 up front Why: the model choice is checked by eye only (napoleon J19, J72); no brief said whether rule 79 applies to a `harness/*.py` change (J22); in the next job that changes `jobq.py` anyway Raised: napoleon J19 review Later 3; J22 review Later 5, 2026-11-04",
+  "title": "`wsc jobs check`: the report's `Model:` line against the row, and a brief that names `proxy/` or `harness/` code without an acceptance line",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B68",
+  "area": "core"
+}
