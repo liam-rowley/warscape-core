@@ -3,11 +3,12 @@
   "description": "**The owner can grant one more review round**: A job blocked after 3 rounds has no way forward, though docs/REVIEW.md says the owner decides: `policy` is a required check, the ruleset has no bypass, `jobs check` refuses a fourth round (`MAX_ROUNDS`), and a reviewer who must fix a conflict cannot write `merge` (rule A). Add a way for the owner to grant one more fresh round for one job. The grant must be something only Liam can merge (`meta/` or `decide/`), never `plan/`, which merges itself, and never the job's own branch. W45 is the first use. Raised: W45 review round 3 and Liam's answer, 2026-11-06",
   "title": "The owner can grant one more review round",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": false,
   "semver": "minor",
   "depends_on": [],
   "brief": "jobs/W132/brief.md",
+  "report": "jobs/W132/report.md",
   "area": "core"
 }

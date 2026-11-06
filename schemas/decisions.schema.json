@@ -42,6 +42,11 @@
         "x-ref": "decisions"
       },
       "description": "the rows this one reverses or amends"
+    },
+    "grants_round": {
+      "type": "string",
+      "pattern": "^[A-Z][1-9][0-9]*$",
+      "description": "W132: the job id that gets one more review round. Only a `meta/` branch (merged by the owner) may add a row with this field; the job must be blocked after its rounds."
     }
   },
   "x-view": {

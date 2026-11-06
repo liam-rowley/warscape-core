@@ -164,10 +164,9 @@ inputs = { ... }                   # set name -> regex: paths that run that slow
 workflows = ["gates.yml", "policy.yml"]   # rendered from ci/<name>.in by `wsc ci render`; the `ci_render` gate checks
 required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-settings`); [] = every workflow job but changes and notify (0.22.0)
 ```
-- **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only `<jobs dir>/<id>/brief.md` and its row, but a committed
-  jobs view (`[views] commit = true`) changes with every `reg set` (so `policy` refuses the branch), and the `registries` gate refuses a stale one (so `gates` fails the
-  branch if the view is left alone): no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
-  plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination and say what to change, and `policy` marks a committed registry view in its brief-branch refusal.
+- **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only its brief and row, but a committed
+  jobs view (`[views] commit = true`) changes with every `reg set` (`policy` refuses) and a stale one fails the `registries` gate: no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
+  plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination and say what to change.
 - **The `jobs view` page** pins marked by its integrity hash, shows raw HTML as text and carries a Content-Security-Policy (W28; `jobq.py` owns it).
 - **Claim and autopilot (core W26, C32).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
   (`brief/<id>`); a lost race moves on, any other failure exits 1. `--peek` and `--offline` claim nothing. Order is (phase, number). An empty claim
@@ -269,9 +268,8 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
   6. Run `python3 core/wsc.py gates`, `jobs check` and `policy --branch <the pin-bump branch>`: `jobs check` and the page's PC block read as before.
 
 ## Review integrity (0.35.0, core W27, C30)
-`wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: the `warscape/policy.py` docstring); warnings print as `policy: warning:`
-lines and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
-`## Orchestrator additions`. A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
+`wsc policy` checks a job branch's review rounds and cited evidence (rules A-F: `warscape/policy.py`); warnings print as `policy: warning:` and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
+`## Orchestrator additions`. The owner grants a blocked job one more round with a `grants_round` decision row on `meta/` (W132, `docs/REVIEW.md`). A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
 
 ## Auditing the pipeline (W44, C41)
 `wsc audit` measures the queue against `[audit]`; rules and keys: [AUDIT_METRICS.md](AUDIT_METRICS.md).

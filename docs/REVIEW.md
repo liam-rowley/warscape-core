@@ -19,6 +19,10 @@ starts one whenever a job branch's row says `review`, and `wsc jobs review` name
 session (`wsc jobs fix`), which appends `## Fix round N` to `report.md` and sets `review` again; the loop then starts the next round. Round 3 without
 `merge` blocks the job for the owner.
 
+**One more round (W132).** The owner grants it as a decision row, `python3 wsc.py reg add decisions --mint who=Liam decision="<why>" reversible=yes grants_round=<id>`, on a `meta/` branch
+that only the owner merges: `policy` refuses the row on `plan/` (it merges itself), `brief/`, `release/` and every `job/` branch, and for a job that is not blocked after its rounds.
+One row per extra round. Once it is on main the job's branch sets its row to `fix`/`review` as after round 1 or 2 (a fix session appends `## Fix round 3`), and a fresh session writes round 4.
+
 ## Setup
 A **new** Claude Code session in the repo folder (never the one that built the branch): `git fetch`, check out the job branch, `git submodule update --init`
 in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/brief.md`, `jobs/<id>/report.md`, `jobs/<id>/handback.md` when there is one (the builder
