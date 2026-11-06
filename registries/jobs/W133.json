@@ -1,0 +1,11 @@
+{
+  "id": "W133",
+  "description": "**Rule F crashes on a job branch with no job id**: in `warscape/policy.py` `check`, `kind` is `job` for a branch like `job/foo` but the job/brief match `m` is None, so with `decisions_cite_job` on and a decision row added, `m.group(2)` raises `AttributeError`. It fails closed, but the judge refuses with a traceback (\"the base's rules gave no verdict\"), not a reason the branch's author can act on. Guard rule F on `m`, so the branch gets the ordinary refusal, with a host test. Raised: W132 review round 1, 2026-11-06",
+  "title": "Rule F crashes on a job branch with no job id",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
