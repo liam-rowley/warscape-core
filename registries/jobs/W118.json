@@ -1,0 +1,11 @@
+{
+  "id": "W118",
+  "description": "**`test_capture`'s stress test fails at random**: `test_capture`'s stress failed once in six builds with its code unchanged. Find the race or the timing it depends on. Raised: napoleon J25 report, 2026-11-06",
+  "title": "`test_capture`'s stress test fails at random",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "harness"
+}

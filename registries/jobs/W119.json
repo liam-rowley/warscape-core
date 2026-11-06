@@ -1,0 +1,11 @@
+{
+  "id": "W119",
+  "description": "**`shader_catalog.py import` takes only the shaders a capture uses**: `shader_catalog.py import` takes every shader in the capture folder, not just those a capture uses. Raised: napoleon J25 report, 2026-11-06",
+  "title": "`shader_catalog.py import` takes only the shaders a capture uses",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "harness"
+}
