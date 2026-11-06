@@ -134,6 +134,31 @@ void TestOwnMove() {
     CHECK(GatePos(p, false, false, false, true).out.flags & kSwpNoMove);
 }
 
+// W18 (B22): at a scaled target a DPI-unaware window thread sees the armed rect in logical pixels
+void TestOwnMoveLogical() {
+    for (int pct : { 125, 150 }) {
+        const Rect phys = R(3839, 2160, 3840, 2160);
+        const Rect lg = Rect{ phys.l * 100 / pct, phys.t * 100 / pct, phys.r * 100 / pct, phys.b * 100 / pct };
+        OwnMove m; m.armed = true; m.want = phys; m.logical = lg; m.haveLogical = true; m.at = 10.0;
+        auto at = [&](const Rect& r) { Pos p; p.x = r.l; p.y = r.t; p.cx = Width(r); p.cy = Height(r); p.flags = kSwpNoActivate | kSwpAsync; return p; };
+        CHECK(IsOwnMove(m, at(lg), 10.05));                      // exact logical
+        CHECK(IsOwnMove(m, at(phys), 10.05));                    // physical still accepted
+        for (int e = 0; e < 4; ++e) for (int d : { -1, 1 }) {    // one pixel off on each edge: rounding
+            Rect r = lg; (e == 0 ? r.l : e == 1 ? r.t : e == 2 ? r.r : r.b) += d;
+            CHECK(IsOwnMove(m, at(r), 10.05));
+        }
+        for (int e = 0; e < 4; ++e) for (int d : { -2, 2 }) {    // two pixels off: refused
+            Rect r = lg; (e == 0 ? r.l : e == 1 ? r.t : e == 2 ? r.r : r.b) += d;
+            CHECK(!IsOwnMove(m, at(r), 10.05));
+        }
+        CHECK(!IsOwnMove(m, at(lg), 10.0 + kOwnMoveMs / 1000.0 + 0.01));   // expired
+        Pos p = at(lg); p.flags |= kSwpNoMove; CHECK(!IsOwnMove(m, p, 10.05));
+        p = at(lg); p.flags |= kSwpNoSize; CHECK(!IsOwnMove(m, p, 10.05));
+        OwnMove off = m; off.armed = false; CHECK(!IsOwnMove(off, at(lg), 10.05));
+        OwnMove nol = m; nol.haveLogical = false; CHECK(!IsOwnMove(nol, at(lg), 10.05));   // no logical rect armed: only the physical one
+    }
+}
+
 void TestSweep() {
     const Rect t = R(3839, 2160, 3840, 2160);
     CHECK(SweepHides(true, false, R(0, 0, 640, 480), true, t));       // a DLL's dialog on the primary
@@ -153,6 +178,27 @@ void TestSweep() {
     }
     CHECK(hidden); CHECK(visibleMs <= (int)(kSweepPolls * 4));
     printf("  sweep: a DLL window after start-up hidden after %d ms (sweep every %u ms)\n", visibleMs, kSweepPolls * 4);
+}
+
+// W18 (B19): the show-time hook applies the sweep's rule to the one window that was just shown
+void TestShowEvent() {
+    const Rect t = R(3839, 2160, 3840, 2160), dll = R(0, 0, 640, 480);
+    CHECK(ShowEventHides(true, true, true, true, false, dll, true, t));            // a DLL's window on the primary
+    CHECK(!ShowEventHides(false, true, true, true, false, dll, true, t));          // not a window object (a caret, a menu)
+    CHECK(!ShowEventHides(true, false, true, true, false, dll, true, t));          // a child window
+    CHECK(!ShowEventHides(true, true, false, true, false, dll, true, t));          // another process
+    CHECK(!ShowEventHides(true, true, true, false, false, dll, true, t));          // not visible
+    CHECK(!ShowEventHides(true, true, true, true, true, dll, true, t));            // guarded: the gates own it
+    CHECK(!ShowEventHides(true, true, true, true, false, R(0, 0, 1, 1), true, t)); // the engine's helper size
+    CHECK(!ShowEventHides(true, true, true, true, false, R(4000, 2300, 640, 480), true, t));   // wholly inside the target
+    CHECK(ShowEventHides(true, true, true, true, false, R(3000, 2000, 1000, 800), true, t));   // straddles the target's edge
+    CHECK(ShowEventHides(true, true, true, true, false, R(4000, 2300, 640, 480), false, t));   // no target: fail closed
+    // the rule is the sweep's, for every shape
+    for (const Rect& r : { dll, R(4000, 2300, 640, 480), R(0, 0, 2, 400), R(0, 0, 8, 8) })
+        for (int k = 0; k < 8; ++k)
+            CHECK_EQ(ShowEventHides(true, true, true, (k & 1) != 0, (k & 2) != 0, r, (k & 4) != 0, t), SweepHides((k & 1) != 0, (k & 2) != 0, r, (k & 4) != 0, t));
+    // timeline: shown at 1501 ms; the event hides it at once, the sweep alone would take up to kSweepPolls * 4 ms
+    CHECK(kSweepPolls * 4 > 25u);
 }
 
 Obs Steady() {
@@ -195,6 +241,10 @@ void TestStatus() {
     CHECK(j.find("\"state\": \"on_virtual\"") != std::string::npos); CHECK(j.find("\"rect\": [3839, 2160, 7679, 4320]") != std::string::npos);
     CHECK(j.find("\\\"quoted\\\"\\\\path\\u000a") != std::string::npos); CHECK(j.find("\"device\": \"\\\\\\\\.\\\\DISPLAY10\"") != std::string::npos);
     CHECK(j.find("\"exit_code\": 0") != std::string::npos);
+    CHECK(j.find("\"relocations\": 0, \"written_utc\"") != std::string::npos);   // W18 (B23): 0 until the first relocation, before written_utc
+    s.relocations = 3; const std::string j3 = StatusJson(s);
+    CHECK(j3.find("\"relocations\": 3, \"written_utc\"") != std::string::npos);
+    CHECK(j3.find("\"exit_code\": 0, \"relocations\"") != std::string::npos);
     Status r; r.state = "refused"; r.exitCode = kRefuseExitCode; CHECK(StatusJson(r).find("\"target\": null") != std::string::npos);
     CHECK(StatusJson(r).find("\"exit_code\": 2160") != std::string::npos);
 }
@@ -365,6 +415,24 @@ void TestLints() {
                            "headless.test_off_thread", "headless.test_dll_window_ms" }) {
         CHECK(known.count(k)); CHECK(raw.find(std::string("\"") + k + "\"") != std::string::npos);
     }
+    // W18: the show hook is set up on the guard thread before its loop, the message drain sits outside the lock, and the status is rewritten after a verified relocation
+    {
+        const size_t gt = hl.find("DWORD WINAPI GuardThread"), loop = hl.find("for (unsigned n = 1", gt), hook = hl.find("SetWinEventHook(", gt);
+        CHECK(gt != std::string::npos && loop != std::string::npos);
+        CHECK(hook != std::string::npos && hook < loop);
+        CHECK(hl.find("WINEVENT_OUTOFCONTEXT", hook) < loop);
+        const size_t lk = hl.find("Lock l;", loop), mw = hl.find("MsgWaitForMultipleObjects(", loop), pm = hl.find("PeekMessageW(", loop);
+        CHECK(mw != std::string::npos && pm != std::string::npos && lk != std::string::npos);
+        CHECK(mw < lk && pm < lk);                                  // drained before the loop body takes the lock
+        const size_t rl = hl.find("void RelocateLocked()"), ok = hl.find("PlacementVerified(", rl), end = hl.find("
+}
+", ok);
+        CHECK(rl != std::string::npos && ok != std::string::npos && end != std::string::npos);
+        const std::string succ = hl.substr(ok, end - ok);
+        CHECK(succ.find("WriteStatus()") != std::string::npos);
+        CHECK(succ.find("s_st.state") == std::string::npos);        // the state stays what it was
+        CHECK(succ.find("++s_st.relocations") != std::string::npos);
+    }
     // the release value is off: a normal install never runs headless
     for (size_t i = 0; i < gen::kKeyCount; ++i)
         for (const char* off : { "headless.enabled", "headless.test_off_thread", "headless.test_dll_window_ms" })   // test hooks too
@@ -374,6 +442,6 @@ void TestLints() {
 
 int main(int argc, char** argv) {
     tk::Args(argc, argv);
-    TestSelect(); TestModes(); TestCreateShowStyle(); TestGatePos(); TestOwnMove(); TestSweep(); TestDecide(); TestStatus(); TestSimulation(); TestLints();
+    TestSelect(); TestModes(); TestCreateShowStyle(); TestGatePos(); TestOwnMove(); TestOwnMoveLogical(); TestSweep(); TestShowEvent(); TestDecide(); TestStatus(); TestSimulation(); TestLints();
     return tk::Done("test_display_guard");
 }
