@@ -97,6 +97,8 @@ def migrate(ctx, name, to):
     frm = 'dir' if name in cfg['storage']['dir'] else 'jsonl'
     if frm == to:
         raise RegistryError(f'{name} is already stored as {to}')
+    if name == 'proposals' and to == 'jsonl':
+        raise RegistryError('proposals stays one file per row: the guard on who answers reads only that folder (C41), and wsc.toml is refused without it')
     old = load_from_config(cfg, ctx.root, only=name, storage=frm)[name]
     new = load_from_config(cfg, ctx.root, only=name, storage=to)[name]
     if old.parse_errors:

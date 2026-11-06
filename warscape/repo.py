@@ -255,6 +255,8 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions names registry {dreg}: declare it in [registries]')
     if dreg and dreg not in cfg['storage']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions names registry {dreg}: list it in [storage] dir (one file per row)')
+    if 'proposals' in cfg['registries'] and 'proposals' not in cfg['storage']['dir']:
+        raise ConfigError(f'{CONFIG_NAME}: registry proposals: list it in [storage] dir (one file per row): the guard on who answers reads only that folder (C41)')
     if not isinstance(cfg['policy']['decisions_cite_job'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
     if cfg['policy']['reviewer_code'] not in ('warn', 'error'):

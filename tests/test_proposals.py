@@ -14,7 +14,9 @@ from warscape import audit as A  # noqa: E402
 from warscape import gates, jobq  # noqa: E402
 from warscape import policy as pp  # noqa: E402
 from warscape import proposals as P  # noqa: E402
+from warscape.registry import RegistryError  # noqa: E402
 from warscape.repo import DEFAULTS, ConfigError, Ctx, audit_problem  # noqa: E402
+from warscape.verbs import reg as reg_verb  # noqa: E402
 
 CONFIG = {**DEFAULTS,
           'registries': {'jobs': 'core:jobs', 'decisions': 'core:decisions', 'proposals': 'core:proposals'},
@@ -553,6 +555,19 @@ class Folder(unittest.TestCase):
                 self.answer(bad)
         self.assertEqual(self.status()['status'], 'open')
         self.assertFalse((self.root / ANS).exists())
+
+    def test_the_registry_outside_storage_dir_is_refused(self):
+        f = self.root / 'wsc.toml'
+        f.write_text(f.read_text(encoding='utf-8').replace('dir = ["jobs", "decisions", "proposals"]', 'dir = ["jobs", "decisions"]'), encoding='utf-8')
+        with self.assertRaisesRegex(ConfigError, r'proposals.*\[storage\] dir'):
+            Ctx.load(self.root)
+
+    def test_the_registry_cannot_be_migrated_out_of_storage_dir(self):
+        self.put(row())
+        with self.assertRaisesRegex(RegistryError, 'one file per row'):
+            reg_verb.migrate(self.ctx, 'proposals', 'jsonl')
+        self.assertEqual(self.status()['status'], 'open')
+        self.assertEqual(Ctx.load(self.root).config['storage']['dir'], ['jobs', 'decisions', 'proposals'])
 
     def test_the_second_round_of_a_day_writes_its_own_record(self):
         self.put(row())

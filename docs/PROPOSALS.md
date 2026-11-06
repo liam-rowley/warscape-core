@@ -36,4 +36,4 @@ Both are read from the rows at the measured sha, and are in the record as `suppr
 - Nothing can tell the owner's merge from an agent's: the agents push with the same account. The rule is that no tool and no session queues the merge, as with `meta/`.
 
 ## What a game declares
-`proposals = "core:proposals"` in `[registries]`, `"proposals"` in `[storage] dir`, `registries/proposals/*` in `[policy] plan` and in any list of paperwork paths, a `[jobs.text] owner`, and `[policy] decisions = "registry:<name>"`. Without the registry none of this runs, and `decide/` is refused.
+`proposals = "core:proposals"` in `[registries]`, `"proposals"` in `[storage] dir`, `registries/proposals/*` in `[policy] plan` and in any list of paperwork paths, a `[jobs.text] owner`, and `[policy] decisions = "registry:<name>"`. Without the registry none of this runs, and `decide/` is refused. The registry outside `[storage] dir` is a config error, because the guard reads only that folder.
