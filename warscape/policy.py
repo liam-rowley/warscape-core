@@ -459,7 +459,7 @@ def decide_problems(branch, changed, base_rows, head_rows, cfg):
     return errs
 
 
-GRANT_KINDS = ('meta', 'decide')   # the branch kinds the owner merges, by rule: nothing here sees who merged (W132); `decide` is refused as a kind until a base knows it
+GRANT_KINDS = ('meta', 'decide')   # the branch kinds the owner merges, by rule: nothing here sees who merged (W132); `decide` changes no job row (`decide_problems`), so it grants only for a row already blocked on the base
 GRANT_JOB = re.compile(r'[A-Z][1-9][0-9]*')
 GRANT_BLOCKED = re.compile(r'[1-9][0-9]* review rounds without merge')
 GRANT_BASE_STATUS = ('queued', 'blocked')   # main's row of a job that ran: `queued` until the job merges, `blocked` after a grant

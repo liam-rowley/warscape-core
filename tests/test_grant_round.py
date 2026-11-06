@@ -102,6 +102,17 @@ class GrantJudge(Branches, unittest.TestCase):
                 self.assertEqual(rc, 1, f'{name}: {out}')
                 self.assertIn("grants_round is the owner's alone", out, name)
 
+    def test_on_decide_a_grant_needs_the_row_already_blocked_on_the_base(self):
+        rc, out = self.judge('decide/2026-11-06', {**row_file('d001'), **blocked()})   # W45: decide/ adds job rows only, so a first grant is meta's
+        self.assertEqual(rc, 1, out)
+        self.assertIn('adds job rows only; it changes W901', out)
+        self.merge_to_main('meta/decide-first', {**row_file('d002'), **blocked()})
+        try:
+            rc, out = self.judge('decide/2026-11-07', row_file('d003'))
+            self.assertEqual(rc, 0, out)
+        finally:
+            self.undo_merge()
+
     def test_a_grant_for_a_job_that_is_not_blocked_is_refused(self):
         rc, out = self.judge('meta/not-blocked', row_file('cccc', job='W902'))
         self.assertEqual(rc, 1, out)
