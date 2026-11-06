@@ -1,0 +1,11 @@
+{
+  "id": "W126",
+  "description": "**A decide/ branch can rewrite the question it answers**: `decide_answer_problems` in `warscape/policy.py` does not compare the row with its base, so the answering commit may change `question` and `options`. Refuse any change beyond the answer fields. Also in this area: `newest_by_finding` in `warscape/proposals.py` breaks a same-date tie on the random id (read, not run; it fails closed in `check`), and `max_questions` is in no doc. Depends on W45 merging. From W45 review round 1, 2026-11-06.",
+  "title": "A decide/ branch can rewrite the question it answers",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
