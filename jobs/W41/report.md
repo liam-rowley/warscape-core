@@ -1,17 +1,64 @@
-# W41 report: stopped at a kill criterion, nothing built
+# W41 report: session cap, jobs sessions, the acceptance lock deferral
 
-The session cap is not built. This session stopped at the brief's second kill criterion: `claude agents --json` no longer lists `done`
-(Claude Code 2.1.318; J52 saw it listed on 2.1.316). The change breaks decision 4 only. Decisions 1, 2, 3, 5 and 6 read `working` and
-`blocked`, which are unchanged. No code or test changed on this branch. The row is `blocked` until Liam answers the questions below.
+The session cap is built. The first session stopped at the brief's second kill criterion (`claude agents --json` no longer listed `done`, Claude Code 2.1.318)
+and asked four questions; Liam answered them on 2026-11-06 ("Yes your pick"), and a second session built the job from those answers. Decisions 3 and 4 of the brief
+changed as a result; the rest are built as written. No existing test assertion changed.
+
+## Liam's answers, 2026-11-06
+1. **Build decisions 1, 2, 3, 5 and 6 as written, with the `kind == 'background'` test added.** Yes.
+2. **Decision 4: as the first session recommended.** `jobs sessions` reads `--all` and shows every state. `--stop-finished` stops only `done` rows that still have a `pid`,
+   reports the rest as already exited without counting them as failures, and never calls `claude rm`. The first session said no such row exists today. **That was
+   wrong:** on 2026-11-06 W43-build was `done` with a live 404 MB process, and W43-review, W44-review and others the same.
+3. **The cap differs from the recommendation.** A session counts only if it has a `pid`, whatever its state: a `blocked` row with no pid does not count, a `blocked` or `done` row
+   with a pid does. The cap exists for RAM (D59), and a row with no process uses none. Accepted cost: a blocked session with no process that resumes can go over the cap by one for a while.
+4. **`claude stop`, settled by Liam's tests on 2026-11-05 and 2026-11-06.** On a `done` row with no pid it exits 0 and changes nothing. On a `done` row with a pid it ends the
+   process, the row stays `done` and the pid clears. A session can also lose its pid by itself while blocked (W41-build did).
 
 ## What was built
-Nothing. This report and the row change are the whole diff. `python3 wsc.py gates --fast` was green at the start (15 ok, 2026-11-05).
+- **`[jobs] max_sessions`** (`warscape/repo.py`, default 0 = no cap; the loader refuses anything but a whole number of at least 0). `capped_sessions` in `warscape/jobq.py` is the one
+  rule: `kind == 'background'` and a `pid`.
+- **`list_agents` reads `claude agents --json --all`.** Answer 3 counts a `done` row with a pid, and plain `--json` lists active sessions only. Every older reader still filters on
+  `LIVE_STATES`, so the same-name and PC holder checks behave as before.
+- **The check in `JobServer.start`** (decision 2): after the same-name check, before the claim and the launch; 429 with the brief's message, at most 5 names. `auto_tick` works on a
+  copy of the list, adds each start to it, and logs one deferral line per tick when the cap is full.
+- **`jobs next`** (decision 3): `sessions: <n> live of <cap>`; at the cap it says to wait and claims nothing; an unreadable list is printed and blocks nothing.
+- **`wsc jobs sessions [--stop-finished] [--json]`** (decision 4): `session_rows`, `stop_finished` and `stop_session` in `jobq.py`, the sub-verb in `warscape/verbs/jobs.py`.
+- **The acceptance lock** (decision 5): `read_pc_lock` runs `harness/job.sh status`, the reader `harness/ctl.py` and `harness/acceptance.py` use, and takes its `lock`. `JobServer.pc_busy` reads
+  it once per tick through a new `pc_lock` seam, and `defer_reason` holds a `needs_pc` start. Buttons never read it. `ACCEPTANCE_PURPOSE` is held to `harness/acceptance.py` by a host test.
+- **Docs:** `docs/CONSUMING.md` (the key and one line, paid for by cuts in the same section: 30,662 to 30,688 bytes, under the 30,720 cap), `docs/UPGRADING.md`, the `jobq.py` module docstring, the verb header and
+  its `wsc.jobs` tool row.
+- **`docs/AUDIT_METRICS.md:41`:** one phrase changed. See deviations.
 
 ## Evidence
-Read on the PC on 2026-11-05 with Claude Code 2.1.318, read-only unless stated.
+Tests: `python3 -m unittest tests.test_jobs` on 2026-11-06. Red before the build: 174 tests, 36 failed or errored, every one in the new classes (`SessionCap`, `AgentList`,
+`NextAtTheCap`, `Sessions`, `AcceptanceLock`, `MaxSessionsKey`). Green after it: 174 tests, OK. The six classes cover each case of deliverable 4.
 
-The kill criterion that fired: "`claude agents --json` on this PC no longer lists `state` with `working`, `blocked` and `done`: stop and
-report the new shape before building on it."
+CI_LINE
+
+Read on the PC on 2026-11-06 with Claude Code 2.1.319, read-only (no session was stopped by this job):
+
+`python3 wsc.py jobs sessions`, its head and last line:
+
+```
+name                                  id        state    pid     job
+J32-build                             1f457253  working  11688   -
+W41-build2                            2d13416a  working  17216   W41
+W45-build                             8c158f7a  working  22472   W45
+j19 pickup                            6eecf913  done     -       -
+...
+sessions: 178 background (blocked 2, done 156, failed 1, stopped 16, working 3); 3 with a process, no cap set
+```
+
+The answer to the brief's second open question: the PC had 156 finished sessions at that reading, none with a pid, so `--stop-finished` would have stopped none. Liam's reading
+earlier the same day found several with a pid, so the number moves through the day.
+
+With `S.max_sessions` set by hand against the live list: 4 printed `sessions: 3 live of 4` and `cap_line` was None. The refusal at the cap ran only against stubbed lists.
+
+The lock, read through a real game: `core/harness/job.sh status` in napoleon-remastered returned the watcher's status with `lock: {owner: j32, purpose: "J32 S3 and S4", age_s: 2, stale: false}`,
+the shape `read_pc_lock` parses; that purpose is a sitting, not acceptance, so it defers nothing. In this repo `job.sh status` exits 64 (no adapter), and `read_pc_lock` returned None. The lock
+purpose `harness/acceptance.py` takes is `acceptance pass`; `Parse-KV` in `harness/watcher.ps1` keeps the two words.
+
+The first session's reading, 2026-11-05, Claude Code 2.1.318:
 
 | Command | Rows | `state` values | `kind` |
 |---|---|---|---|
@@ -20,18 +67,7 @@ report the new shape before building on it."
 
 Row keys: `cwd`, `id`, `kind`, `name`, `pid`, `sessionId`, `startedAt`, `state`, `status`. The interactive row has no `id` and no `state`.
 
-Which rows have a process, from `--all`:
-
-| `state` | `kind` | Has `pid` | `status` | Rows |
-|---|---|---|---|---|
-| done | background | no | none | 147 |
-| stopped | background | no | none | 15 |
-| failed | background | no | none | 1 |
-| working | background | yes | busy | 3 |
-| blocked | background | no | none | 1 |
-| none | interactive | yes | busy | 1 |
-
-The CLI help, the parts that matter here:
+The CLI help the brief asks for:
 
 ```
 claude agents --help
@@ -47,48 +83,25 @@ claude rm --help
   Delete a background session and its worktree. Unlike `stop`, works on already-exited sessions.
 ```
 
-## What this changes in the brief
-1. **`done` needs `--all`.** `list_agents` calls plain `--json`, so `jobs sessions` would see no finished sessions and `--stop-finished`
-   would do nothing. The `jobq.py` comment on `LIVE_STATES` ("done" stays listed: J52) is out of date for the same reason.
-2. **`--stop-finished` probably has nothing to stop.** All 147 `done` rows have no `pid`, so their processes have already exited and hold no
-   memory. The `rm` help implies `stop` does not work on an exited session. If so, decision 4 as written would try 147 stops, fail them all
-   and exit 1. **This is unverified:** the one test `claude stop` on the oldest `done` session was denied by the session's permission
-   classifier, so `stop` was never run and no session was changed.
-3. **`claude rm` is not a substitute.** It works on exited sessions but deletes the session and its worktree, which the brief never asked
-   for. It would also free disk, not memory.
-4. **The memory problem behind D59 may not come from finished sessions.** On this reading only `working` sessions hold a process. The cap
-   is still needed, but "finished sessions are stopped" may now need no action. This is one sample on one day.
-
-Other facts that differ from the brief. None of them is a kill criterion:
-- **Interactive sessions are in the list**, against decision 1's "not in that list" (J52 already said so). The `state` filter still leaves them
-  out, because they have no `state`. The count should also test `kind == 'background'` so it does not depend on that.
-- **`stopped` and `failed` are new states.** Neither is in `LIVE_STATES`, so neither would count, which is correct. `jobs sessions` should show them.
-- **A `blocked` session can have no process.** `J64-build` is `blocked` with no `pid`, so it would take a slot while using no memory.
-- **The orchestrating session is listed if it runs with `--bg`.** D59 excludes it, but the list cannot tell it apart.
-- **Decision 5 has no Python lock reader in `warscape/`.** The purpose `acceptance.py` writes is `acceptance pass`, and `game.lock` is read through
-  `job.sh` and the watcher's `status` (`st['lock']` in `harness/acceptance.py`). `jobq.py` has no adapter to find that root, so the builder must work out how
-  to reach it. A game with no harness needs a defined answer as well: recommended, no lock means no deferral.
-
-The first kill criterion did not fire: `claude stop <id>` exists.
-
 ## Deviations from the brief and why
-- Stopped at the second kill criterion, so all five deliverables are not done, no red tests exist, and no draft pull request was opened.
-- The row is `blocked`, not `review`, because there is nothing to review. There is no usage line, as the job is not finished.
-- A `claude stop` was attempted on one `done` session (`6eecf913`) to settle point 2. The brief allows stopping `done` sessions, but this
-  was a test on a live PC, and it was denied before it ran.
+- **Decisions 1 and 4 follow Liam's answers,** not the brief: the count is rows with a pid, not `state` in `LIVE_STATES`, and `--stop-finished` skips `done` rows with no pid.
+- **`jobs next --id` goes on at the cap**; only plain `jobs next` says wait. The brief does not make this exception. A session launched from the view runs `jobs next --id <id>` and is
+  itself a live row, so at a full cap the wait would stop every session the launch had just allowed. Plain `next` at the cap exits 0, as it is an answer and not a failure.
+- **An unreadable lock defers a `needs_pc` start** under `--auto`. The brief does not say. A harness that cannot answer cannot prove the PC is free, and a deferral costs one tick (decision 6's reasoning).
+  No harness at all (`job.sh` exits 64, or no bash) means no lock and no deferral, as the first session recommended. A stale lock defers nothing, as the watcher is about to expire it.
+- **`jobs sessions` lists background rows only,** so the interactive row is not shown.
+- **`--stop-finished` was not run on this PC.** It would end other sessions' processes, and nothing in the brief needs it; `claude stop`'s behaviour is Liam's own test above, and the verb's is stubbed.
+- **`docs/AUDIT_METRICS.md:41` is outside the brief.** `113dc72` on main retired `docs/DECISIONS.md` and left this line citing it, so the `doc_paths` gate failed on main and would have failed this
+  branch's required CI. The line names napoleon's file, so it now says "its decisions view".
+- **The brief's "two keys" is one key,** `max_sessions`, as its own parenthesis says.
+- `origin/main` was merged into the branch first (10 commits behind).
 
 ## Open questions
-For Liam, each with a recommended answer:
-1. **Build decisions 1, 2, 3, 5 and 6 as written?** Recommended: yes, with the `kind == 'background'` test added. They do not read `done`.
-2. **What should decision 4 become?** Recommended: `jobs sessions` reads `--all` and shows every state; `--stop-finished` stops only `done` rows
-   that still have a `pid` (none today), reports the rest as already exited without counting them as failures, and never calls `claude rm`.
-3. **Should a `blocked` session with no `pid` count against the cap?** Recommended: yes, as decision 1 says. It can resume, and it shows up in
-   `jobs sessions`. The cost is that a few of these could fill the cap and hold the queue.
-4. **Who confirms `claude stop` on an exited session?** Recommended: Liam runs `claude stop 6eecf913` once, or allows it for the next session, and
-   the result goes in this report. Question 2's answer does not depend on it.
-
-The brief's own two open questions are unchanged. The second asks whether `--stop-finished` should run on every tick; if answer 2 is taken, that
-matters less, as there may be nothing to stop.
+1. **The core and other games stay uncapped by default.** The count sees every background session on the PC, but only a repo with `max_sessions` set refuses. A core or empire autopilot can still launch
+   past napoleon's 4. Recommended: set `max_sessions = 4` in the core's `wsc.toml` in the same change as napoleon's pin bump; default after: 2026-11-13. Not done here, as the brief says a game opts in.
+2. **If a Claude Code update drops `pid`, the cap goes quiet:** nothing counts, so nothing is refused. `kind` has the same exposure. Recommended: a later row for a check that a `working` row with no pid
+   warns; `state` already changed shape once. Default after: 2026-11-13.
+3. The brief's own two questions: Liam's `claude --bg` sessions count (the list cannot tell them apart), and `--stop-finished` does not run on the autopilot's tick. Both took the recommended answer; W46 can revisit the second.
 
 ## What napoleon must do at its pin bump
-Nothing yet. Once this job is built, napoleon sets `max_sessions = 4` as the brief says.
+Set `max_sessions = 4` in `[jobs]` of its `wsc.toml` (D59). No DLL or harness input changes, so no acceptance run for this job (rule 79). `docs/UPGRADING.md` "Session cap (W41)" has the rest.
