@@ -83,3 +83,19 @@ leaves the sweep alone. (2) The guard's own asynchronous move of the main window
 once per arming for a position message that matches neither, `a position message ... matches neither armed own-move rect`. (3) `headless_status.json` is
 rewritten after each verified relocation: `target.rect`, `window`, `client`, `detail` (`relocated to <device> <rect> at <s> s`) and a new `"relocations": <n>`
 (0 until the first); `state` is not changed and nothing is written at the cloak. Readers parse JSON, so the added field is compatible.
+
+## Acceptance evidence (W9, minor)
+(Here, not in CONSUMING.md: that file is at its 30 KB cap.) `harness/acceptance.py run` writes **schema 2** pass files ([`schemas/acceptance_pass.schema.json`](../schemas/acceptance_pass.schema.json), `acceptance.pass_problems`):
+`result` is `pass | fail | flake`, `build_id` is read from the pid-matched load line of *this* launch in `proxy.log` (`Pc.launches`; never the kit id, never the last launch's log),
+and `evidence` holds `exe_sha1`, `baseline_sha256`, `shots{step: {sha256, bytes, baseline_sha256}}`, `kit_sha256` (the installed kit's manifest), `dll_sha256` (the installed `d3d9.dll`),
+`dll_sha256_logged` (the DLL's `self_hash` line, W24; a mismatch fails step `dll_hash`), `watcher_sha256` (the installed watcher.ps1), `watcher_kit_sha256` (`harness/watcher.ps1` at the core's git HEAD); both hash the content with LF line endings (the file is CRLF on disk and LF in git) and `launches`.
+A launch whose build differs from the pass's first fails step `build_stable`. The ledger line adds `schema`, `watcher_sha`, `dll_sha256`, `kit_sha256`, `evidence_sha256` (sha256 of the pass file) and `flakes_allowed`.
+- **Flake**: a pass whose first failed step carries `cause: headless_launch_lost` (`Pc.launch` retried once, after `ctl.launch.retry_settle_s`, default 10 s, and both attempts ended in a pre-`on_virtual` watcher text) with `exe_sha1` passed.
+  A refused launch, a bad size and every later step stay `fail`. `acceptance.max_flakes` in the harness adapter (default 1, at most 3; `--max-flakes` may only lower it) are allowed per run; a flake is never a pass and the run goes on.
+  The first attempt's `proxy.log`, `headless_status.json` and job output are kept in `<state>/acceptance/<run>/pass_NN/launch_evidence/attempt_N/`.
+- **Refusals before pass 1**: a `--run` id with a pass file, a ledger line or a `<state>/acceptance/<run>/pass_*` folder; an installed `watcher.ps1` whose sha256 differs from the core's (fix: send a harness kit, `job.sh update kit=<id>`),
+  or a running watcher whose version is not the installed file's. The pass file is opened with mode `x`.
+- **`acceptance.py check-pass FILE... [--ledger F]`** validates files and the line that names each; `streak` takes `--watcher-sha` and `--max-flakes`.
+- **Staged saves (B51)**: a `campaign` scenario row may carry `save_file` (path under the game repo) and `save_sha256`; the adapter's `ctl.saves {anchor: appdata|game, dir, ext}` says where `ctl scene` copies it, as `wsc_<id>`, before the autostart and removes it after.
+- **A consumer's rule 79** skips `flake` lines while their count is at most `flakes_allowed` (never above 3), requires `evidence_sha256` = the sha256 of the committed file, one `dll_sha256` across the streak, unique `evidence` paths,
+  and replaces the `$Version` regex by `watcher_sha` = sha256 of `core/harness/watcher.ps1` at the branch HEAD. Older lines carry no shas and stop counting. A pin past this change touches `harness/`: 20 passes on a PC whose watcher is the kit at that pin.

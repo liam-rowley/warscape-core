@@ -123,3 +123,9 @@ Nothing is forced: a repo keeps its Markdown decisions file, and a pin bump past
   `headless_status.json` is rewritten after each verified relocation and gains `relocations` (see [PROXY_HARNESS.md](PROXY_HARNESS.md), "The headless guard").
 - **Game docs:** the game's own "Headless" doc (napoleon-remastered `proxy/README.md`) names the show hook beside the sweep, the logical own-move rect and its near-miss line,
   and the status rewrite with `relocations`. A game pinned below this tag also follows each earlier version's notes in this file.
+
+## Acceptance evidence and scene launches (W9, minor)
+
+Nothing breaks at the bump; a game with no `ctl.saves` block, no flakes and a current watcher behaves as before, except that `acceptance.py run` now refuses a reused `--run` id and a watcher whose installed bytes differ from the pin's,
+and writes schema 2. Details and the consumer's rule 79 changes: [PROXY_HARNESS.md](PROXY_HARNESS.md) "Acceptance evidence". Set `acceptance.max_flakes` in the harness adapter (suggested 1) and, for rows with `save_file`, `ctl.saves`.
+Because `harness/` changes at this pin, the first bump past it needs a 20-pass run on a PC whose installed watcher is the kit at that pin (the preflight checks it).

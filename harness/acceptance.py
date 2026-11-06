@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The acceptance gate: one pass proves the harness, the DLL and the control API hold; 20 in a row pass the phase 1 gate (J4, rules 28, 74, 79).
 
-purpose: run N acceptance passes in the background against the committed baseline file (rule 74), stop at the first failure with its evidence, and append one line per pass to the committed ledger; also the pure checks the policy gate reuses (consecutive passes for a build)
-usage: acceptance.py run --passes N --run RUN_ID [--owner O] [--session S] [--baseline F] [--ledger F] | measure --run RUN_ID [--owner O] [--session S] | check-baseline [--baseline F] | streak --build ID --watcher V [--ledger F]
+purpose: run N acceptance passes in the background against the committed baseline file (rule 74), stop at the first failure with its evidence, and append one line per pass to the committed ledger; also the pure checks the policy gate reuses (consecutive passes for a build, a pass file and its ledger line)
+usage: acceptance.py run --passes N --run RUN_ID [--owner O] [--session S] [--baseline F] [--ledger F] [--max-flakes N] | measure --run RUN_ID [--owner O] [--session S] | check-baseline [--baseline F] | streak --build ID --watcher V [--watcher-sha SHA] [--max-flakes N] [--ledger F] | check-pass FILE... [--ledger F]
 when: after every change to proxy/ or harness/ (rule 79: a job branch that changes them needs 20 consecutive ledger passes on its final DLL and watcher build); `check-baseline` and the helpers run in the tests gate
 not-a-verb: orchestrates PC sessions through harness/ctl.py and job.sh (game-agnostic: the scenario list is the baseline's, the settings files and exe pin come from the adapter); a J12 core candidate
 
@@ -13,8 +13,11 @@ A step's verb that is refused or failed fails the pass (nothing is skipped silen
 A step whose `pose` is null (the campaign: its camera route is open, the game repo's engine fact campaign.camera_route) is shot at the default view.
 PC binding (J44, `PcEnv`): each pass takes the game lock, launches through the watcher with the adapter's keys (ctl.py `Pc`), and after the exit
 releases the lock and waits for the watcher's byte-for-byte restore before the settings are compared, so the check is the end state Liam sees.
-Shots stay on the PC (<state>/acceptance/<run>/pass_NN/); each pass commits harness/runs/<run>/pass_NN.json (results, shot sha256 and diffs),
-and its ledger line names the run and that file (rule 79 refuses a line whose evidence is not committed). `measure` makes the baseline from two
+Shots stay on the PC (<state>/acceptance/<run>/pass_NN/); each attempt commits harness/runs/<run>/pass_NN.json (schema 2, schemas/acceptance_pass.schema.json:
+results, the shot sha256s, and the evidence block: exe, baseline, kit, DLL and watcher shas, the launches with the build of each from its own proxy.log line),
+and its ledger line names the run and that file and carries its sha256 (rule 79 refuses a line whose evidence is not committed). A lost headless start that
+survived the retry, before the build ran, is a `flake` (classify), not a fail; the adapter's acceptance.max_flakes (default 1, at most 3) are allowed per run
+and a flake never counts as a pass. A run id with evidence is refused, and the installed watcher must equal the core's watcher.ps1 in content, compared with LF line endings (CRLF is not a difference). `measure` makes the baseline from two
 passes: the first's load times and shots, the second's shot difference sets each step's threshold (a step above `NONDET_DIFF` is marked not
 deterministic, with why).
 """
@@ -24,6 +27,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -136,26 +140,123 @@ def read_ledger(text):
     return [json.loads(line) for line in (text or '').splitlines() if line.strip()]
 
 
-def ledger_line(n, build_id, watcher, kit, passed, steps, branch='', run='', evidence=''):
-    """One pass. `run` is the harness/runs/<run> folder, `evidence` the committed pass file in it (rule 79 checks it exists: J4 review 7)."""
-    return {'pass': n, 'utc': utc(), 'build_id': build_id, 'watcher': watcher, 'kit': kit, 'branch': branch, 'run': run, 'evidence': evidence,
-            'result': 'pass' if passed else 'fail', 'steps': steps}
+MAX_FLAKES_CAP = 3   # W9: no adapter can allow more flakes than this per run (a larger number would hide a launch rate worth fixing)
+SCHEMA = 2           # the pass file's and the ledger line's shape (W9)
+FLAKE_CAUSE = 'headless_launch_lost'
 
 
-def streak(lines, build_id, watcher):
-    """Passes in a row at the end of the ledger on this build and watcher: a fail, or a line of another build or watcher, ends the run."""
-    n = 0
+def ledger_line(n, build_id, watcher, kit, passed, steps, branch='', run='', evidence='', result=None, doc=None, file_sha=None, flakes_allowed=None):
+    """One attempt. `run` is the harness/runs/<run> folder, `evidence` the committed pass file in it (rule 79 checks it exists: J4 review 7).
+    With `doc` (the pass file's content) and `file_sha` (sha256 of its bytes) the line also carries the schema-2 facts (W9, H3)."""
+    ln = {'pass': n, 'utc': utc(), 'build_id': build_id, 'watcher': watcher, 'kit': kit, 'branch': branch, 'run': run, 'evidence': evidence,
+          'result': result or ('pass' if passed else 'fail'), 'steps': steps}
+    if doc is not None:
+        ev = doc.get('evidence') or {}
+        ln.update(schema=SCHEMA, watcher_sha=ev.get('watcher_sha256'), dll_sha256=ev.get('dll_sha256'), kit_sha256=ev.get('kit_sha256'),
+                  evidence_sha256=file_sha, flakes_allowed=flakes_allowed)
+    return ln
+
+
+def streak(lines, build_id, watcher, max_flakes=0, watcher_sha=None):
+    """Passes in a row at the end of the ledger on this build and watcher: a fail, or a line of another build or watcher, ends the run.
+    A `flake` line (W9) of this build or of build null is skipped without counting, up to max_flakes of them; one more ends the run. With
+    watcher_sha, a line whose watcher_sha differs (or is absent) ends it: the watcher is its bytes, not its $Version."""
+    n = flakes = 0
     for ln in reversed(lines):
-        if ln.get('result') == 'pass' and ln.get('build_id') == build_id and ln.get('watcher') == watcher:
+        if ln.get('watcher') != watcher or (watcher_sha is not None and ln.get('watcher_sha') != watcher_sha):
+            break
+        if ln.get('result') == 'pass' and ln.get('build_id') == build_id:
             n += 1
+        elif ln.get('result') == 'flake' and ln.get('build_id') in (build_id, None):
+            flakes += 1
+            if flakes > max_flakes:
+                break
         else:
             break
     return n
 
 
+def classify(passed, steps):
+    """pass | fail | flake. A flake is a lost headless launch (cause headless_launch_lost: two attempts ended before on_virtual) as the FIRST failed
+    step (the cleanup is a step too), with the exe_sha1 step passed. Everything else that fails is a fail: the build under test must have run to be judged (W9, decision 4)."""
+    if passed:
+        return 'pass'
+    first = next((v for v in steps.values() if not v.get('ok')), {})
+    return 'flake' if first.get('cause') == FLAKE_CAUSE and (steps.get('exe_sha1') or {}).get('ok') is True else 'fail'
+
+
+def build_checks(launches, dll_file_sha):
+    """[(step, ok, detail)] over the pass's launches (ctl.Pc.launches): the first names the build, a later launch on another build fails
+    (build_stable), and a DLL self-hash logged by a launch must equal the installed file's (dll_hash: the file changed under the run)."""
+    builds = [l.get('build') for l in launches]
+    out = []
+    ok = bool(builds) and builds[0] is not None and all(b in (None, builds[0]) for b in builds) and None not in builds
+    out.append(('build_stable', ok, {'compared': 'the build each launch logged in proxy.log (pid-matched), all equal and present', 'launches': builds}))
+    logged = sorted({l['dll_sha256_logged'] for l in launches if l.get('dll_sha256_logged')})
+    ok = all(h == dll_file_sha for h in logged)
+    out.append(('dll_hash', ok, {'compared': 'the DLL sha256 the launches logged against the installed d3d9.dll', 'file': dll_file_sha, 'logged': logged}))
+    return out
+
+
+def ledger_line_matches(line, doc, file_sha):
+    """Problems (empty = the line and the pass file agree) between a schema-2 ledger line and its pass file (H3)."""
+    ev = doc.get('evidence') or {}
+    want = {'pass': doc.get('pass'), 'build_id': doc.get('build_id'), 'watcher': doc.get('watcher'), 'kit': doc.get('kit'), 'result': doc.get('result'),
+            'schema': doc.get('schema'), 'watcher_sha': ev.get('watcher_sha256'), 'dll_sha256': ev.get('dll_sha256'), 'kit_sha256': ev.get('kit_sha256'),
+            'evidence_sha256': file_sha, 'steps': {k: v.get('ok') for k, v in (doc.get('steps') or {}).items()}}
+    return [f'ledger {k} is {line.get(k)!r}, the pass file says {v!r}' for k, v in want.items() if line.get(k) != v]
+
+
+PASS_REQUIRED = ('schema', 'pass', 'start_utc', 'end_utc', 'result', 'passed', 'build_id', 'build_source', 'watcher', 'kit', 'steps', 'evidence')
+EVIDENCE_REQUIRED = ('exe_sha1', 'baseline_sha256', 'shots', 'kit_sha256', 'dll_sha256', 'dll_sha256_logged', 'watcher_sha256', 'watcher_kit_sha256', 'launches')
+
+
+def pass_problems(doc):
+    """Problems (empty = valid schema-2 evidence) of a pass file's content. A file without `schema` is legacy and is reported as such (also schemas/acceptance_pass.schema.json)."""
+    if not isinstance(doc, dict) or 'schema' not in doc:
+        return ['legacy pass file (no schema field, schema 1): not evidence of a streak since W9']
+    out = [f'lacks "{k}"' for k in PASS_REQUIRED if k not in doc]
+    if doc.get('schema') != SCHEMA:
+        out.append(f'schema must be {SCHEMA}')
+    if doc.get('result') not in ('pass', 'fail', 'flake'):
+        out.append('result is pass, fail or flake')
+    if doc.get('build_source') != 'proxy.log':
+        out.append('build_source is proxy.log')
+    if doc.get('result') == 'pass' and not doc.get('build_id'):
+        out.append('a pass names its build_id (a launch that never logged one cannot pass)')
+    ev = doc.get('evidence')
+    if isinstance(ev, dict):
+        out += [f'evidence lacks "{k}"' for k in EVIDENCE_REQUIRED if k not in ev]
+        for k, v in (ev.get('shots') or {}).items():
+            if not (isinstance(v, dict) and len(str(v.get('sha256', ''))) == 64 and isinstance(v.get('bytes'), int)):
+                out.append(f'evidence.shots.{k} needs sha256 and bytes')
+    elif 'evidence' in doc:
+        out.append('evidence is an object')
+    if doc.get('result') == 'pass':   # H3: a pass that proves nothing is refused
+        out += pass_proof_problems(doc)
+    return out
+
+
+def pass_proof_problems(doc):
+    """What a `pass` must carry: passed true, the exe, baseline, DLL and watcher shas, a launch, and one shot entry per shot step."""
+    out = []
+    if doc.get('passed') is not True:
+        out.append('result pass needs passed true')
+    ev = doc.get('evidence') if isinstance(doc.get('evidence'), dict) else {}
+    out += [f'a pass needs evidence.{k}' for k in ('exe_sha1', 'baseline_sha256', 'dll_sha256', 'watcher_sha256') if not ev.get(k)]
+    if not ev.get('launches'):
+        out.append('a pass needs at least one launch in evidence.launches')
+    shots = ev.get('shots') if isinstance(ev.get('shots'), dict) else {}
+    for name, st in (doc.get('steps') or {}).items():
+        if name.endswith(':shot') and name[:-len(':shot')] not in shots:
+            out.append(f'step {name} has no entry in evidence.shots')
+    return out
+
+
 # ---- one pass ----------------------------------------------------------------------------------------------------------------
 def run_pass(baseline, env):
-    """env supplies: exe_sha1(), settings(), launch(size), exit(), relaunch(), ctl (a harness Ctl), shot_diff(step, shot result) -> float, pin.
+    """env supplies: exe_sha1(), settings(), launch(size), exit(), relaunch(), ctl (a harness Ctl), shot_diff(step, shot result) -> float, pin; optional
+    (W9) launches() -> ctl.Pc.launches and dll_sha256() -> the installed DLL's sha256, which add the build_stable and dll_hash steps.
     Returns (passed, steps) where steps maps a step name to {ok, check or reason}; stops at the first failed step."""
     steps, passed = {}, True
 
@@ -165,16 +266,29 @@ def run_pass(baseline, env):
         passed = passed and bool(ok)
         return bool(ok)
 
+    def start(name, size):   # a launch that the retry could not save carries its cause (ctl.HeadlessLaunchLost.cause), so classify can call it a flake
+        try:
+            env[name](size)
+            return True
+        except Exception as e:
+            if getattr(e, 'cause', None) != FLAKE_CAUSE:
+                raise
+            return record(name, False, {'reason': f'{type(e).__name__}: {e}', 'cause': e.cause})
+
+    def failed(name, r):
+        return record(name, False, {'reason': r['reason'], **({'cause': r['cause']} if r.get('cause') else {})})
+
     before = env['settings']()
     ok, d = exe_pin_ok(env['exe_sha1'](), baseline['exe_sha1'])
     if not record('exe_sha1', ok, d):
         return False, steps
-    env['launch'](baseline['size'])
+    if not start('launch', baseline['size']):
+        return False, steps
     for s in baseline['steps']:
         sid = s['scenario']
         r = env['ctl'].run('scene', sid)
         if r['status'] != 'ok':
-            record(f'{sid}:scene', False, {'reason': r['reason']})
+            failed(f'{sid}:scene', r)
             return False, steps
         ok, d = load_time_ok(s['load_time_s'], r.get('load_s') or 0, s['load_tolerance_pct'])
         d['path'] = r.get('path')   # launch, relaunch or reset, and a recorded launch retry (ctl.Pc.launch)
@@ -185,7 +299,13 @@ def run_pass(baseline, env):
             if not record(f'{sid}:cam', r['status'] == 'ok', {'reason': r['reason'], 'check': r['check']}):
                 return False, steps
         r = env['ctl'].run('shot', f'{sid}_{s["pose"] or "default"}')
-        if not record(f'{sid}:shot', r['status'] == 'ok', {'reason': r['reason'], 'check': r['check'], 'shot': r.get('shot')}):
+        hashed = {}
+        if r.get('shot') and Path(r['shot']).is_file():   # W9 (H3): the file ctl wrote, hashed where it lies
+            b = Path(r['shot']).read_bytes()
+            hashed = {'sha256': hashlib.sha256(b).hexdigest(), 'bytes': len(b)}
+        if r['status'] == 'ok' and not hashed:   # no file to hash is no proof of a shot
+            r = {**r, 'status': 'failed', 'reason': f"the shot file {r.get('shot')!r} is missing or unreadable, so it cannot be hashed"}
+        if not record(f'{sid}:shot', r['status'] == 'ok', {'reason': r['reason'], 'check': r['check'], 'shot': r.get('shot'), **hashed}):
             return False, steps
         if s['deterministic']:
             ok, d = shot_ok(env['shot_diff'](s, r), s['shot_threshold'])
@@ -198,8 +318,13 @@ def run_pass(baseline, env):
     if not record('warm_reset', r['status'] == 'ok', {'reason': r['reason'], 'check': r['check']}):
         return False, steps
     env['exit']()
-    env['relaunch'](baseline['size'])
+    if not start('relaunch', baseline['size']):
+        return False, steps
     env['exit']()
+    if 'launches' in env:
+        for name, ok, d in build_checks(env['launches'](), env['dll_sha256']()):
+            if not record(name, ok, d):
+                return False, steps
     ok, d = settings_unchanged(before, env['settings']())
     record('settings_identical', ok, d)
     return passed, steps
@@ -224,6 +349,7 @@ class PcEnv:
         self.owner, self.session, self.out_dir, self.baseline_dir = owner, session, Path(out_dir), Path(baseline_dir or BASELINE.parent)
         self.sleep = sleep or time.sleep
         self.pc = self.ctlmod.Pc(owner, adapter_path, self.a)
+        self.pc.evidence_dir = self.out_dir / 'launch_evidence'   # W9 (B60): a failed first launch attempt's logs, before the retry recreates them
         rows = self.ctlmod.load_scenarios(ROOT / 'registries' / 'scenarios.jsonl')
         state = Path(self.a['state_dir'])
         self.ctl = self.ctlmod.Ctl(self.ctlmod.job_sh_transport(owner, adapter_path), rows, self.a, shotter=lambda n: self.pc.shot(n, self.out_dir),
@@ -242,7 +368,10 @@ class PcEnv:
                 raise RuntimeError(f'acceptance: cannot take the game lock: {out.strip()}')
             self.locked = True
         else:
-            self.sh('touch', self.owner)   # W10: touch refreshes only the holder's lock
+            self.touch()
+
+    def touch(self):
+        self.sh('touch', self.owner)   # W10: touch refreshes only the holder's lock; a bare touch is refused
 
     def release(self):
         """Release the lock and wait until the watcher has restored every profile (byte for byte) with the game closed."""
@@ -277,7 +406,7 @@ class PcEnv:
         return self.pc.launch(size)
 
     def exit(self):
-        self.sh('touch')
+        self.touch()
         return self.pc.exit()
 
     relaunch = launch
@@ -291,22 +420,112 @@ class PcEnv:
                 s.env = env
 
             def run(s, verb, *args):
-                s.env.sh('touch')
+                s.env.touch()
                 return s.env.ctl.run(verb, *args)
         return {'exe_sha1': self.exe_sha1, 'settings': self.settings, 'launch': self.launch, 'exit': self.exit, 'relaunch': self.relaunch,
-                'ctl': TouchingCtl(self), 'shot_diff': self.shot_diff}
+                'ctl': TouchingCtl(self), 'shot_diff': self.shot_diff, 'launches': lambda: self.pc.launches, 'dll_sha256': self.dll_sha256}
 
-    def identity(self):
+    def identity(self, strict=False):
+        """(build, watcher version, kit). strict (W9): the build comes from this run's own launches (proxy.log, pid-matched) and is None when none logged one;
+        not strict (measure) keeps the older read."""
         st = self.pc.status()
-        b = self.pc.build_info()
+        if strict:
+            try:
+                b = self.pc.build_info(strict=True)
+            except RuntimeError:
+                b = {'build': None, 'kit': self.pc.build_info().get('kit')}
+        else:
+            b = self.pc.build_info()
         return b.get('build'), st.get('version'), b.get('kit')
+
+    # -- the pass's evidence (W9, H3): the shas that tie a pass to the exact files it ran on
+    def state(self):
+        return Path(self.a['state_dir'])
+
+    def install_record(self):
+        p = self.state() / 'install.json'
+        return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
+
+    def dll_path(self):
+        for f in self.install_record().get('files', []):
+            if f.get('path', '').replace('\\', '/').rsplit('/', 1)[-1].lower() == 'd3d9.dll':
+                return Path(self.a['game_dir']) / f['path'].replace('\\', '/')
+        return Path(self.a['game_dir']) / 'd3d9.dll'
+
+    def dll_sha256(self):
+        p = self.dll_path()
+        return sha(p) if p.exists() else None
+
+    def evidence(self, baseline_path, baseline_sha):
+        kit = self.install_record().get('kit_id')
+        mf = self.state() / 'kits' / str(kit) / 'manifest.json'
+        inst, kitb = installed_watcher_bytes(self.a), kit_watcher_bytes()
+        return {'exe_sha1': self.exe_sha1(), 'baseline_sha256': baseline_sha, 'kit_sha256': sha(mf) if mf.exists() else None,
+                'dll_sha256': self.dll_sha256(), 'dll_sha256_logged': next((l['dll_sha256_logged'] for l in self.pc.launches if l.get('dll_sha256_logged')), None),
+                'watcher_sha256': hashlib.sha256(inst).hexdigest() if inst else None, 'watcher_kit_sha256': hashlib.sha256(kitb).hexdigest() if kitb else None,
+                'launches': list(self.pc.launches)}
+
+
+def lf(b):
+    """watcher.ps1 is CRLF in a working tree and in a kit built from one, LF in git (.gitattributes `*.ps1 eol=crlf`): its identity is the content with LF endings."""
+    return None if b is None else b.replace(b'\r\n', b'\n')
+
+
+def installed_watcher_bytes(adapter):
+    """The installed watcher.ps1, opened read-only (W9, decision 9); None when missing. Nothing here writes, renames or locks it."""
+    p = Path(adapter['state_dir']) / adapter.get('watcher_subdir', 'watcher') / 'src' / 'watcher.ps1'
+    try:
+        with open(p, 'rb') as f:
+            return lf(f.read())
+    except OSError:
+        return None
+
+
+def kit_watcher_bytes():
+    """harness/watcher.ps1 as committed at the core's HEAD (in a game repo: the pinned commit), so a dirty working copy is irrelevant; None if git cannot say."""
+    r = subprocess.run(['git', '-C', str(HERE), 'show', 'HEAD:./watcher.ps1'], capture_output=True)
+    return lf(r.stdout) if r.returncode == 0 and r.stdout else None
+
+
+VERSION_RX = re.compile(rb"\$Version\s*=\s*['\"]([^'\"]+)['\"]")
+KIT_FIX = 'send a harness kit (pc_deploy.py kit --what harness, send) and run job.sh update kit=<id>, then start the run'
+
+
+def watcher_problems(installed, kit, status):
+    """The watcher is its bytes (H10): the installed watcher.ps1 must equal the core's, and the running watcher must be the installed one. Problems as text."""
+    installed, kit = lf(installed), lf(kit)
+    if installed is None:
+        return [f'the installed watcher.ps1 cannot be read (not installed under <state_dir>/<watcher_subdir>/src): {KIT_FIX}']
+    if kit is None:
+        return ['harness/watcher.ps1 cannot be read from the core at git HEAD (git show failed): the watcher cannot be compared']
+    out = []
+    a, b = hashlib.sha256(installed).hexdigest(), hashlib.sha256(kit).hexdigest()
+    if a != b:
+        out.append(f'the installed watcher.ps1 (sha256 {a[:12]}) is not the core\'s harness/watcher.ps1 (sha256 {b[:12]}): {KIT_FIX}')
+    m = VERSION_RX.search(installed)
+    running = (status or {}).get('version')
+    if m and running and m.group(1).decode() != running:
+        out.append(f'the running watcher reports version {running} but the installed file says {m.group(1).decode()}: it was updated on disk and never restarted; restart it ({KIT_FIX})')
+    return out
+
+
+def run_id_problems(run, ledger_text, runs_dir, state):
+    """A --run id that already has evidence is refused (W9, H5): a pass file in the repo, a ledger line, or a pass folder on the PC."""
+    out = []
+    if list(Path(runs_dir, run).glob('pass_*.json')):
+        out.append(f'run {run} already has pass files under {Path(runs_dir, run)}: use a fresh --run id (evidence is never overwritten)')
+    if any(str(ln.get('run', '')).rsplit('/', 1)[-1] == run for ln in read_ledger(ledger_text)):
+        out.append(f'the ledger already has lines for run {run}: use a fresh --run id')
+    if list((Path(state) / 'acceptance' / run).glob('pass_*')):
+        out.append(f'{Path(state) / "acceptance" / run} already has pass folders: use a fresh --run id')
+    return out
 
 
 def pass_file(run, n):
     return ROOT / 'harness' / 'runs' / run / f'pass_{n:02d}.json'
 
 
-def run_problems(a, branch_of=None, has_pil=None, watcher_status=None):
+def run_problems(a, branch_of=None, has_pil=None, watcher_status=None, watcher_files=None):
     """Checks before pass 1, so a run cannot spend a ledger line on its setup (J45 run 20261031_j45acc: pass 1 failed on a missing
     Pillow in the interpreter, and its line carried no branch, which rule 79 never counts). Fills a.branch from git when not given."""
     if not a.branch:
@@ -331,6 +550,8 @@ def run_problems(a, branch_of=None, has_pil=None, watcher_status=None):
                    '(job.sh unlock <owner>) and let the watcher restore, then start the run; each pass takes and releases its own lock')
     if st.get('profile_active'):
         out.append(f"a profile is active ({st['profile_active']}): release the lock that applied it and wait for the restore before the run")
+    if watcher_files is not None:   # (installed bytes, the core's bytes): W9, decision 9
+        out += watcher_problems(*watcher_files, st)
     return out
 
 
@@ -343,22 +564,38 @@ def who(a):
     return not why
 
 
+def max_flakes_of(ad, cli):
+    """The flakes allowed per run: the adapter's acceptance.max_flakes (default 1), --max-flakes may only lower it, never above MAX_FLAKES_CAP. (value, problem)."""
+    n = (ad.get('acceptance') or {}).get('max_flakes', 1)
+    if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= MAX_FLAKES_CAP:
+        return None, f'acceptance.max_flakes is {n!r}: a whole number from 0 to {MAX_FLAKES_CAP}'
+    if cli is not None and not 0 <= cli <= n:
+        return None, f'--max-flakes {cli} may only lower the adapter\'s {n} (and is at most {MAX_FLAKES_CAP})'
+    return n if cli is None else cli, None
+
+
 def cmd_run(a):
     baseline = load_baseline(a.baseline)   # refuses without a valid baseline (rule 74)
     ad = json.loads(Path(a.adapter).read_text(encoding='utf-8'))
+    allowed, why = max_flakes_of(ad, a.max_flakes)
+    if why:
+        print(f'acceptance run: refused: {why}', file=sys.stderr)
+        return 2
     try:   # the watcher's own status file (rewritten every 2 s); unreadable = nothing known, the passes then find out
         st = json.loads(Path(ad['state_dir'], ad.get('watcher_subdir', 'watcher'), 'watcher.status').read_text(encoding='utf-8-sig'))
     except (OSError, ValueError, KeyError):
         st = {}
-    bad = run_problems(a, watcher_status=st)
+    state = Path(ad['state_dir'])
+    led = Path(a.ledger)
+    bad = run_problems(a, watcher_status=st, watcher_files=(installed_watcher_bytes(ad), kit_watcher_bytes()))
+    bad += run_id_problems(a.run, led.read_text(encoding='utf-8') if led.exists() else '', ROOT / 'harness' / 'runs', state)
     if bad:
         for b in bad:
             print(f'acceptance run: refused: {b}', file=sys.stderr)
         return 2
     if not who(a):
         return 2
-    state = Path(json.loads(Path(a.adapter).read_text(encoding='utf-8'))['state_dir'])
-    led = Path(a.ledger)
+    base_sha = sha(a.baseline)
     # J12 run 20261031_j12acc2: ctl.py writes the launch keys into the mod ini before its launch, outside any snapshot, so on a fresh
     # install pass 1 read its "before" without them and failed settings_identical. The keys are the run's setup: applied once here,
     # before pass 1 reads the settings (every earlier run had them in the ini already).
@@ -367,9 +604,11 @@ def cmd_run(a):
     if miss:
         pre.pc.set_keys(miss)
         print(f"acceptance: launch keys applied before pass 1: {', '.join(sorted(miss))}")
-    for n in range(1, a.passes + 1):
+    done = flakes = attempt = 0
+    while done < a.passes:   # an attempt is a pass file and a ledger line; a flake is one that does not count and does not stop the run (W9)
+        attempt += 1
+        n = attempt
         env = PcEnv(a.owner, a.session, a.adapter, state / 'acceptance' / a.run / f'pass_{n:02d}', Path(a.baseline).parent)
-        build, watcher, kit = env.identity()
         t0 = utc()
         try:
             passed, steps = run_pass(baseline, env.as_env())
@@ -380,21 +619,85 @@ def cmd_run(a):
                 env.exit()
                 env.release()
             except Exception as e:
-                steps = dict(steps, cleanup={'ok': False, 'reason': f'{type(e).__name__}: {e}'})
+                passed, steps = False, dict(steps, cleanup={'ok': False, 'reason': f'{type(e).__name__}: {e}',
+                                                            **({'cause': e.cause} if getattr(e, 'cause', None) else {})})
+        result = classify(passed, steps)
+        build, watcher, kit = env.identity(strict=True)
+        if build is None:
+            passed, result = False, ('fail' if result == 'pass' else result)
+            steps.setdefault('build_id', {'ok': False, 'reason': 'no launch of this pass logged its build in proxy.log: a pass cannot be labelled'})
+        evidence = dict(env.evidence(a.baseline, base_sha), shots=shots_evidence(steps, baseline, Path(a.baseline).parent))
+        doc = {'schema': SCHEMA, 'pass': n, 'start_utc': t0, 'end_utc': utc(), 'result': result, 'passed': passed, 'build_id': build, 'build_source': 'proxy.log',
+               'watcher': watcher, 'kit': kit, 'steps': steps, 'evidence': evidence}
         pf = pass_file(a.run, n)
         pf.parent.mkdir(parents=True, exist_ok=True)
         rel = pf.relative_to(ROOT).as_posix()
-        pf.write_text(json.dumps({'pass': n, 'start_utc': t0, 'end_utc': utc(), 'build_id': build, 'watcher': watcher, 'kit': kit, 'passed': passed,
-                                  'steps': steps}, indent=1) + '\n', encoding='utf-8', newline='\n')
-        line = ledger_line(n, build, watcher, kit, passed, {k: v['ok'] for k, v in steps.items()}, a.branch, f'harness/runs/{a.run}', rel)
+        with open(pf, 'x', encoding='utf-8', newline='\n') as f:   # 'x': a race can never overwrite earlier evidence
+            f.write(json.dumps(doc, indent=1) + '\n')
+        line = ledger_line(n, build, watcher, kit, passed, {k: v['ok'] for k, v in steps.items()}, a.branch, f'harness/runs/{a.run}', rel,
+                           result=result, doc=doc, file_sha=sha(pf), flakes_allowed=allowed)
         with open(led, 'a', encoding='utf-8', newline='\n') as f:
             f.write(json.dumps(line) + '\n')
-        print(f'acceptance pass {n}: {"pass" if passed else "FAIL"} ({rel})', flush=True)
-        if not passed:
-            bad = next((k for k, v in steps.items() if not v['ok']), '?')
-            print(f'acceptance: stopped at the first failure: {bad}: {steps.get(bad)}', flush=True)
+        print(f'acceptance pass {n}: {result.upper() if result != "pass" else "pass"} ({rel})', flush=True)
+        bad = next((k for k, v in steps.items() if not v['ok']), '?')
+        if result == 'pass':
+            done += 1
+            continue
+        if result == 'flake':
+            flakes += 1
+            print(f'acceptance: flake {flakes} of {allowed} allowed (the headless start was lost twice before the build ran): {bad}: {steps.get(bad)}', flush=True)
+            if flakes <= allowed:
+                continue
+            print('acceptance: stopped: the flake allowance is spent', flush=True)
             return 1
+        print(f'acceptance: stopped at the first failure: {bad}: {steps.get(bad)}', flush=True)
+        return 1
     return 0
+
+
+def shots_evidence(steps, baseline, baseline_dir):
+    """{step: {sha256, bytes, baseline_sha256?}} for every shot step the pass reached (the baseline shot's sha256 where the step is compared)."""
+    out = {}
+    for s in baseline['steps']:
+        v = steps.get(f"{s['scenario']}:shot")
+        if v and v.get('sha256'):
+            out[s['scenario']] = {'sha256': v['sha256'], 'bytes': v['bytes']}
+            bp = Path(baseline_dir) / s['shot']
+            if s['deterministic'] and bp.is_file():
+                out[s['scenario']]['baseline_sha256'] = sha(bp)
+    return out
+
+
+def cmd_check_pass(a):
+    """Each FILE must be valid schema-2 evidence; with --ledger the ledger line naming it must agree (and exist)."""
+    lines = None
+    if a.ledger:
+        if not Path(a.ledger).is_file():
+            print(f'check-pass: the ledger {a.ledger} does not exist (a named ledger is never skipped)')
+            return 1
+        lines = read_ledger(Path(a.ledger).read_text(encoding='utf-8'))
+    bad = 0
+    for f in a.files:
+        p = Path(f)
+        probs = []
+        try:
+            doc = json.loads(p.read_text(encoding='utf-8'))
+            probs = pass_problems(doc)
+        except (OSError, ValueError) as e:
+            doc, probs = None, [f'unreadable: {e}']
+        if lines is not None and doc is not None and not probs:
+            try:
+                rel = p.resolve().relative_to(ROOT).as_posix()
+            except ValueError:
+                rel = p.as_posix()
+            mine = [ln for ln in lines if ln.get('evidence') == rel or str(ln.get('evidence', '')).endswith(p.name) and p.as_posix().endswith(str(ln.get('evidence')))]
+            if len(mine) != 1:
+                probs.append(f'{len(mine)} ledger lines name this file (need exactly 1)')
+            else:
+                probs += ledger_line_matches(mine[0], doc, sha(p))
+        print(f'{f}: ' + ('ok' if not probs else 'PROBLEMS: ' + '; '.join(probs)))
+        bad += bool(probs)
+    return 1 if bad else 0
 
 
 def cmd_measure(a):
@@ -481,14 +784,16 @@ def cmd_measure(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(description='acceptance gate')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    adapter = str(layout.harness_adapter(ROOT))
     r = sub.add_parser('run'); r.add_argument('--passes', type=int, default=NEEDED); r.add_argument('--owner', default=None)
     r.add_argument('--baseline', default=str(BASELINE)); r.add_argument('--ledger', default=str(LEDGER)); r.add_argument('--run', required=True)
-    r.add_argument('--session', default=None); r.add_argument('--adapter', default=adapter); r.add_argument('--branch', default='')
+    r.add_argument('--session', default=None); r.add_argument('--adapter', default=None); r.add_argument('--branch', default='')
+    r.add_argument('--max-flakes', type=int, default=None, dest='max_flakes')
     m = sub.add_parser('measure'); m.add_argument('--run', required=True); m.add_argument('--owner', default=None)
-    m.add_argument('--session', default=None); m.add_argument('--adapter', default=adapter)
+    m.add_argument('--session', default=None); m.add_argument('--adapter', default=None)
     c = sub.add_parser('check-baseline'); c.add_argument('--baseline', default=str(BASELINE))
     s = sub.add_parser('streak'); s.add_argument('--build', required=True); s.add_argument('--watcher', required=True); s.add_argument('--ledger', default=str(LEDGER))
+    s.add_argument('--watcher-sha', default=None); s.add_argument('--max-flakes', type=int, default=0)
+    k = sub.add_parser('check-pass'); k.add_argument('files', nargs='+'); k.add_argument('--ledger', default=None)
     a = ap.parse_args(argv)
     if a.cmd == 'check-baseline':
         load_baseline(a.baseline)
@@ -496,9 +801,12 @@ def main(argv=None):
         return 0
     if a.cmd == 'streak':
         lp = Path(a.ledger)
-        n = streak(read_ledger(lp.read_text(encoding='utf-8') if lp.exists() else ''), a.build, a.watcher)
+        n = streak(read_ledger(lp.read_text(encoding='utf-8') if lp.exists() else ''), a.build, a.watcher, min(a.max_flakes, MAX_FLAKES_CAP), a.watcher_sha)
         print(f'{n} consecutive passes on build {a.build}, watcher {a.watcher} (need {NEEDED})')
         return 0 if n >= NEEDED else 1
+    if a.cmd == 'check-pass':
+        return cmd_check_pass(a)
+    a.adapter = a.adapter or str(layout.harness_adapter(ROOT))
     if a.cmd == 'measure':
         return cmd_measure(a)
     return cmd_run(a)

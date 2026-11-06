@@ -1,0 +1,11 @@
+{
+  "id": "W131",
+  "description": "**W81's early-end test catches the old bug only by chance**: `tests/test_job_sh.py` `test_lock_wait_never_ends_early_whenever_in_the_second_it_starts` spaces its runs with fixed `time.sleep` calls, so where each run starts in the second is never set against the clock. The old bug shows only when the second ticks between `job.sh` starting and its first deadline check, a window as wide as bash's startup. Against the unfixed `job.sh` the test was red 5 of 6 on Git Bash and 2 of 10 on Linux (WSL Ubuntu, W81 review round 1, 2026-11-06). Start each run a set time before a tick (`time.sleep(1 - time.time() % 1 - margin)`) so the old code is red every run on both runners; the fixed code is unaffected. Why: a regression in the deadline would mostly pass on `ubuntu-latest` and could pass on a Windows run Raised: W81 review round 1, 2026-11-06",
+  "title": "W81's early-end test catches the old bug only by chance",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
