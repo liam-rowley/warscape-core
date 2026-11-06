@@ -14,6 +14,11 @@
 //   every Present             post-check (a window visible off the target is cloaked), pending relocation, the on_virtual status.
 //   guard thread (~4 ms)      virtual-screen metrics, the target's live rect, the layout signature -> Decide: cloak first,
 //                             re-resolve, move, verify, uncloak after a quiet settle; no target for refuse_grace_ms -> refusal.
+//                             A window sweep every ~250 ms (the backstop) and a WinEvent hook on EVENT_OBJECT_SHOW (W18, B19),
+//                             pumped on this thread outside the lock, hide an unguarded window the moment it is shown.
+//   after a verified relocation  the guard's own async move is recognised by its rect, in physical pixels or, for a window thread
+//                             that is not per-monitor aware, as the target monitor looks in its DPI context (W18, B22); headless_status.json is rewritten with
+//                             the new target rect and "relocations" (state unchanged; W18, B23).
 // Refusal: every window of the process cloaked and hidden, headless_status.json state refused, exit code dg::kRefuseExitCode.
 #include "runtime.h"
 #include "display_guard.h"
@@ -58,6 +63,7 @@ WNDPROC s_next = nullptr;               // the main window's procedure under our
 bool s_cloaked = false, s_hiddenByGuard = false, s_pending = false, s_placed = false, s_haveWindow = false, s_device = false;
 uint64_t s_layoutAt = 0, s_metricsAt = 0;
 double s_lastTrigger = -1e9, s_noTargetSince = -1;
+bool s_ownMoveLogged = false;           // the near-miss line (OwnLocked) is written once per arming
 DWORD s_ownMoveThread = 0;              // the thread inside the guard's own SetWindowPos (its WM_WINDOWPOSCHANGING passes)
 OwnMove s_ownMove;                      // the main window's last placement by the guard, matched by rect on any thread (IsOwnMove)
 long s_frames = 0;
@@ -97,6 +103,7 @@ PFN_SetThreadDpiCtx DpiFn() {
 struct DpiScope {
     HANDLE prev = nullptr;
     DpiScope() { if (auto f = DpiFn()) { prev = f(kDpiPerMonitorV2); if (!prev) prev = f(kDpiPerMonitor); } }
+    explicit DpiScope(HANDLE ctx) { if (auto f = DpiFn()) prev = f(ctx); }
     ~DpiScope() { if (prev) DpiFn()(prev); }
 };
 Rect FromRECT(const RECT& r) { return Rect{ r.left, r.top, r.right, r.bottom }; }
@@ -178,6 +185,24 @@ bool LiveRect(Rect& out) {   // the target monitor's rect now
     if (!GetMonitorInfoW(s_t.hmon, &mi)) return false;
     out = FromRECT(mi.rcMonitor); return true;
 }
+// The rect the window's own thread will see for a physical one on the target: unchanged unless that thread is not per-monitor aware
+// (a game at a scaled target; W18, B22). Asks the target monitor, in the window's DPI context, how that context sees it, and maps
+// through dg::LogicalOnMonitor: the window has not reached the target yet, so nothing that needs the point inside the window can
+// answer (run 20261106_w18review). false = no distinct logical rect (aware, the functions absent: Windows before 10 1607, no monitor).
+bool LogicalRect(HWND h, const Rect& phys, Rect& out) {
+    using PFN_GetCtx = HANDLE(WINAPI*)(HWND);
+    using PFN_Equal = BOOL(WINAPI*)(HANDLE, HANDLE);
+    HMODULE u = GetModuleHandleW(L"user32.dll");
+    static PFN_GetCtx getCtx = (PFN_GetCtx)(void*)GetProcAddress(u, "GetWindowDpiAwarenessContext");
+    static PFN_Equal equal = (PFN_Equal)(void*)GetProcAddress(u, "AreDpiAwarenessContextsEqual");
+    if (!getCtx || !equal) return false;
+    const HANDLE ctx = getCtx(h);
+    if (!ctx || equal(ctx, kDpiPerMonitorV2) || equal(ctx, kDpiPerMonitor)) return false;
+    Rect physMon; if (!LiveRect(physMon)) return false;
+    MONITORINFO mi{}; mi.cbSize = sizeof mi;
+    { DpiScope d(ctx); if (!d.prev || !GetMonitorInfoW(s_t.hmon, &mi)) return false; }
+    return LogicalOnMonitor(phys, physMon, FromRECT(mi.rcMonitor), out);
+}
 uint64_t s_loggedLayout = 0;
 // Resolve the target by name and exact size. s_cs held. false + why when there is none.
 bool ResolveLocked(std::string& why) {
@@ -241,7 +266,11 @@ bool PlaceLocked(HWND h) {
     {
         DpiScope d;
         s_ownMoveThread = GetCurrentThreadId();
-        if (pin) { s_ownMove.armed = true; s_ownMove.want = R(t.l, t.t, w, hh); s_ownMove.at = MonoS(); }
+        if (pin) {
+            s_ownMove = OwnMove{}; s_ownMove.armed = true; s_ownMove.want = R(t.l, t.t, w, hh); s_ownMove.at = MonoS(); s_ownMoveLogged = false;
+            s_ownMove.haveLogical = LogicalRect(h, s_ownMove.want, s_ownMove.logical);
+            if (s_ownMove.haveLogical) LOGI("headless: own move armed at %s, and as the window's thread sees it (DPI-unaware) %s", RectStr(s_ownMove.want).c_str(), RectStr(s_ownMove.logical).c_str());
+        }
         SetWindowPos(h, nullptr, t.l, t.t, w, hh, fl);
         s_ownMoveThread = 0;
     }
@@ -286,6 +315,13 @@ void RelocateLocked() {
     if (s_main && PlacementVerified(s_t.m.rc, WinRect(s_main), liveOk, live, before, after)) {
         s_placed = true; s_pending = false; s_layoutAt = after; s_metricsAt = MetricsNow();
         LOGI("headless: relocated and verified on %s %s (cloaked until the layout is quiet for %u ms)", s_t.m.device.c_str(), RectStr(s_t.m.rc).c_str(), s_settleMs);
+        {   // B23: the status names the new rect (shot.sh reads target.rect); its state stays what it was
+            const Rect wr = WinRect(s_main); RECT c{}; GetClientRect(s_main, &c);
+            ++s_st.relocations; s_st.winW = Width(wr); s_st.winH = Height(wr); s_st.clientW = c.right; s_st.clientH = c.bottom;
+            char d[200]; snprintf(d, sizeof d, "relocated to %s %s at %.1f s", s_t.m.device.c_str(), RectStr(s_t.m.rc).c_str(), Uptime());
+            s_st.detail = d;
+            WriteStatus();
+        }
     }
 }
 // After any gated call and every Present: a guarded window visible off the target (and not cloaked) is cloaked and sent to relocation.
@@ -302,7 +338,17 @@ void PostCheckLocked(const char* where) {
 
 // ---- the main window's procedure: topology messages and its own geometry ------------------------------------------------------------
 Pos PosOf(const WINDOWPOS* p) { Pos in; in.x = p->x; in.y = p->y; in.cx = p->cx; in.cy = p->cy; in.flags = p->flags; return in; }
-bool OwnLocked(const Pos& in) { return s_ownMoveThread == GetCurrentThreadId() || IsOwnMove(s_ownMove, in, MonoS()); }
+bool OwnLocked(const Pos& in) {
+    if (s_ownMoveThread == GetCurrentThreadId()) return true;
+    const double now = MonoS();
+    if (IsOwnMove(s_ownMove, in, now)) return true;
+    if (!s_ownMoveLogged && OwnMoveArmed(s_ownMove, in, now)) {   // a move inside the armed window that is neither rect: dropped, logged once per arming
+        s_ownMoveLogged = true;
+        LOGW("headless: a position message %d,%d %dx%d (flags 0x%x) matches neither armed own-move rect (physical %s, logical %s): dropped as the engine's",
+             (int)in.x, (int)in.y, (int)in.cx, (int)in.cy, in.flags, RectStr(s_ownMove.want).c_str(), s_ownMove.haveLogical ? RectStr(s_ownMove.logical).c_str() : "none");
+    }
+    return false;
+}
 
 LRESULT CALLBACK GuardProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     Event ev = Event::Tick; bool trigger = false, ownChanged = false;
@@ -339,10 +385,17 @@ LRESULT CALLBACK GuardProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 // ---- the guard thread ---------------------------------------------------------------------------------------------------------------
 BOOL CALLBACK SweepCb(HWND h, LPARAM);
+void CALLBACK ShowEventCb(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD);
 DWORD WINAPI GuardThread(void*) {
     uint64_t lastMetrics = 0;
+    // B19: a window shown after start-up is hidden at once (ShowEventCb), out of context: the callback runs on this thread inside
+    // PeekMessage below. A failure leaves the sweep as the only path.
+    if (!SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, nullptr, ShowEventCb, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNTHREAD))
+        LOGW("headless: SetWinEventHook(EVENT_OBJECT_SHOW) failed (%lu): the %u ms sweep is the only path for a window shown after start-up", GetLastError(), kSweepPolls * 4);
     for (unsigned n = 1;; ++n) {
-        Sleep(4);
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, 4, QS_ALLINPUT);   // the 4 ms poll, woken early by the hook's events
+        MSG msg;   // drained outside the lock: ShowEventCb takes it per window
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
         if (SweepDue(n)) EnumWindows(SweepCb, 0);   // windows no gate saw (SweepHides); outside s_cs, SweepCb locks per window
         Lock l;
         if (!s_haveWindow || !s_main) continue;
@@ -385,6 +438,23 @@ BOOL CALLBACK SweepCb(HWND h, LPARAM) {
         LOGW("headless: unguarded window %p visible at %s: hidden", (void*)h, RectStr(r).c_str()); CloakWindow(h, true); ShowWindowAsync(h, SW_HIDE);
     }
     return TRUE;
+}
+
+// The show-time hook (B19): the sweep's rule applied to the window just shown (ShowEventHides).
+void CALLBACK ShowEventCb(HWINEVENTHOOK, DWORD event, HWND h, LONG idObject, LONG idChild, DWORD, DWORD) {
+    if (event != EVENT_OBJECT_SHOW || !h) return;
+    const bool isWindow = idObject == OBJID_WINDOW && idChild == CHILDID_SELF;
+    if (!isWindow || !IsWindow(h)) return;
+    const bool topLevel = GetAncestor(h, GA_ROOT) == h;
+    DWORD pid = 0; GetWindowThreadProcessId(h, &pid);
+    const bool visible = IsWindowVisible(h) != 0, same = pid == GetCurrentProcessId();
+    if (!topLevel || !same) return;
+    const Rect r = WinRect(h);
+    Lock l;
+    if (ShowEventHides(isWindow, topLevel, same, visible, s_wins.count(h) != 0, r, s_targetKnown, s_t.m.rc)) {
+        if (Budget()) LOGW("headless: unguarded window %p shown at %s: hidden at show (winevent)", (void*)h, RectStr(r).c_str());
+        CloakWindow(h, true); ShowWindowAsync(h, SW_HIDE);
+    }
 }
 
 // Target resolved and the guard running; called at the first Direct3DCreate9 or the first game window, whichever comes first.

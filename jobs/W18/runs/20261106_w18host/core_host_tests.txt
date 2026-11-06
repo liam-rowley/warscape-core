@@ -1,0 +1,7 @@
+build.sh: /src/proxy/tests/null_game/build/proxy/null/d3d9.dll build c8935ee831e7-dirty sha256 72502291b0ff91f69f13eb63fa43ebfbd93694e5426d72312a91c9e7bf608501
+build.sh: core test test_display_guard
+  sweep: a DLL window after start-up hidden after 232 ms (sweep every 248 ms)
+  sim incident: 3 ms visible on a real monitor (poll 4 ms), cloaked 504 ms
+  sim worker-thread present: fixed ends on the target uncloaked; thread-id test still cloaked after 2000 ms
+test_display_guard: 328 passed, 0 failed
+build.sh: host tests passed (17 core, 1 game)

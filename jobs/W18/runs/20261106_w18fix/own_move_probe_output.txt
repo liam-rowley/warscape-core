@@ -1,0 +1,100 @@
+﻿=== unaware
+window context -1
+monitor \\.\DISPLAY10: physical (3839, 2160, 7679, 4320); as the window's context sees it (3839, 2160, 7679, 4320)
+monitor \\.\DISPLAY2: physical (-2560, 327, 0, 1767); as the window's context sees it (-2560, 327, -512, 1479)
+monitor \\.\DISPLAY1: physical (0, 0, 3840, 2160); as the window's context sees it (0, 0, 2560, 1440)
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(3839, 2160, 7679, 4320)]; mapped (3839, 2160, 7679, 4320); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(3940, 2217, 5861, 3298)]; mapped (3940, 2217, 5861, 3298); largest edge difference 0
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(4172, 2371, 4842, 2937)]; mapped (4172, 2371, 4842, 2937); largest edge difference 0
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-2560, 327, -512, 1479)]; mapped (-2560, 327, -512, 1479); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 385, -1178, 1106); messages [(-2479, 373, -1454, 950)]; mapped (-2479, 373, -1454, 949); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-2294, 496, -1758, 949)]; mapped (-2294, 496, -1758, 949); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 2560, 1440)]; mapped (0, 0, 2560, 1440); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2023, 1139); messages [(67, 38, 1348, 759)]; mapped (67, 38, 1348, 759); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 212, 1004, 778); messages [(222, 141, 669, 518)]; mapped (222, 141, 669, 518); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 2560, 1440)]; mapped (0, 0, 2560, 1440); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2023, 1139); messages [(67, 38, 1348, 759)]; mapped (67, 38, 1348, 759); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 212, 1004, 778); messages [(222, 141, 669, 518)]; mapped (222, 141, 669, 518); largest edge difference 0
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-2560, 327, -512, 1479)]; mapped (-2560, 327, -512, 1479); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 385, -1178, 1106); messages [(-2479, 373, -1454, 950)]; mapped (-2479, 373, -1454, 949); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-2294, 496, -1758, 949)]; mapped (-2294, 496, -1758, 949); largest edge difference 0
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(3839, 2160, 7679, 4320)]; mapped (3839, 2160, 7679, 4320); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(3940, 2217, 5861, 3298)]; mapped (3940, 2217, 5861, 3298); largest edge difference 0
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(4172, 2371, 4842, 2937)]; mapped (4172, 2371, 4842, 2937); largest edge difference 0
+largest edge difference over all moves: 1
+=== system
+window context -2
+monitor \\.\DISPLAY10: physical (3839, 2160, 7679, 4320); as the window's context sees it (5759, 3240, 11519, 6480)
+monitor \\.\DISPLAY2: physical (-2560, 327, 0, 1767); as the window's context sees it (-3840, 491, -768, 2219)
+monitor \\.\DISPLAY1: physical (0, 0, 3840, 2160); as the window's context sees it (0, 0, 3840, 2160)
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(5759, 3240, 11519, 6480)]; mapped (5759, 3240, 11519, 6480); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(5911, 3326, 8793, 4948)]; mapped (5911, 3326, 8792, 4947); largest edge difference 1
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(6259, 3557, 7264, 4406)]; mapped (6259, 3556, 7263, 4406); largest edge difference 1
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-3840, 491, -768, 2219)]; mapped (-3840, 491, -768, 2219); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 384, -1178, 1105); messages [(-3719, 559, -2182, 1424)]; mapped (-3719, 559, -2182, 1425); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-3440, 744, -2636, 1423)]; mapped (-3440, 744, -2636, 1423); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 3840, 2160)]; mapped (0, 0, 3840, 2160); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2022, 1138); messages [(101, 57, 2022, 1138)]; mapped (101, 57, 2022, 1138); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 211, 1003, 777); messages [(333, 211, 1003, 777)]; mapped (333, 211, 1003, 777); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 3840, 2160)]; mapped (0, 0, 3840, 2160); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2022, 1138); messages [(101, 57, 2022, 1138)]; mapped (101, 57, 2022, 1138); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 211, 1003, 777); messages [(333, 211, 1003, 777)]; mapped (333, 211, 1003, 777); largest edge difference 0
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-3840, 491, -768, 2219)]; mapped (-3840, 491, -768, 2219); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 384, -1178, 1105); messages [(-3719, 559, -2182, 1424)]; mapped (-3719, 559, -2182, 1425); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-3440, 744, -2636, 1423)]; mapped (-3440, 744, -2636, 1423); largest edge difference 0
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(5759, 3240, 11519, 6480)]; mapped (5759, 3240, 11519, 6480); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(5911, 3326, 8793, 4948)]; mapped (5911, 3326, 8792, 4947); largest edge difference 1
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(6259, 3557, 7264, 4406)]; mapped (6259, 3556, 7263, 4406); largest edge difference 1
+largest edge difference over all moves: 1
+=== unaware cloaked
+window context -1
+monitor \\.\DISPLAY10: physical (3839, 2160, 7679, 4320); as the window's context sees it (3839, 2160, 7679, 4320)
+monitor \\.\DISPLAY2: physical (-2560, 327, 0, 1767); as the window's context sees it (-2560, 327, -512, 1479)
+monitor \\.\DISPLAY1: physical (0, 0, 3840, 2160); as the window's context sees it (0, 0, 2560, 1440)
+cloak hr 0
+visible flag 1
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(3839, 2160, 7679, 4320)]; mapped (3839, 2160, 7679, 4320); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(3940, 2217, 5861, 3298)]; mapped (3940, 2217, 5861, 3298); largest edge difference 0
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(4172, 2371, 4842, 2937)]; mapped (4172, 2371, 4842, 2937); largest edge difference 0
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-2560, 327, -512, 1479)]; mapped (-2560, 327, -512, 1479); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 385, -1178, 1106); messages [(-2479, 373, -1454, 950)]; mapped (-2479, 373, -1454, 949); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-2294, 496, -1758, 949)]; mapped (-2294, 496, -1758, 949); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 2560, 1440)]; mapped (0, 0, 2560, 1440); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2023, 1139); messages [(67, 38, 1348, 759)]; mapped (67, 38, 1348, 759); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 212, 1004, 778); messages [(222, 141, 669, 518)]; mapped (222, 141, 669, 518); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 2560, 1440)]; mapped (0, 0, 2560, 1440); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2023, 1139); messages [(67, 38, 1348, 759)]; mapped (67, 38, 1348, 759); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 212, 1004, 778); messages [(222, 141, 669, 518)]; mapped (222, 141, 669, 518); largest edge difference 0
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-2560, 327, -512, 1479)]; mapped (-2560, 327, -512, 1479); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 385, -1178, 1106); messages [(-2479, 373, -1454, 950)]; mapped (-2479, 373, -1454, 949); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-2294, 496, -1758, 949)]; mapped (-2294, 496, -1758, 949); largest edge difference 0
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(3839, 2160, 7679, 4320)]; mapped (3839, 2160, 7679, 4320); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(3940, 2217, 5861, 3298)]; mapped (3940, 2217, 5861, 3298); largest edge difference 0
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(4172, 2371, 4842, 2937)]; mapped (4172, 2371, 4842, 2937); largest edge difference 0
+largest edge difference over all moves: 1
+=== system cloaked
+window context -2
+monitor \\.\DISPLAY10: physical (3839, 2160, 7679, 4320); as the window's context sees it (5759, 3240, 11519, 6480)
+monitor \\.\DISPLAY2: physical (-2560, 327, 0, 1767); as the window's context sees it (-3840, 491, -768, 2219)
+monitor \\.\DISPLAY1: physical (0, 0, 3840, 2160); as the window's context sees it (0, 0, 3840, 2160)
+cloak hr 0
+visible flag 1
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(5759, 3240, 11519, 6480)]; mapped (5759, 3240, 11519, 6480); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(5911, 3326, 8793, 4948)]; mapped (5911, 3326, 8792, 4947); largest edge difference 1
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(6259, 3557, 7264, 4406)]; mapped (6259, 3556, 7263, 4406); largest edge difference 1
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-3840, 491, -768, 2219)]; mapped (-3840, 491, -768, 2219); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 384, -1178, 1105); messages [(-3719, 559, -2182, 1424)]; mapped (-3719, 559, -2182, 1425); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-3440, 744, -2636, 1423)]; mapped (-3440, 744, -2636, 1423); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 3840, 2160)]; mapped (0, 0, 3840, 2160); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2022, 1138); messages [(101, 57, 2022, 1138)]; mapped (101, 57, 2022, 1138); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 211, 1003, 777); messages [(333, 211, 1003, 777)]; mapped (333, 211, 1003, 777); largest edge difference 0
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 3840, 2160)]; mapped (0, 0, 3840, 2160); largest edge difference 0
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2022, 1138); messages [(101, 57, 2022, 1138)]; mapped (101, 57, 2022, 1138); largest edge difference 0
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 211, 1003, 777); messages [(333, 211, 1003, 777)]; mapped (333, 211, 1003, 777); largest edge difference 0
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-3840, 491, -768, 2219)]; mapped (-3840, 491, -768, 2219); largest edge difference 0
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 384, -1178, 1105); messages [(-3719, 559, -2182, 1424)]; mapped (-3719, 559, -2182, 1425); largest edge difference 1
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-3440, 744, -2636, 1423)]; mapped (-3440, 744, -2636, 1423); largest edge difference 0
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(5759, 3240, 11519, 6480)]; mapped (5759, 3240, 11519, 6480); largest edge difference 0
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(5911, 3326, 8793, 4948)]; mapped (5911, 3326, 8792, 4947); largest edge difference 1
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(6259, 3557, 7264, 4406)]; mapped (6259, 3556, 7263, 4406); largest edge difference 1
+largest edge difference over all moves: 1

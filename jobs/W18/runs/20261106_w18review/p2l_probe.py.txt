@@ -1,0 +1,34 @@
+"""Does PhysicalToLogicalPointForPerMonitorDPI accept a point outside the window? (W18 review, LogicalRect)
+Creates one never-shown window with a DPI-unaware thread context, asks from a per-monitor thread, destroys it."""
+import ctypes
+from ctypes import wintypes as w
+
+u = ctypes.WinDLL("user32", use_last_error=True)
+u.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+u.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+u.GetWindowDpiAwarenessContext.restype = ctypes.c_void_p
+u.GetWindowDpiAwarenessContext.argtypes = [w.HWND]
+u.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+u.CreateWindowExW.restype = w.HWND
+u.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                              w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
+u.PhysicalToLogicalPointForPerMonitorDPI.argtypes = [w.HWND, ctypes.POINTER(w.POINT)]
+u.GetWindowRect.argtypes = [w.HWND, ctypes.POINTER(w.RECT)]
+u.GetDpiForWindow.argtypes = [w.HWND]
+u.DestroyWindow.argtypes = [w.HWND]
+UNAWARE, PMV2 = ctypes.c_void_p(-1), ctypes.c_void_p(-4)
+
+prev = u.SetThreadDpiAwarenessContext(UNAWARE)
+h = u.CreateWindowExW(0, "Static", "w18probe", 0x80000000, 100, 100, 200, 200, None, None, None, None)  # WS_POPUP, not visible
+print("hwnd", h, "awareness", u.GetAwarenessFromDpiAwarenessContext(u.GetWindowDpiAwarenessContext(h)), "(0 = unaware)")
+u.SetThreadDpiAwarenessContext(PMV2)
+r = w.RECT(); u.GetWindowRect(h, ctypes.byref(r))
+print("physical rect", r.left, r.top, r.right, r.bottom, "dpi for window", u.GetDpiForWindow(h))
+cx, cy = (r.left + r.right) // 2, (r.top + r.bottom) // 2
+for name, x, y in [("inside", cx, cy), ("top-left corner", r.left, r.top), ("bottom-right corner", r.right, r.bottom),
+                   ("outside, near", r.right + 50, r.bottom + 50), ("outside, far (a target elsewhere)", 7000, 3000)]:
+    p = w.POINT(x, y)
+    ctypes.set_last_error(0)
+    ok = u.PhysicalToLogicalPointForPerMonitorDPI(h, ctypes.byref(p))
+    print(f"{name:36} ({x},{y}) -> ok={ok} point=({p.x},{p.y}) err={ctypes.get_last_error()}")
+u.DestroyWindow(h)
