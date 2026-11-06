@@ -2,7 +2,7 @@
 
 W45 adds the half of C41 between a finding and a change: a proposals registry, `wsc proposals draft|check|ask|answer|close`, a `decide/` branch kind only the owner merges, and a guard on every branch kind so that nothing but `decide/` can write an answer. `wsc audit` now reads the rows, suppressing declined findings and re-measuring applied ones, and `doc_caps` leaves out the job folders. The dry run went end to end: the answers pass `policy` on `decide/`, and the same diff is refused on `plan/`. Branch `job/W45`, session 8c158f7a.
 
-Usage: 105 tool calls; models: opus; 1 session, counted by hand, about, brief 30 and build 75, 2026-11-06
+Usage: 130 tool calls; models: opus; 2 sessions, counted by hand, about, brief 30, build 75 and fix 25, 2026-11-06
 
 ## What was built
 - `schemas/proposals.schema.json`, declared in `wsc.toml` with one file per row. The registry stays empty here: W47's session raises the first real rows.
@@ -98,3 +98,19 @@ Report question 3 of W44 (`both_sides_min`) is untouched, as the brief says.
 
 ## What W47's brief must call, and what a game declares
 W47: `wsc audit --record` first, so that `draft` reads a record from after this job (the 2026-11-05 record still holds the six `doc_cap:jobs/...` findings), then `wsc proposals close`, `draft`, fill each, `answer --auto`. A game: `docs/PROPOSALS.md`, "What a game declares". A pin bump to this tag carries no acceptance run for it: no DLL or harness input changed.
+
+## Fix round 1
+Fixed on `job/W45`, with origin/main merged first (`ff5f99f`, then `27506b4`, the plan rows W124 to W126). Round 1 had no blockers, and all four should-fix items are done.
+
+1. **Should-fix 1, tag stripped on `plan/`: `96b761b`.** On an existing row, `plan/` may add a `tag`, but may not change or remove one, or change `class`. The check sits before `auto_applied`. Five tests: strip, change, relabel, adding is still allowed, and closing as `gone` keeps the tag.
+2. **Should-fix 2, the registry outside `[storage] dir`: `8519300`, `e624dcc`.** `load_config` now refuses that config, so the failure is closed. One step beyond the finding: `wsc reg migrate proposals --to jsonl` would have written exactly that config and left every verb refusing to load, so it is refused too. `e624dcc` corrects the `test_audit.py` fixture, which declared the registry without the storage; the first full gates run caught it.
+3. **Should-fix 3, an earlier ANSWERS file rewritten: `4d3c82c`.** The guard refuses a change to or deletion of `record` when the base has the file, and `answer` refuses before it writes anything. Both name the next branch through `next_decide` (`decide/<date>-2`, and `-3` after that). Four tests.
+4. **Should-fix 4, `docs/AUDIT_METRICS.md`: `44987ac`.** `decide` is in the subject kinds.
+
+The rule changes are in the `warscape/policy.py` docstring and `docs/PROPOSALS.md`. `docs/CONSUMING.md` is untouched, still 30697 bytes.
+
+**Left, and the reviewer should look at it: should-fix 1 has a second route.** The fix covers an existing row, as the finding asks. One `plan/` branch can still close a tagged row as `gone` and add a new untagged row for the same finding, already accepted by `auto_apply`: with the test module's `AUTO` settings the judge gives `[]` (run this round, not committed as a test). The tag does not stop this, because the new row is a different file. Closing it means reading the base's other rows, and `proposal_problems` has only per-path reads, so it is more than this fix. It is latent while `auto_apply` is empty and is close to W125 (a close on no evidence), which needs the route added or its own row before anyone fills that list. A `job/` branch cannot change W125, so it is left to a `plan/` branch.
+
+**Left as filed:** the review's later items are W124 to W126, and `max_questions` in no doc is unchanged. Report question 5 stays Liam's.
+
+**Evidence.** `python3 wsc.py gates` on this Windows PC at `e624dcc`, merged with origin/main `27506b4`, 2026-11-06: 15 ok, 1 warn, 0 failed, 1439 host tests passed, 5 skipped, 660.7 s. The warn is the known skips. origin/main was checked again after that run and had not moved. `python3 wsc.py policy --branch job/W45 --base origin/main` refuses on only the two expected lines, the missing merge verdict and the done row. The mutation check was not repeated for the new guards.
