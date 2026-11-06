@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Kit, install, uninstall and check the proxy on the PC with sha-checked copies and a byte-exact uninstall.
 
-purpose: build a proxy kit (built DLL, default config, pinned DXVK) or a harness kit (the watcher, its adapter and profiles; manifest with sha256 and unique staged names; both carry a sha-checked exe_identity.json), install the proxy into the game folder with sha-checked copies (refused when the exe is not the vanilla build the identity names), uninstall it back to the pre-install snapshot, edit the installed config, check the exe sha after each of them, snapshot and diff a game folder; status reports the exe verdict, any .git in or above the game folder, files no install owns (J18) and, with nothing installed, a stray config file or mod folder (W25); install, uninstall, set and sync-lua take the game lock through job.sh and write the ini and install.json atomically (W25)
-usage: pc_deploy.py sync-lua --game G --state S [--dry-run] [LOCK] | kit [--what proxy|harness] [--out DIR] | send --kit DIR --state S | snapshot --game G --out F | install --kit DIR --game G --state S [--move-stray] [LOCK] | uninstall --game G --state S [LOCK] | set --game G [--state S] [LOCK] key=value... | status --game G --state S | diff A B   (LOCK = [--assume-closed] [--owner O] [--session ID] [--job-sh FILE])
+purpose: build a proxy kit (built DLL, default config, pinned DXVK) or a harness kit (the watcher, its adapter and profiles; manifest with sha256 and unique staged names; both carry a sha-checked exe_identity.json), install the proxy into the game folder with sha-checked copies (refused when the exe is not the vanilla build the identity names), uninstall it back to the pre-install snapshot, edit the installed config, check the exe sha after each of them, snapshot and diff a game folder; status reports the exe verdict, any .git in or above the game folder, files no install owns (J18) and, with nothing installed, a stray config file or mod folder (W25); install, uninstall, set and sync-lua take the game lock through job.sh and write the ini and install.json atomically (W25); set and uninstall refuse while a watcher profile restore is pending (B39, W94)
+usage: pc_deploy.py sync-lua --game G --state S [--dry-run] [LOCK] | kit [--what proxy|harness] [--out DIR] | send --kit DIR --state S | snapshot --game G --out F | install --kit DIR --game G --state S [--move-stray] [LOCK] | uninstall --game G --state S [--wait-restore N] [LOCK] | set --game G [--state S] [LOCK] key=value... | status --game G --state S | diff A B   (LOCK = [--assume-closed] [--owner O] [--session ID] [--job-sh FILE])
 when: every time built proxy or harness files go to the game folder or the watcher (never copy them by hand); runs in Git Bash on the PC from the repo checkout: `kit` builds into build/kits, `send` puts a kit sha-checked under <state>/kits/<id> (for install and the watcher's `update kit=<id>`); install/uninstall/set/sync-lua take (or use the caller's) game lock with --session or $WSC_SESSION_ID (exit 2 when another holds it), then ask the running watcher (<state>/watcher/watcher.status), else tasklist, whether a game of either title is running (--assume-closed skips only that question)
 not-a-verb: a deploy script with its own subcommands that the PC's installer also runs from a kit folder (a copy travels in every kit), so it stays stdlib only and outside the wsc CLI (whether it becomes a verb: J20 report)
 """
@@ -882,13 +882,18 @@ def _install(kit, game, state, man, ident, lk, move_stray):
     return rec
 
 
-def uninstall(game, state, assume_closed=False, owner=None, session=None, job_sh=None):
+def uninstall(game, state, assume_closed=False, owner=None, session=None, job_sh=None, wait_restore=30, sleep=time.sleep):
+    """W94: waits for (--wait-restore, default 30 s) or refuses on a pending watcher profile restore first (a restore that runs after the
+    uninstall puts the config files, the mod ini included, back), then the game lock, a second look at the restore with no wait (a profile
+    applied meanwhile), then the running check (--assume-closed skips only that)."""
     game, state = Path(game), Path(state)
     rec_path = state / STATE_FILE
     if not rec_path.exists():
         raise SystemExit(f'pc_deploy uninstall: no {STATE_FILE} in {state}: nothing installed by this tool')
     rec = json.loads(rec_path.read_text(encoding='utf-8'))
+    wait_for_restore(state, wait_restore, sleep, 'uninstall')
     with game_lock(state, owner, session, 'uninstall', job_sh):
+        wait_for_restore(state, 0, sleep, 'uninstall', quiet=True)
         require_closed(game, rec, assume_closed, state)
         return _uninstall(game, state, rec, rec_path)
 
@@ -977,7 +982,9 @@ def resolve_keys(text, sets):
 
 def pending_restore(state):
     """The watcher's pending profile restore (<state>/watcher/profiles/_active.json) as a dict, or None. The watcher removes the file once the
-    game is closed and the lock released, expired or changed owner; a restore that runs after `set` puts the old keys back (B39)."""
+    game is closed and the lock released, expired or changed owner; a restore that runs after `set` or `uninstall` puts the old keys back (B39,
+    W94). The watcher never writes `null` or `{}` (it removes the file); those read as none, as the watcher's Get-Active and a game's
+    profile_active do. A file that cannot be read counts as pending."""
     p = Path(state) / 'watcher' / 'profiles' / '_active.json'
     if not p.exists():
         return None
@@ -985,18 +992,21 @@ def pending_restore(state):
         d = json.loads(p.read_bytes().decode('utf-8-sig'))
     except (OSError, ValueError):
         return {'name': '?', 'owner': '?'}
+    if d is None or d == {}:
+        return None
     return d if isinstance(d, dict) else {'name': '?', 'owner': '?'}
 
 
-def wait_for_restore(state, wait_s, sleep=time.sleep):
-    """B39: with a usable watcher, wait up to wait_s (once a second) for a pending profile restore to finish; refuse (SystemExit) while it
+def wait_for_restore(state, wait_s, sleep=time.sleep, verb='set', quiet=False):
+    """B39 (W94: for `set` and `uninstall`; `verb` names the caller in the text, quiet drops the cannot-be-seen line): with a usable watcher, wait up to wait_s (once a second) for a pending profile restore to finish; refuse (SystemExit) while it
     is still there. No state, no watcher folder or an unusable watcher: print one line that a pending restore cannot be seen."""
     if state is None:
-        print('pc_deploy set: no --state, so a pending watcher profile restore cannot be seen (pass --state to have set wait for it)')
+        print(f'pc_deploy {verb}: no --state, so a pending watcher profile restore cannot be seen (pass --state to have {verb} wait for it)')
         return
     why, st = watcher_view(state)
     if st is None:
-        print(f'pc_deploy set: {why or "no watcher folder under the state"}: a pending watcher profile restore cannot be seen')
+        if not quiet:
+            print(f'pc_deploy {verb}: {why or "no watcher folder under the state"}: a pending watcher profile restore cannot be seen')
         return
     act = pending_restore(state)
     waited = 0
@@ -1008,11 +1018,14 @@ def wait_for_restore(state, wait_s, sleep=time.sleep):
         return
     lock = st.get('lock')
     running = [str(p.get('image')) for p in st.get('processes', [])]
+    after = ('this set would put the old keys back' if verb == 'set' else
+             f'this {verb} would put the config files back, the mod ini included, into the game folder')
+    way_out = '' if verb == 'set' else f' Release the lock that applied it, wait until `job.sh status` shows profile_active null, then run {verb} again.'
     raise SystemExit(
-        f"pc_deploy set: refused, the watcher still has profile '{act.get('name')}' (owner {act.get('owner')}) to restore, and a restore that runs after "
-        f"this set would put the old keys back; the lock is {'held by ' + str(lock.get('owner')) if isinstance(lock, dict) else 'not held'}, the game is "
+        f"pc_deploy {verb}: refused, the watcher still has profile '{act.get('name')}' (owner {act.get('owner')}) to restore, and a restore that runs after "
+        f"{after}; the lock is {'held by ' + str(lock.get('owner')) if isinstance(lock, dict) else 'not held'}, the game is "
         f"{'running (' + ', '.join(running) + ')' if running else 'not running'}. The restore waits for the game to close and the lock to be released "
-        f"(job.sh unlock <owner>); waited {waited} s (--wait-restore N to wait longer). Nothing was written.")
+        f"(job.sh unlock <owner>); waited {waited} s (--wait-restore N to wait longer).{way_out} Nothing was {'written' if verb == 'set' else 'moved'}.")
 
 
 def set_keys(game, pairs, config_file, state=None, wait_restore=30, sleep=time.sleep, assume_closed=False, owner=None, session=None, job_sh=None):
@@ -1150,7 +1163,7 @@ def main():
         q.add_argument('--job-sh', help='the job.sh to take the lock with (default: beside this script, then the repo harness)')
     i = sub.add_parser('install'); i.add_argument('--kit', required=True); i.add_argument('--game', required=True); i.add_argument('--state', required=True); lock_args(i)
     i.add_argument('--move-stray', action='store_true', help='nothing installed but a stray config file or mod folder: move it to <state>/_to_delete/stray_<stamp>/ first')
-    u = sub.add_parser('uninstall'); u.add_argument('--game', required=True); u.add_argument('--state', required=True); lock_args(u)
+    u = sub.add_parser('uninstall'); u.add_argument('--game', required=True); u.add_argument('--state', required=True); u.add_argument('--wait-restore', type=int, default=30, help='seconds to wait for a pending watcher profile restore before refusing (0 refuses at once; default 30)'); lock_args(u)
     c = sub.add_parser('set'); c.add_argument('--game', required=True); c.add_argument('--state'); c.add_argument('--config-file', help="the proxy's config file name (default: the identity's config_file)"); c.add_argument('--wait-restore', type=int, default=30, help='seconds to wait for a pending watcher profile restore before refusing (0 refuses at once; default 30)'); lock_args(c); c.add_argument('pairs', nargs='+')
     st = sub.add_parser('status'); st.add_argument('--game', required=True); st.add_argument('--state', required=True)
     sl = sub.add_parser('sync-lua'); sl.add_argument('--game', required=True); sl.add_argument('--state', required=True); lock_args(sl); sl.add_argument('--dry-run', action='store_true')
@@ -1179,7 +1192,7 @@ def run(a):
     elif a.cmd == 'install':
         install(a.kit, a.game, a.state, a.assume_closed, move_stray=a.move_stray, **lk)
     elif a.cmd == 'uninstall':
-        return 0 if uninstall(a.game, a.state, a.assume_closed, **lk) else 1
+        return 0 if uninstall(a.game, a.state, a.assume_closed, wait_restore=a.wait_restore, **lk) else 1
     elif a.cmd == 'set':
         return set_keys(a.game, a.pairs, a.config_file, a.state, a.wait_restore, assume_closed=a.assume_closed, **lk)
     elif a.cmd == 'status':

@@ -1,0 +1,11 @@
+{
+  "id": "W129",
+  "description": "**`pc_deploy uninstall` still goes ahead with a stopped watcher and a pending restore**: `wait_for_restore` in `proxy/tools/pc_deploy.py` returns on an unusable watcher before reading `_active.json`, so a stale heartbeat prints \"cannot be seen\" with the file there to read, and the next watcher start restores the mod ini: a stray again. Decide whether to refuse there and what the way out is when the watcher will not start; W94 decision 4 only reasoned about a host with no watcher. Also in this area: refuse at once when the caller holds the lock (the restore waits for that lock, so the 30 s wait cannot help); `tests.test_pc_deploy` needs bash, but only `harness-windows` sets `WSC_REQUIRE_BASH` and it does not run that module, so a lost bash is only a warning on `gates (windows-latest)`; napoleon `play.py` `profile_active` reads an unreadable `_active.json` as none where the core says pending, which leaves the packs out and the proxy in (the game's to change). From W94 review round 1, 2026-11-06.",
+  "title": "`pc_deploy uninstall` with a stopped watcher and a pending restore",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
