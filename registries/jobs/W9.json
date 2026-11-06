@@ -6,6 +6,7 @@
   "status": "queued",
   "model": "sonnet",
   "needs_pc": true,
+  "semver": "minor",
   "depends_on": [
     "W8",
     "W10"

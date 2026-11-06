@@ -479,6 +479,15 @@ class Preflight(unittest.TestCase):
         self.assertEqual(len(bad), 1)
         self.assertIn('never restarted', bad[0])
 
+    def test_failing_fixture_crlf_in_the_working_tree_is_the_same_watcher_as_lf_in_git(self):
+        # .gitattributes: *.ps1 is CRLF on disk and in kits, LF in the blob git show returns; comparing raw bytes refused every correct install
+        self.assertEqual(acc.watcher_problems(b'a\r\nb\r\n', b'a\nb\n', {}), [])
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'watcher' / 'src' / 'watcher.ps1'
+            p.parent.mkdir(parents=True)
+            p.write_bytes(b'a\r\nb\r\n')
+            self.assertEqual(acc.installed_watcher_bytes({'state_dir': d}), b'a\nb\n')
+
     def test_missing_files_refuse(self):
         self.assertTrue(acc.watcher_problems(None, b'x', {}))
         self.assertTrue(acc.watcher_problems(b'x', None, {}))

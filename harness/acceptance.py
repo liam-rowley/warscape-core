@@ -446,12 +446,17 @@ class PcEnv:
                 'launches': list(self.pc.launches)}
 
 
+def lf(b):
+    """watcher.ps1 is CRLF in a working tree and in a kit built from one, LF in git (.gitattributes `*.ps1 eol=crlf`): its identity is the content with LF endings."""
+    return None if b is None else b.replace(b'\r\n', b'\n')
+
+
 def installed_watcher_bytes(adapter):
     """The installed watcher.ps1, opened read-only (W9, decision 9); None when missing. Nothing here writes, renames or locks it."""
     p = Path(adapter['state_dir']) / adapter.get('watcher_subdir', 'watcher') / 'src' / 'watcher.ps1'
     try:
         with open(p, 'rb') as f:
-            return f.read()
+            return lf(f.read())
     except OSError:
         return None
 
@@ -459,7 +464,7 @@ def installed_watcher_bytes(adapter):
 def kit_watcher_bytes():
     """harness/watcher.ps1 as committed at the core's HEAD (in a game repo: the pinned commit), so a dirty working copy is irrelevant; None if git cannot say."""
     r = subprocess.run(['git', '-C', str(HERE), 'show', 'HEAD:./watcher.ps1'], capture_output=True)
-    return r.stdout if r.returncode == 0 and r.stdout else None
+    return lf(r.stdout) if r.returncode == 0 and r.stdout else None
 
 
 VERSION_RX = re.compile(rb"\$Version\s*=\s*['\"]([^'\"]+)['\"]")
@@ -468,6 +473,7 @@ KIT_FIX = 'send a harness kit (pc_deploy.py kit --what harness, send) and run jo
 
 def watcher_problems(installed, kit, status):
     """The watcher is its bytes (H10): the installed watcher.ps1 must equal the core's, and the running watcher must be the installed one. Problems as text."""
+    installed, kit = lf(installed), lf(kit)
     if installed is None:
         return [f'the installed watcher.ps1 cannot be read (not installed under <state_dir>/<watcher_subdir>/src): {KIT_FIX}']
     if kit is None:
