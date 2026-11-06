@@ -1,0 +1,12 @@
+{
+  "id": "W76",
+  "description": "**`build.sh` small guards after W24**: (a) `proxy/tools/build.sh` honours `WSP_SOURCES` on any run, so an exported value on a native build skips `build_id.py --sources` (the tracked-source refusal and the list); accept it only inside the `--docker` container (a marker `docker run` sets); (b) a host test of the `WSP_TOOLCHAIN=any` branch of `toolchain_check` (a stub `toolchain.py` that exits 2: the id gains `-dirty` once and the build goes on; without the variable, exit 2); (c) `build_id.py --sources` reads the core sources folder from `layout.proxy_src()` while the adapter honours `--root`: take both from `--root` Why: none bites today (CI and `--docker` never set the variable by hand; W24 report deviation 12 names (b) untested); in the next job that changes `build.sh` anyway (a build-id input, so not alone) Raised: W24 review round 1 Later 1 to 3, 2026-11-04",
+  "title": "`build.sh` small guards after W24",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B86",
+  "area": "core"
+}

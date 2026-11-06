@@ -1,0 +1,12 @@
+{
+  "id": "W77",
+  "description": "**Napoleon follow-ups of W26** (napoleon-remastered, not the core): (a) `tools/verbs/setup.py` calls `warscape.worktrees.report(root, rows, branches)` and prints its lines as warnings (dead worktree registrations, merged worktrees, a `.git` above the clone); (b) `wsc.toml` `[jobs] pc_state` set to the adapter's PC state folder, so a cloud session is not handed a `needs_pc` build; (c) its CLAUDE.md \"pick up the next job\" line says `jobs next` now claims the branch (no \"push early\") Why: the core ships the function, the key and the claim; the wiring is the game's (W26 decisions 7 and 10) Raised: W26 report, 2026-11-04",
+  "title": "Napoleon follow-ups of W26",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B87",
+  "area": "core"
+}

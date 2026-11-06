@@ -1,0 +1,12 @@
+{
+  "id": "W96",
+  "description": "**`ci.changed_files` must list both halves of a rename**: `warscape/ci.py` runs `git diff --name-only` without `--no-renames`, so a code file moved into `docs/` or `jobs/` lists only its new path; add the flag (`warscape/policy.py` already does) and a test on a real repository Why: a branch whose only code change is such a move skips `gates (windows-latest)`, and the same gap skips `proxy` and `harness`; ubuntu and the merge's run on `main` still catch it Raised: W42 review round 1 Later 1, 2026-11-05",
+  "title": "`ci.changed_files` must list both halves of a rename",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B107",
+  "area": "core"
+}

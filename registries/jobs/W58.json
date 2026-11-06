@@ -1,0 +1,12 @@
+{
+  "id": "W58",
+  "description": "**A kit role for loose `data\\` files** owned by the install record (`pc_deploy.py`) Why: the loose-override probe stopped because kits place files only at fixed destinations and nothing else may write into `data\\` (napoleon J9, fact `napoleon.files.loose_override` still open) Raised: napoleon J9 report, 2026-11-01",
+  "title": "A kit role for loose `data\\` files",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B42",
+  "area": "core"
+}

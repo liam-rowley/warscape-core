@@ -1,0 +1,12 @@
+{
+  "id": "W85",
+  "description": "**Rule A judges a late round commit against the newest round**: `warscape/policy.py` `round_problems`: a round 1 session that wrote `merge after fixes` can push code after round 2's `merge` and rule A says nothing, even at `error`, because the commit is attributed to round 1, whose verdict is not `merge`; judge such a commit by the newest round (steps R1 `merge after fixes`, R2 `merge`, R1 code give `([], [])`) Why: `docs/REVIEW.md` says such code is refused; it predates W40, and changing what rule A attributes was outside that brief Raised: W40 report open question 2; W40 review Later 2, 2026-11-05",
+  "title": "Rule A judges a late round commit against the newest round",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B95",
+  "area": "core"
+}

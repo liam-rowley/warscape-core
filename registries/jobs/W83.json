@@ -1,0 +1,12 @@
+{
+  "id": "W83",
+  "description": "**The null adapters use designated initialisers**: `proxy/tests/null_game/proxy/null/adapter.cpp` and the no-gesture copy stay positional and say the form is C++20, while `docs/CONSUMING.md` says it compiles under the DLL's `-std=c++17` and the `GameAdapter` size assert tells people to use it; switching also changes CI's `sed 's/, &kGesture };/ };/'` guard Why: the core's own adapters should show the rule, and the two texts disagree Raised: W34 report; W34 review Later 4, 2026-11-05",
+  "title": "The null adapters use designated initialisers",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B93",
+  "area": "core"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "W80",
+  "description": "**A core-owned test hook, so CI installs one**: the core has no hook it installs at a site without a game's adapter, so `null.dummy_hook` is checked by the plan and nothing detours it; add a core-owned hook behind a null key and have launch 12 of `proxy/tools/build.sh` smoke call through it Why: C5's hook half stays open after W34: no CI run sees a hook install (W34 brief open question 5 expected this row) Raised: W34 review Later 1, 2026-11-05",
+  "title": "A core-owned test hook, so CI installs one",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B90",
+  "area": "core"
+}

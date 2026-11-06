@@ -1,0 +1,12 @@
+{
+  "id": "W56",
+  "description": "**Pack reader beyond PFH0** (`proxy/src/pack.h`, `proxy/tools/pack_list.py`): PFH2 and PFH3 headers (Shogun 2) behind one reader Why: both readers refuse any magic but `PFH0` Raised: planning chat, 2026-11-01",
+  "title": "Pack reader beyond PFH0",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B37",
+  "area": "core"
+}

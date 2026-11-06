@@ -1,0 +1,12 @@
+{
+  "id": "W59",
+  "description": "**`ci_failures.py` as a core verb** (`wsc ci failures`): the run fetch, the first-error finder and the table renderer move here; the failure classes and guard texts become a data file named in `wsc.toml` `[ci]` Why: left in napoleon by J62: its `CLASSES` and `GUARDS` are Python dict comprehensions full of napoleon run ids and prose, so moving it needs a data migration first, and nothing else consumes it yet Raised: napoleon J62, 2026-11-02",
+  "title": "`ci_failures.py` as a core verb",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B44",
+  "area": "core"
+}

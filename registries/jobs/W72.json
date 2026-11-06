@@ -1,0 +1,12 @@
+{
+  "id": "W72",
+  "description": "**`wsc jobs view --serve` hardening**: `warscape/jobq.py` (`JobServer`, `branch_rows`, `start_session`): (a) one cached snapshot per tick and a lock around `snapshot()`, so the page GET and the autopilot do not `git fetch` into the same refs at once; (b) the same-name guard counts sessions in any state started in the last hour, not only `working`; (c) confirm the 8-hex id regex of `start_session` against real `claude --bg` output; (d) strip `CLAUDE_CODE_*` in `_claude` when served from an agent; (e) a Stop button; (f) `--prune` scoped to the job refspec Why: each is a latent failure napoleon J39, J52 and J56 reviewers named and left; in the next job that changes `jobq.py` anyway Raised: napoleon J39 review Later 2 to 6; J52 Later 3; J56 Later 2, 2026-11-04",
+  "title": "`wsc jobs view --serve` hardening",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B75",
+  "area": "core"
+}

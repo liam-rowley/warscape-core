@@ -1,0 +1,12 @@
+{
+  "id": "W67",
+  "description": "**Capture: the s_rec gate into the pure state machine** (`proxy/src/capture.cpp` `CapturePresent`): move the \"a Present with `s_rec` clear acts only on `start`\" rule (W19 review round 1) into `capture.h` (`CapOnPresent` taking the caller's `rec`) and add a second Present thread to `test_capture.cpp`'s two-thread stress case; also give an Abandoned capture whose recording thread never presents again a way out (today every later capture is refused until the game restarts) Why: the race W19's review fixed lives in driver code, so only a source lint guards it, and the stress case models one Present thread Raised: W19 review round 1, 2026-11-03",
+  "title": "Capture: the s_rec gate into the pure state machine",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B63",
+  "area": "core"
+}

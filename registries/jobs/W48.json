@@ -1,0 +1,12 @@
+{
+  "id": "W48",
+  "description": "**Large registries, committed views**: `x-view` option to skip or summarise the Markdown view (0.6.0 `[views] commit = false` already keeps views out of git) Why: a 60,000-row assets registry still renders a 4 MB view in a repo that commits views; decide with napoleon's discovery phase whether game-derived rows are committed at all Raised: review of PR 1, 2026-10-28; narrowed napoleon J55, 2026-11-01",
+  "title": "Large registries, committed views",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B4",
+  "area": "core"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "W86",
+  "description": "**Rule A clears on a round that no longer exists at the head**: `warscape/policy.py` `round_problems` looks up `opened`, built from every commit of review.md's history, and never asks whether that round survived; add the condition `k in head_r` and a test on a real repository (R1 writes `merge` and code, a side branch writes round 2, a trailerless `git merge -s ours` drops it: rule A says nothing at `error`) Why: it passes the real verb, though no honest flow reaches it: the commit-msg hook refuses that merge, and forging a visible round is easier Raised: W40 review round 2 Later 1, 2026-11-05",
+  "title": "Rule A clears on a round that no longer exists at the head",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B96",
+  "area": "core"
+}

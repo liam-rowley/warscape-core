@@ -1,0 +1,12 @@
+{
+  "id": "W50",
+  "description": "**Engine-Lua string lint** as a shared rule for games on this engine lineage (B1 is built: a core gate, or a game gate module per game, C22): flag string functions known to stall the engine's message pump in Lua sent to the engine, including Lua sent inline from Python, not only tracked `.lua` files Why: napoleon codes it in its own `test_repo_rules.py` (fact `napoleon.lua.string_find_stalls_pump`); Empire will need the same rule Raised: napoleon J43 review 4, 2026-10-30",
+  "title": "Engine-Lua string lint",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B14",
+  "area": "core"
+}

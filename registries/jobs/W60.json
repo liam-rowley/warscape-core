@@ -1,0 +1,12 @@
+{
+  "id": "W60",
+  "description": "**Move `ui_atlas.py`'s target-game tables into the adapter**: `UNITS`, `PIECES`, `NAMES`, `ENGINE`, the `STATIC_ONLY` reasons and the art-role rules are data of one game's UI inside a core module (name-free, so the lint passes, but not game-agnostic) Why: a second game's atlas needs the same module with other tables; kept in place by W4 because moving them is a rewrite of a 1,400-line module that must not move a byte Raised: napoleon J64 / core W4, 2026-11-03",
+  "title": "Move `ui_atlas.py`'s target-game tables into the adapter",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B54",
+  "area": "core"
+}

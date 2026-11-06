@@ -1,0 +1,12 @@
+{
+  "id": "W84",
+  "description": "**Two smoke gaps after W34**: (a) the every-500 rotation (`proxy/src/dev.cpp` `CtlThread`) is a source lint, no launch reaches it; (b) `--docker smoke` runs non-root but `proxy/tools/build.sh` still copies `smoke_dll_fault.*` into `$OUT`, which by reading fails on a Linux host where `--docker all` left `$OUT` root-owned (not run; the PC's bind mount is fine) Why: small; in the next job that changes the smoke anyway Raised: W34 review Later 5, 2026-11-05",
+  "title": "Two smoke gaps after W34",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B94",
+  "area": "core"
+}

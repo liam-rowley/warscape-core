@@ -1,0 +1,12 @@
+{
+  "id": "W53",
+  "description": "**`headless_status.json` rewritten after each verified relocation** (`proxy/src/headless.cpp`) Why: it is written once, at `on_virtual`, so after a display move `shot.sh` (which reads its rect since J12 fix 1c) captures the old rect Raised: napoleon J12 report question 3, 2026-10-31",
+  "title": "`headless_status.json` rewritten after each verified relocation",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B23",
+  "area": "core"
+}
