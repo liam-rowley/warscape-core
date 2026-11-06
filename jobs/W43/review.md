@@ -1,5 +1,53 @@
 # W43 review
 
+## Round 2 (2026-11-06, branch job/W43 at 8df7ba8)
+
+**Verdict: merge.**
+
+Round 1's blocker is fixed: a stale branch can no longer land a Markdown decision row, and I reproduced that through the real verb. The three should-fix items are answered, and CI ran every fix commit on Windows. No blocker or should-fix remains; one new `later` item is below.
+
+### What I ran
+- `python3 wsc.py gates` on this PC at 8df7ba8: 14 ok, 2 warn, 0 failed, 1201 host tests, 5 skipped. The warnings are this worktree's `hooks` path and the capstone and POSIX skips.
+- `python3 wsc.py policy --branch job/W43 --base origin/main` before this round: refused only for round 1's verdict and the row not yet `done`. The note names the changed rule files; the new rule is proven by its host tests (C24).
+- Every variant below ran in a throwaway clone, judged by `wsc policy` with this head as the base.
+
+### CI on Windows
+- The fix commits are 4879b5d, fad7cd5 and 2957edb. They have no separate runs: one push carried them, and all three are ancestors of 2957edb.
+- Gates run 42136132878 at 2957edb: `gates (windows-latest)` ran in full, `gates: 15 ok, 1 warn, 0 failed`, 1201 host tests in 506.6 s, and wrote its pass marker (tree 7677d2c2, commit 2957edb). `gates (ubuntu-latest)`, `proxy` and `harness-windows` are green in the same run.
+- Gates run 42137462815 at the head 8df7ba8: Windows, `proxy` and `harness-windows` are skipped, and the `changes` job shows why. It computed `gates_windows=true` and hit the marker for tree 7677d2c2, so this was a pass-marker skip and not a paperwork skip. `warscape/ci.py` `tree_hashes` gives the same hash for all three input sets at 2957edb and at the head, and `git diff 2957edb HEAD` is only `jobs/W43/report.md` and the job's row. `gates (ubuntu-latest)` ran and is green.
+- So the code that merges is the code Windows tested. This round's commit changes only the job folder and the row, so it hits the same marker.
+
+### Round 1 findings
+1. **Blocker, the frozen file's guard: fixed.** Read `retired_file_problems` (`warscape/policy.py:233`) and its call in `check` (:269), which comes before the branch kind is read. From `origin/main` 870e298, a stale head with no key and no new code:
+   ```
+   add a | C42 | row, plan/ and meta/:      REFUSED, docs/DECISIONS.md is frozen
+   the same on job/W43:                     REFUSED, the same line among the job's own errors
+   edit the C36 line's spacing:             REFUSED
+   an indented row:                         REFUSED
+   prose only:                              ok
+   file untouched, another doc changed:     ok
+   ```
+   A branch from this head that adds a row and sets `decisions = ""` and `decisions_retired = ""` in its own `wsc.toml` is also REFUSED: the head does not choose how it is judged.
+2. **Should-fix, follow-up 2: fixed.** Run as written on a throwaway branch: `policy` ok, `gates --fast` 14 ok, 1 warn, 0 failed.
+3. **Should-fix, decision rows and the Windows gates: fixed.** `registries/decisions/` is in the exclusion at `wsc.toml:98`. `test_every_plan_glob_is_paperwork_to_the_windows_gates` is a useful guard on two hand-kept lists.
+4. **Should-fix, the report's evidence: answered** in `## Fix round 1`, each line naming what it replaces. Its run id and its "only the report and the row" claim are both checked above.
+
+### Risk-first reading
+I picked the new rule in `warscape/policy.py`, as it decides what reaches `main`, and read the fix commits' whole diff. The table comparison keeps order and strips whitespace, so a reorder or a changed cell differs and CRLF does not. Deleting or renaming the file passes by design: follow-up 2 needs that, and the rows live in the registry.
+
+### Merging with main
+- A trial merge of `origin/main` 870e298 is clean (it changes only `docs/BACKLOG.md`). On it, `reg migrate decisions --check` says 41 rows, exit 0, with 42 row files and 91 tools, and `find C36` prints the row.
+- Follow-up 1 on that merge: 50 + 15 = 65 rows, as the fix round says, both `--check` exit 0, `jobs check` 112 rows ok, `find B95` ranks W85 first.
+- **W44 (#133)** adds a line to `registries/tools.jsonl`, which this job deletes. It was open and a draft at this review, so this job merges first if its checks pass, and W44's modify/delete conflict is then W44's to resolve: the line becomes a row file (`wsc reg add tools <path>`). If W44 lands first, this pull request conflicts and stays open, and a fix session carries the row into `registries/tools/`.
+
+### Later
+8. A line with no leading pipe gets past the frozen-file rule. `warscape/policy.py:239`: `C42 | 2026-11-06 | Liam | A stale row | yes` appended to `docs/DECISIONS.md` gives `policy: plan/f-no-lead-pipe: ok`, and after merging it `--check` and `gates --fast` still pass. It cannot turn `main` red, as no parser reads it as a row, but GitHub would render it as one and it has no row file. The window closes with follow-up 2, so comparing every non-prose line is not worth doing unless a game's window stays open.
+
+Round 1's later items 5, 6 and 7 stand. These go in `later` rows once the status is on `main`.
+
+### Not verified
+The `Usage:` line is hand-counted, as the report says.
+
 ## Round 1 (2026-11-06, branch job/W43 at 8df4430)
 
 **Verdict: merge after fixes.**
