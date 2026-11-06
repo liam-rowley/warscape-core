@@ -1,0 +1,11 @@
+{
+  "id": "W125",
+  "description": "**A plan/ branch closes proposal rows on no evidence**: `proposal_row_problems` in `warscape/policy.py` lets `plan/` close an accepted row as `moved` with its job not done, and a tagged open row as `gone`, with no record behind either. Decide whether a close must name a record that shows it. Why: `plan/` merges itself, so a question can go before the owner sees it, or a decline can lose its suppression. Depends on W45 merging. From W45 review round 1, 2026-11-06.",
+  "title": "A plan/ branch closes proposal rows on no evidence",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
