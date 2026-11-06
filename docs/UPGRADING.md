@@ -3,6 +3,11 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## `wsc audit` (W44, C41)
+
+A new core verb and an `[audit]` table; nothing is required at the bump. A game verb named `audit` in `[cli] verb_dirs` now refuses to load: rename it. The keys a game sets:
+[AUDIT_METRICS.md](AUDIT_METRICS.md) "What a game sets".
+
 ## Hooks and gate keys added in 0.24.0 (C23)
 
 - **`.githooks/commit-msg`** refuses a commit whose message has no `Claude-Session:` trailer with a value (read with `git interpret-trailers --parse`, as `policy` reads

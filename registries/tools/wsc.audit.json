@@ -1,0 +1,11 @@
+{
+  "id": "wsc.audit",
+  "kind": "verb",
+  "path": "warscape/verbs/audit.py",
+  "purpose": "Compute the pipeline's metrics at origin/main, compare them with the `[audit]` thresholds and write a record of findings with stable ids (W44, C41); no model computes a number; the rules are in docs/AUDIT_METRICS.md",
+  "usage": "wsc audit [--since <YYYY-MM-DD|sha>] [--record] [--json PATH] [--offline] [--only <metric>,...]   (exit 0 measured, findings or not; 1 a metric could not be computed; 2 the repo cannot be read)",
+  "when": "by the audit session on its cadence (W47) with --record; by hand to see where the pipeline stands; `wsc --root <clone> audit --offline --json <path outside it>` reads another repo and writes nothing there",
+  "verb": "audit",
+  "status": "live",
+  "last_used": "2026-11-06"
+}
