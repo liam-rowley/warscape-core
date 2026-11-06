@@ -11,11 +11,11 @@
 namespace wsp {
 
 struct DevKeys {
-    bool timeline = false, logFiles = false, skipIntro = false, stateJson = false, luaBridge = false, ctl = false, console = false, perf = false, camera = false, capture = false, orders = false;
+    bool timeline = false, logFiles = false, skipIntro = false, stateJson = false, luaBridge = false, ctl = false, console = false, perf = false, camera = false, capture = false, orders = false, cascade = false;
     std::wstring fileRules, ctlDir, captureDir;
     std::string autostart;
     int autostartDelayMs = 1500;
-    bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || capture || orders || !fileRules.empty() || !autostart.empty(); }
+    bool Any() const { return timeline || logFiles || skipIntro || stateJson || luaBridge || ctl || console || perf || camera || capture || orders || cascade || !fileRules.empty() || !autostart.empty(); }
 };
 DevKeys& Dk();
 bool DevActive();
@@ -64,6 +64,10 @@ bool OrdersGroundAt(float x, float z, float& y, std::string& why);   // W6: the 
 std::string OrdersInfo();                             // install state, the owner path's pointers, the thread ids
 
 // capture.cpp (J8): the frame capture behind dev.capture; decisions in its header
+// cascade.cpp (J25 spike): the two-cascade prototype behind dev.cascade_proto; decisions in its header
+void CascadeInit();                                   // DevInit
+void CascadeInstall(void* device);                    // every CreateDevice, before the capture
+void CascadePresent();                                // the render thread, every Present
 void CaptureInit();                                   // DevInit: the capture folder
 void CaptureInstall(void* device);                    // every CreateDevice: hooks the device's vtable slots (no-op with dev.capture=0)
 void CapturePresent(void* device);                    // the render thread, every Present, before the real one

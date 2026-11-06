@@ -115,13 +115,14 @@ std::string StateJson() {   // s_cs held
 using PFN_CreateDevice = HRESULT(WINAPI*)(void*, UINT, int, HWND, DWORD, void*, void**);
 using PFN_Present = HRESULT(WINAPI*)(void*, const RECT*, const RECT*, HWND, const void*);
 PFN_CreateDevice o_CreateDevice; PFN_Present o_Present;
-HRESULT WINAPI hk_Present(void* dev, const RECT* a, const RECT* b, HWND w, const void* r) { DevPresent(); if (Dk().capture) CapturePresent(dev); if (Dk().orders) OrdersPresent(); return o_Present(dev, a, b, w, r); }
+HRESULT WINAPI hk_Present(void* dev, const RECT* a, const RECT* b, HWND w, const void* r) { DevPresent(); if (Dk().cascade) CascadePresent(); if (Dk().capture) CapturePresent(dev); if (Dk().orders) OrdersPresent(); return o_Present(dev, a, b, w, r); }
 HRESULT WINAPI hk_CreateDevice(void* d3d, UINT ad, int type, HWND w, DWORD flags, void* pp, void** out) {
     const HRESULT hr = o_CreateDevice(d3d, ad, type, w, flags, pp, out);
     char d[80]; snprintf(d, sizeof d, "hr 0x%08lx flags 0x%lx", (unsigned long)hr, flags);
     TlMarkOnce("device_created", d);
     if (SUCCEEDED(hr) && out && *out) {
         VtableHook(*(void***)*out, 17, (void*)hk_Present, (void**)&o_Present, "IDirect3DDevice9::Present");
+        if (Dk().cascade) CascadeInstall(*out);   // first: a capture then wraps it and records the engine's calls only
         CaptureInstall(*out);   // no-op with dev.capture=0
     }
     return hr;
@@ -625,6 +626,7 @@ void DevInit() {
     k.camera = rt.cfg.Bool("dev.camera");
     k.capture = rt.cfg.Bool("dev.capture");
     k.orders = rt.cfg.Bool("dev.orders");
+    k.cascade = rt.cfg.Bool("dev.cascade_proto");
     k.captureDir = WidenUtf8(rt.cfg.Str("dev.capture_dir"));
     k.fileRules = WidenUtf8(rt.cfg.Str("dev.file_rules"));
     k.ctlDir = WidenUtf8(rt.cfg.Str("dev.ctl_dir"));
@@ -648,6 +650,7 @@ void DevInit() {
     CameraInit(k.camera, Adapter().camera);
     OrdersInit(k.orders, Adapter().orders);
     if (k.capture) CaptureInit();
+    if (k.cascade) CascadeInit();
 
     std::vector<FileRule> rules;
     if (k.skipIntro) for (const char* const* m = ad->introMovies; m && *m; ++m) rules.push_back(MakeRule(RuleSpace::Movie, RuleAct::Fail, *m, "", "dev.skip_intro"));
@@ -663,7 +666,7 @@ void DevInit() {
         else { std::vector<std::string> w; auto more = ParseRules(text, w); for (auto& x : w) LOGW("redirect: %ls: %s", p.c_str(), x.c_str()); rules.insert(rules.end(), more.begin(), more.end()); LOGI("redirect: %zu rules from %ls", more.size(), p.c_str()); }
     }
     FilesInit(rules);
-    s_frames = k.timeline || k.stateJson || k.ctl || k.capture || !k.autostart.empty();
+    s_frames = k.timeline || k.stateJson || k.ctl || k.capture || k.cascade || !k.autostart.empty();
     if (k.autostart.size()) s_autostartStatus = "waiting for the front end";
     if (HANDLE h = CreateThread(nullptr, 0, StateThread, nullptr, 0, nullptr)) CloseHandle(h);
     if (k.ctl || !k.autostart.empty()) {
