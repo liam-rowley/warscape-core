@@ -650,7 +650,7 @@ void DevInit() {
     CameraInit(k.camera, Adapter().camera);
     OrdersInit(k.orders, Adapter().orders);
     if (k.capture) CaptureInit();
-    if (k.cascade) CascadeInit();
+    if (k.cascade) CascadeInit(rt.cfg.Bool("dev.cascade_tint"), rt.cfg.Bool("dev.cascade_count"), (int)rt.cfg.Int("dev.cascade_split"), (int)rt.cfg.Int("dev.cascade_size"), WidenUtf8(rt.cfg.Str("dev.cascade_dir")));
 
     std::vector<FileRule> rules;
     if (k.skipIntro) for (const char* const* m = ad->introMovies; m && *m; ++m) rules.push_back(MakeRule(RuleSpace::Movie, RuleAct::Fail, *m, "", "dev.skip_intro"));

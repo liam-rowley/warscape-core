@@ -276,13 +276,10 @@ void LoadSwaps() {
 
 } // namespace
 
-void CascadeInit() {
-    const Runtime& rt = Rt();
+void CascadeInit(bool tint, bool count, int split, int size, const std::wstring& dir) {
     InitializeCriticalSection(&s_cs);
-    s_k.tint = rt.cfg.Bool("dev.cascade_tint"); s_k.count = rt.cfg.Bool("dev.cascade_count");
-    if (rt.cfg.Int("dev.cascade_split") > 0) s_k.split = (int)rt.cfg.Int("dev.cascade_split");
-    s_k.size = (int)rt.cfg.Int("dev.cascade_size");
-    s_k.dir = WidenUtf8(rt.cfg.Str("dev.cascade_dir"));
+    s_k.tint = tint; s_k.count = count; s_k.size = size; s_k.dir = dir;
+    if (split > 0) s_k.split = split;
     LOGI("cascade: prototype on: split %d m, size %d (0 = the engine map's), tint %d, count %d", s_k.split, s_k.size, s_k.tint, s_k.count);
     LoadSwaps();
 }
