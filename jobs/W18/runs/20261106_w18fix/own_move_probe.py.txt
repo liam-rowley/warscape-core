@@ -1,0 +1,129 @@
+"""What does a DPI-unaware window's own thread see for a move made from a per-monitor thread? (W18 fix round 1, finding 1)
+One DPI-unaware thread owns a never-shown popup and logs WM_WINDOWPOSCHANGING; the main thread (per-monitor V2) moves it the way
+PlaceLocked does (SWP_ASYNCWINDOWPOS) to each monitor's physical rect and compares with GetMonitorInfoW as the window's context sees it.
+No game, no display setting."""
+import ctypes, threading, time, sys
+from ctypes import wintypes as w
+
+u = ctypes.WinDLL("user32", use_last_error=True)
+LRESULT = ctypes.c_ssize_t
+u.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+u.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+u.CreateWindowExW.restype = w.HWND
+u.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
+WNDPROC = ctypes.WINFUNCTYPE(LRESULT, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+u.SetWindowLongPtrW.restype = ctypes.c_void_p
+u.SetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int, ctypes.c_void_p]
+u.CallWindowProcW.restype = LRESULT
+u.CallWindowProcW.argtypes = [ctypes.c_void_p, w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+u.SetWindowPos.argtypes = [w.HWND, w.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.UINT]
+u.GetWindowRect.argtypes = [w.HWND, ctypes.POINTER(w.RECT)]
+u.GetDpiForWindow.argtypes = [w.HWND]
+u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+
+
+class WINDOWPOS(ctypes.Structure):
+    _fields_ = [("hwnd", w.HWND), ("after", w.HWND), ("x", ctypes.c_int), ("y", ctypes.c_int), ("cx", ctypes.c_int), ("cy", ctypes.c_int), ("flags", w.UINT)]
+
+
+class MI(ctypes.Structure):
+    _fields_ = [("cb", w.DWORD), ("rc", w.RECT), ("work", w.RECT), ("flags", w.DWORD), ("dev", w.WCHAR * 32)]
+
+
+MONENUM = ctypes.WINFUNCTYPE(w.BOOL, ctypes.c_void_p, w.HDC, ctypes.POINTER(w.RECT), w.LPARAM)
+u.EnumDisplayMonitors.argtypes = [w.HDC, ctypes.c_void_p, MONENUM, w.LPARAM]
+u.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(MI)]
+UNAWARE, SYSTEM, PMV2 = -1, -2, -4
+
+
+def R(r):
+    return (r.left, r.top, r.right, r.bottom)
+
+
+def monitors():
+    out = []
+
+    def cb(h, dc, rc, lp):
+        m = MI()
+        m.cb = ctypes.sizeof(MI)
+        u.GetMonitorInfoW(h, ctypes.byref(m))
+        out.append((m.dev, R(m.rc)))
+        return True
+    u.EnumDisplayMonitors(None, None, MONENUM(cb), 0)
+    return out
+
+
+ctx = {"unaware": UNAWARE, "system": SYSTEM}[sys.argv[1] if len(sys.argv) > 1 else "unaware"]
+msgs, ready, hold = [], threading.Event(), {}
+
+
+def owner():
+    u.SetThreadDpiAwarenessContext(ctx)
+    h = u.CreateWindowExW(0, "Static", "w18fixprobe", 0x80000000, 100, 100, 640, 480, None, None, None, None)
+    old = u.SetWindowLongPtrW(h, -4, None)
+
+    def proc(hw, m, wp, lp):
+        if m == 0x46:
+            p = ctypes.cast(lp, ctypes.POINTER(WINDOWPOS)).contents
+            msgs.append((p.x, p.y, p.cx, p.cy, hex(p.flags)))
+        return u.CallWindowProcW(old, hw, m, wp, lp)
+    hold["proc"] = WNDPROC(proc)
+    u.SetWindowLongPtrW(h, -4, ctypes.cast(hold["proc"], ctypes.c_void_p))
+    hold["h"] = h
+    hold["logical"] = monitors()
+    ready.set()
+    msg = w.MSG()
+    while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        u.TranslateMessage(ctypes.byref(msg))
+        u.DispatchMessageW(ctypes.byref(msg))
+
+
+threading.Thread(target=owner, daemon=True).start()
+ready.wait()
+u.SetThreadDpiAwarenessContext(PMV2)
+h = hold["h"]
+phys = monitors()
+print("window context", ctx)
+for (dev, p), (_, l) in zip(phys, hold["logical"]):
+    print(f"monitor {dev}: physical {p}; as the window's context sees it {l}")
+if "cloaked" in sys.argv:   # the game's state during a relocation: shown, but cloaked first, so nothing ever reaches a screen
+    dwm = ctypes.WinDLL("dwmapi")
+    dwm.DwmSetWindowAttribute.argtypes = [w.HWND, w.DWORD, ctypes.c_void_p, w.DWORD]
+    on = w.BOOL(1)
+    hr = dwm.DwmSetWindowAttribute(h, 13, ctypes.byref(on), 4)   # DWMWA_CLOAK
+    print("cloak hr", hr)
+    if hr != 0:
+        sys.exit("not cloaked: not showing it")
+    u.ShowWindow.argtypes = [w.HWND, ctypes.c_int]
+    u.ShowWindow(h, 4)   # SW_SHOWNOACTIVATE
+    u.IsWindowVisible.argtypes = [w.HWND]
+    print("visible flag", u.IsWindowVisible(h))
+    time.sleep(0.2)
+fl = 0x0010 | 0x0004 | 0x0200 | 0x4000   # NOACTIVATE NOZORDER NOOWNERZORDER ASYNCWINDOWPOS
+
+
+def mapped(q, p, l):
+    """the pure map under test: physical rect q on a monitor physical p, logical l"""
+    def ax(v, p0, p1, l0, l1):
+        return l0 + round((v - p0) * (l1 - l0) / (p1 - p0))
+    return (ax(q[0], p[0], p[2], l[0], l[2]), ax(q[1], p[1], p[3], l[1], l[3]), ax(q[2], p[0], p[2], l[0], l[2]), ax(q[3], p[1], p[3], l[1], l[3]))
+
+
+worst = 0
+logical = dict(hold["logical"])
+for dev, p in phys + phys[::-1]:
+    W, H = p[2] - p[0], p[3] - p[1]
+    for q in (p, (p[0] + 101, p[1] + 57, p[0] + 101 + W // 2 + 1, p[1] + 57 + H // 2 + 1), (p[0] + 333, p[1] + 211, p[0] + 1003, p[1] + 777)):
+        msgs.clear()
+        u.SetWindowPos(h, None, q[0], q[1], q[2] - q[0], q[3] - q[1], fl)
+        time.sleep(0.3)
+        r = w.RECT()
+        u.GetWindowRect(h, ctypes.byref(r))
+        want = mapped(q, p, logical[dev])
+        got = [(m[0], m[1], m[0] + m[2], m[1] + m[3]) for m in msgs]
+        d = min((max(abs(a - b) for a, b in zip(want, g)) for g in got), default=None)
+        worst = max(worst, d if d is not None else 9999)
+        print(f"-> {dev} {q}: now {R(r)}; messages {got}; mapped {want}; largest edge difference {d}")
+print("largest edge difference over all moves:", worst)
+u.PostMessageW(h, 0x10, 0, 0)
+time.sleep(0.2)

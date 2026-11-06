@@ -159,6 +159,42 @@ void TestOwnMoveLogical() {
     }
 }
 
+// W18 fix round 1 (review finding 1): the logical rect comes from the target monitor's two rects, never from the window's position. The
+// rows are measured: the WM_WINDOWPOSCHANGING a DPI-unaware or system-aware window's own thread received for a move from a per-monitor
+// thread, on a PC with monitors at 150 % and 125 % (verified 2026-11-06, run 20261106_w18fix). An unaware context keeps a monitor's
+// origin and scales its size; a system-aware one scales the origin too: only the monitor's own rects say which.
+void TestLogicalOnMonitor() {
+    struct Row { Rect physMon, logMon, phys, msg; };
+    const Rect d1{ 0, 0, 3840, 2160 }, d2{ -2560, 327, 0, 1767 }, d10{ 3839, 2160, 7679, 4320 };
+    const Rect d1u{ 0, 0, 2560, 1440 }, d2u{ -2560, 327, -512, 1479 }, d2s{ -3840, 491, -768, 2219 }, d10s{ 5759, 3240, 11519, 6480 };
+    const Row rows[] = {
+        { d1, d1u, d1, d1u },                                                    // unaware, 150 %: the main window's case, the whole monitor
+        { d2, d2u, d2, d2u },                                                    // unaware, 125 %, a non-zero origin
+        { d10, d10s, d10, d10s },                                                // system-aware at 150 %, a 96 DPI monitor: the origin moves
+        { d2, d2s, d2, d2s },
+        { d1, d1u, Rect{ 101, 57, 2022, 1138 }, Rect{ 67, 38, 1348, 759 } },     // a rect inside the monitor
+        { d2, d2u, Rect{ -2459, 384, -1178, 1105 }, Rect{ -2479, 373, -1454, 950 } },
+        { d2, d2u, Rect{ -2227, 538, -1557, 1104 }, Rect{ -2294, 496, -1758, 949 } },
+        { d10, d10s, Rect{ 3940, 2217, 5861, 3298 }, Rect{ 5911, 3326, 8793, 4948 } },
+        { d10, d10s, Rect{ 4172, 2371, 4842, 2937 }, Rect{ 6259, 3557, 7264, 4406 } },
+        { d2, d2s, Rect{ -2459, 384, -1178, 1105 }, Rect{ -3719, 559, -2182, 1424 } },
+    };
+    auto at = [](const Rect& r) { Pos p; p.x = r.l; p.y = r.t; p.cx = Width(r); p.cy = Height(r); p.flags = kSwpNoActivate | kSwpAsync; return p; };
+    for (const Row& w : rows) {
+        OwnMove m; m.armed = true; m.want = w.phys; m.at = 10.0;
+        m.haveLogical = LogicalOnMonitor(w.phys, w.physMon, w.logMon, m.logical);
+        CHECK(m.haveLogical);
+        CHECK(IsOwnMove(m, at(w.msg), 10.05));                                   // the message Windows really sent is recognised
+        CHECK(!IsOwnMove(m, at(Rect{ w.msg.l + 3, w.msg.t, w.msg.r + 3, w.msg.b }), 10.05));
+    }
+    Rect out;   // the whole monitor maps exactly, with no rounding to forgive
+    CHECK(LogicalOnMonitor(d2, d2, d2u, out)); CHECK(Same(out, d2u));
+    CHECK(LogicalOnMonitor(d10, d10, d10s, out)); CHECK(Same(out, d10s));
+    CHECK(!LogicalOnMonitor(d10, d10, d10, out));                                // a context that sees the monitor as it is: nothing to arm
+    CHECK(!LogicalOnMonitor(d1, Rect{ 0, 0, 0, 0 }, d1u, out));                  // no monitor rect: no answer, never a division by zero
+    CHECK(!LogicalOnMonitor(d1, Rect{ 5, 5, 5, 900 }, d1u, out));
+}
+
 void TestSweep() {
     const Rect t = R(3839, 2160, 3840, 2160);
     CHECK(SweepHides(true, false, R(0, 0, 640, 480), true, t));       // a DLL's dialog on the primary
@@ -431,6 +467,17 @@ void TestLints() {
         CHECK(succ.find("s_st.state") == std::string::npos);        // the state stays what it was
         CHECK(succ.find("++s_st.relocations") != std::string::npos);
     }
+    // W18 fix round 1: the logical rect is read from the target monitor in the window's own DPI context. The per-window point conversion
+    // refuses any point outside the window, so it can never answer for a target the window has not reached yet (run 20261106_w18review).
+    {
+        CHECK(raw.find("PhysicalToLogicalPoint") == std::string::npos);
+        const size_t lr = hl.find("bool LogicalRect("), end = hl.find("\n}", lr);
+        CHECK(lr != std::string::npos && end != std::string::npos);
+        const std::string body = hl.substr(lr, end - lr);
+        const size_t scope = body.find("DpiScope d(ctx)"), info = body.find("GetMonitorInfoW(s_t.hmon"), map = body.find("LogicalOnMonitor(");
+        CHECK(scope != std::string::npos && info != std::string::npos && map != std::string::npos);
+        CHECK(scope < info && info < map);
+    }
     // the release value is off: a normal install never runs headless
     for (size_t i = 0; i < gen::kKeyCount; ++i)
         for (const char* off : { "headless.enabled", "headless.test_off_thread", "headless.test_dll_window_ms" })   // test hooks too
@@ -440,6 +487,6 @@ void TestLints() {
 
 int main(int argc, char** argv) {
     tk::Args(argc, argv);
-    TestSelect(); TestModes(); TestCreateShowStyle(); TestGatePos(); TestOwnMove(); TestOwnMoveLogical(); TestSweep(); TestShowEvent(); TestDecide(); TestStatus(); TestSimulation(); TestLints();
+    TestSelect(); TestModes(); TestCreateShowStyle(); TestGatePos(); TestOwnMove(); TestOwnMoveLogical(); TestLogicalOnMonitor(); TestSweep(); TestShowEvent(); TestDecide(); TestStatus(); TestSimulation(); TestLints();
     return tk::Done("test_display_guard");
 }
