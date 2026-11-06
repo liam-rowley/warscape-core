@@ -1,0 +1,12 @@
+{
+  "id": "W111",
+  "description": "**A host lint: no helper function named like a PowerShell alias**: the harness PowerShell tests (`harness/tests/Run-HostTests.ps1`) and the watcher scripts: flag any `function <name>` whose name is a built-in alias (`Get-Alias`), because an alias beats a function of the same name Why: in Empire a helper named `Rd` ran `Remove-Item` and deleted `game.lock` on its first test (empire-remastered `docs/learnings/LEARNINGS_HARNESS.md`); in the next job that changes the host tests anyway Raised: audit 2026-11-03 (napoleon J82 triage, Empire learning 2), 2026-11-04",
+  "title": "A host lint: no helper function named like a PowerShell alias",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B84",
+  "area": "harness"
+}

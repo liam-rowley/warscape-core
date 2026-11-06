@@ -1,0 +1,12 @@
+{
+  "id": "W65",
+  "description": "**The hist_nile headless relaunch flake**: the launch into hist_nile (after the relaunch that leaves hist_dresden, `harness/ctl.py` `v_scene`) sometimes gets no `on_virtual` status from the watcher within 180 s, so the watcher kills the game (fail closed) and the acceptance pass fails on `hist_nile:scene` through no fault of the build; find the cause (relaunch timing or the vdisplay attach) and retry the launch once inside the verb, logged Why: about one 20-pass acceptance run in ten breaks on it (napoleon J8, J23, J44, J46, J24), so a job spends another 20-pass sitting: J24 lost two (runs `20261103_j24acc` pass 10, `20261103_j24acc2` pass 17: \"HEADLESS FAILED: no on_virtual status for pid ... within 180 s\") Raised: napoleon J24 report and review round 1, 2026-11-03",
+  "title": "The hist_nile headless relaunch flake",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B60",
+  "area": "core"
+}

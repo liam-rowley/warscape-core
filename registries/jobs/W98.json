@@ -1,0 +1,12 @@
+{
+  "id": "W98",
+  "description": "**Acceptance pass identity after the launch**: `harness/acceptance.py` (through `ctl.py` `build_info()`) reads the DLL build id from `proxy.log` before each pass's launch; read it after the launch, or refuse the fallback to the kit id Why: on a fresh install there is no log yet, so pass 1 is recorded with the kit's id and doesn't count toward the streak: one extra pass is needed, with no warning Raised: napoleon J40 review, 2026-11-01",
+  "title": "Acceptance pass identity after the launch",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B26",
+  "area": "harness"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "W68",
+  "description": "**Capture hardening: the timeout path, unsynchronised globals and state-block hooks**: `proxy/src/capture.cpp`: (a) `CaptureRun` (the second 30 s wait): on a second timeout report `failed` and let the render thread own the close of `s_rec` and `frame.txt` instead of returning ok with a partial frame and setting `kIdle`; (b) `s_depth`, `s_buf` and `Line()` are unsynchronised globals: record the render thread id at arm and count, not record, calls from other threads; (c) hook `CreateStateBlock` and `IDirect3DStateBlock9::Apply/Capture`, at least as counted record lines Why: not hit in napoleon J8 (recordings took 4 to 76 ms) but a second device thread would race; in the next job that changes `capture.cpp` anyway (B63 touches the same function) Raised: napoleon J8 review Later 1 to 3, 2026-11-04",
+  "title": "Capture hardening: the timeout path, unsynchronised globals and state-block hooks",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B64",
+  "area": "core"
+}

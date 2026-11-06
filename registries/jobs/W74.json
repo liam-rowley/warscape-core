@@ -1,0 +1,12 @@
+{
+  "id": "W74",
+  "description": "**`pc_deploy.py status` names a kit left installed by a finished job; its tests need no live game**: `proxy/tools/pc_deploy.py status` (or the job-finish check): name a kit still installed by a job that has finished; and check that the core's own copy of any `Deploy` test does not depend on a running game Why: a forgotten kit is picked up by the next job (napoleon J50 open question 4, J22's kit); in the next job that changes `pc_deploy.py` anyway Raised: napoleon J50 review Later 5; J57 Later 3, 2026-11-04",
+  "title": "`pc_deploy.py status` names a kit left installed by a finished job; its tests need no live game",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B78",
+  "area": "core"
+}

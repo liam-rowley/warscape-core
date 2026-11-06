@@ -1,0 +1,12 @@
+{
+  "id": "W64",
+  "description": "**A smoke launch that walks `ctl gesture press/move/release` and reads a commit back** (W20 built B58 a to c; d is not built, see docs/PROXY_GESTURES.md): the stand-in exe (`proxy/tests/smoke_host.cpp`) gets a `window` mode (800x600 top-level window, `CreateDevice` through the proxy, a message pump and a bounded `Present` loop), and `build.sh smoke` one launch with `ui.enabled=1`, `controls.gestures=1`, `dev.ctl=1` that checks the commit (the null adapter's three orders) and the log; CI needs `xvfb-run` and 32-bit Mesa, and the UI host needs wine's builtin `d3dcompiler_47`; skip the launch with a printed reason when `xvfb-run` is absent Why: W20 did not attempt it: the build PC had no g++, no running Docker and no wine, so none of it could be tried before pushing, and a blind change to the `proxy` job would risk a red required check; try it in a branch where CI can be iterated Raised: W6 review, 2026-11-03; reworded by W20, 2026-11-04",
+  "title": "A smoke launch that walks `ctl gesture press/move/release` and reads a commit back",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B58",
+  "area": "core"
+}

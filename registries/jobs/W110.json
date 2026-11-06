@@ -1,0 +1,12 @@
+{
+  "id": "W110",
+  "description": "**`%~dp0` in a watcher cmd job body is the `jobs` folder**: `harness/watcher.ps1` (the cmd job runner): a cmd job body runs from the watcher's `jobs\\` folder, so `%~dp0` names that folder, not the script's origin; either expand `%~dp0` to the original folder when the body is staged or refuse a body that uses it with a message saying to use absolute paths Why: Empire's harness learnings (empire-remastered `docs/learnings/LEARNINGS_HARNESS.md`, `[orchestrator/reports/2026-10-23_r10-pc]`) keep it as prose and napoleon's audit found it dropped; in the next job that changes the watcher anyway Raised: audit 2026-11-03 (napoleon J82 triage, Empire learning 1), 2026-11-04",
+  "title": "`%~dp0` in a watcher cmd job body is the `jobs` folder",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B83",
+  "area": "harness"
+}

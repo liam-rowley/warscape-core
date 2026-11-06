@@ -1,0 +1,12 @@
+{
+  "id": "W107",
+  "description": "**The watcher and `job.sh lock` know a player's `play.json`**: `harness/job.sh lock` and `harness/watcher.ps1`: a game repo may install a player build under `<state>/play/play.json` (napoleon `upscale/pc/play.py`); refuse a job lock, or warn, while one is installed Why: a forgotten play install is otherwise picked up by the next agent job; in the next job that changes `job.sh` or the watcher anyway Raised: napoleon J53 review Later 2, 2026-11-04",
+  "title": "The watcher and `job.sh lock` know a player's `play.json`",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B79",
+  "area": "harness"
+}

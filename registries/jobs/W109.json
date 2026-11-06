@@ -1,0 +1,12 @@
+{
+  "id": "W109",
+  "description": "**The watcher refuses a script edited after it was queued**: `harness/watcher.ps1`: refuse a `.sh` or `.ps1` job body whose mtime changed since the request was queued (a bash script edited while it runs reads its new bytes mid-run) Why: an Empire repeat: 'never edit a running .sh' is prose in napoleon J24's report (Worth remembering); in the next job that changes the watcher anyway Raised: napoleon J24 review Later 5, 2026-11-04",
+  "title": "The watcher refuses a script edited after it was queued",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B82",
+  "area": "harness"
+}

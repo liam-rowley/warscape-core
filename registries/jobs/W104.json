@@ -1,0 +1,12 @@
+{
+  "id": "W104",
+  "description": "**`ctl.py`: a unit that leaves its army during the settle is a structured failure**: `harness/ctl.py` order verbs (the `step read` path): a unit that leaves its army while settling should return `failed` carrying `settle`, `check` and `evidence` (the last state read and the step), not an exception string with empty fields (napoleon `harness/runs/20261102_j28pc/raw/f1_offmap.json`) Why: the outcome is right but the brief asked `failed` with the evidence; W30 names failed ctl results in the report but does not structure this one; in the next job that changes `ctl.py` anyway Raised: napoleon J28 review Later 1, 2026-11-04",
+  "title": "`ctl.py`: a unit that leaves its army during the settle is a structured failure",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B73",
+  "area": "harness"
+}

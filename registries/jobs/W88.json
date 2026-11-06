@@ -1,0 +1,12 @@
+{
+  "id": "W88",
+  "description": "**Harden the workflow rule**: `[policy] workflow_rule = \"warn\" | \"error\"`, default `warn`, the core at `error` once briefs have named their files for a while, the shape W40 gave rule A Why: until then a job can add a workflow that posts a fake `policy` status if its reviewer ignores the warning; the core's own count is 3 of 31, 2 of them the rendered-file case Raised: W36 report open question 1; W36 review, 2026-11-05",
+  "title": "Harden the workflow rule",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B98",
+  "area": "core"
+}

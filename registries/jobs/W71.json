@@ -1,0 +1,12 @@
+{
+  "id": "W71",
+  "description": "**Host check: every non-stdlib import in `tests/` is guarded or installed by the CI workflow**: the core's test runner (the `tests` gate): list the non-stdlib imports under a game's `tests/` that are neither guarded by a `skipTest` nor installed by `gates.yml` Why: the second CI-only failure class in napoleon's `docs/CI_FAILURES.md` (after the J7 zlib bytes): a test importing a package CI does not install fails only on CI; in the next job that changes the test runner anyway Raised: napoleon J24 review Later 1, 2026-11-04",
+  "title": "Host check: every non-stdlib import in `tests/` is guarded or installed by the CI workflow",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B71",
+  "area": "core"
+}

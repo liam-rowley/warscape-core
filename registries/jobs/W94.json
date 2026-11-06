@@ -1,0 +1,12 @@
+{
+  "id": "W94",
+  "description": "**`pc_deploy uninstall` refuses while a profile is active**: `proxy/tools/pc_deploy.py` `uninstall` has the race napoleon's `play.py` now guards: a watcher profile restore that runs after the uninstall writes the mod ini back into the game folder Why: napoleon J67 left a 10,970-byte `napoleon_remastered.ini` behind this way, and a snapshot taken with it present counts it as vanilla, so later `identical` results mislead Raised: napoleon J67 report open question 4, 2026-11-05",
+  "title": "`pc_deploy uninstall` refuses while a profile is active",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B105",
+  "area": "core"
+}

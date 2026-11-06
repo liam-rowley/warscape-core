@@ -1,0 +1,12 @@
+{
+  "id": "W49",
+  "description": "**Pin changes in one commit**: `core_pin` (or the PR policy, or a game gate module: B1 is built, C22) checks every commit in a push or PR range, not just the tip: a commit that moves the `core` gitlink must set `wsc.toml` `[core] version` to the matching tag, and the reverse Why: `CONSUMING.md` says \"commit `core` and `wsc.toml` together\" in prose; a split pair passes today because only the tip is checked, leaving a commit that checks out the wrong core. Low value while upgrades are two lines Raised: napoleon J17 review, 2026-10-29",
+  "title": "Pin changes in one commit",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B9",
+  "area": "core"
+}

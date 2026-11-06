@@ -1,0 +1,12 @@
+{
+  "id": "W89",
+  "description": "**A window on the virtual display must not fail a pass**: the launch refuses or warns on a foreign window inside the rect, `win_probe` lists foreign windows (it enumerates only the game's own, `win_probe.ps1`), or `shot` captures the back buffer; `harness/runs/20261104_j64pc5/foreign_windows.ps1` in napoleon shows what a check needs Why: a Windows Terminal window failed two of napoleon J64's runs on shot match Raised: napoleon J64 report open question 2, 2026-11-05",
+  "title": "A window on the virtual display must not fail a pass",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B100",
+  "area": "core"
+}

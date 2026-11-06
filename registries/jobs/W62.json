@@ -1,0 +1,12 @@
+{
+  "id": "W62",
+  "description": "**Reference-repo layout out of `exe.py`**: it reads `rml_mod/src/exe_guard_sites.h`, `rml_mod/data/exe_patches.json` and `perf_mod/re/annotations/functions.jsonl` of the reference game's repo and parses a C header; the paths and formats belong in `games.json` (or a loader in the adapter). Also `engine_api.py`'s probe-safe naming word lists Why: name-free but reference-repo specific Raised: napoleon J64 / core W4, 2026-11-03",
+  "title": "Reference-repo layout out of `exe.py`",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B56",
+  "area": "core"
+}
