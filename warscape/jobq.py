@@ -40,7 +40,7 @@ from . import ci, gatemods
 from .checks import strict_loads
 from .gitbash import git_bash
 from .policy import verdict
-from .repo import DEFAULTS, git_env
+from .repo import DEFAULTS, decisions_registry, git_env
 
 
 
@@ -56,6 +56,7 @@ class Settings:
     usage_from = 0
     usage_cmd = ''
     root = None
+    grants = {}   # job id -> extra review rounds the owner granted (W132): decision rows with `grants_round`
     legacy_rounds = frozenset()
     legacy_briefs = frozenset()
     pc_state = ''   # [jobs] pc_state: the PC state folder a needs_pc build needs ('' = no gating; WSC_PC_STATE overrides it, W26)
@@ -66,8 +67,35 @@ class Settings:
 S = Settings()
 
 
-def configure_from(cfg, root=None, reg_dir='registries'):
-    """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file."""
+def read_grants(folder):
+    """{job id: number of decision rows naming it in `grants_round`} of a decisions folder (W132). The rows are append only and `policy`
+    admits one only from a `meta/` branch, so the folder of the checked-out tree is as good as the base's once it has merged main (`grant_hint`)."""
+    out = {}
+    for f in sorted(Path(folder).glob('*.json')) if folder else ():
+        try:
+            j = strict_loads(f.read_text(encoding='utf-8')).get('grants_round')
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(j, str):
+            out[j] = out.get(j, 0) + 1
+    return out
+
+
+def max_rounds(jid, grants=None):
+    """Review rounds job `jid` may have: MAX_ROUNDS plus one per grant row naming it (W132)."""
+    return MAX_ROUNDS + (S.grants if grants is None else grants).get(jid, 0)
+
+
+def blocked_by_rounds(jid, grants=None):
+    return f'{max_rounds(jid, grants)} review rounds without merge'
+
+
+def grant_hint():
+    return f'the owner can grant one more, {S.text.get("review_doc", "docs/REVIEW.md")} "Rounds", and a grant on main counts here only once this branch has merged main'
+
+
+def configure_from(cfg, root=None, reg_dir='registries', decisions=''):
+    """Fill S from a `[jobs]` table (defaults merged) and, when `root` is given, its legacy file and the owner's round grants."""
     S.prefix, S.models, S.jobs_dir, S.reg_dir, S.ledgers = cfg['id_prefix'], list(cfg['models']), cfg['dir'], reg_dir, cfg['ledgers']
     S.failed_results, S.root = cfg.get('failed_results', ''), (Path(root) if root is not None else None)
     S.semver_from = cfg.get('semver_from', 0)
@@ -76,6 +104,7 @@ def configure_from(cfg, root=None, reg_dir='registries'):
     S.pc_state = cfg.get('pc_state', '')
     S.max_sessions = cfg.get('max_sessions', 0)
     S.legacy_rounds = S.legacy_briefs = frozenset()
+    S.grants = read_grants(Path(root) / reg_dir / decisions) if root is not None and decisions else {}
     if root is not None:
         if cfg['legacy']:
             data = strict_loads((Path(root) / cfg['legacy']).read_text(encoding='utf-8'))
@@ -84,7 +113,7 @@ def configure_from(cfg, root=None, reg_dir='registries'):
 
 
 def configure(ctx):
-    return configure_from(ctx.config['jobs'], ctx.root, ctx.config['registries_dir'])
+    return configure_from(ctx.config['jobs'], ctx.root, ctx.config['registries_dir'], decisions_registry(ctx.config) if 'policy' in ctx.config else '')
 
 
 def ref(key, fmt=' ({})'):
@@ -126,7 +155,6 @@ DATED = re.compile(r'\b20\d\d-\d\d-\d\d\b')
 ROUND = re.compile(r'^## Round\b.*$', re.M)
 ROUND_HEAD = re.compile(r'^## Round ([1-9]\d*) \(20\d\d-\d\d-\d\d, branch `?job/[A-Z]\d+`? at `?[0-9a-f]{7,40}`?\)\s*$')
 MAX_ROUNDS = 3
-BLOCKED_BY_ROUNDS = f'{MAX_ROUNDS} review rounds without merge'
 def num(jid):
     return int(jid[1:]) if re.fullmatch(r'[A-Z]\d+', jid or '') else 10 ** 9
 
@@ -474,7 +502,7 @@ def verdict_lines(text):
     return [l for l in (text or '').splitlines() if verdict(l)]
 
 
-def round_problems(text):
+def round_problems(text, jid=None):
     """The review round rules for one review.md: rounds numbered from 1 with no gap, newest first, at most MAX_ROUNDS, each heading dated
     with its branch and sha, exactly one verdict per round and none outside a round (so verdict() returns the newest round's)."""
     pre, rounds = review_rounds(text)
@@ -492,8 +520,9 @@ def round_problems(text):
             nums.append(int(m.group(1)))
         if len(verdict_lines(body)) != 1:
             errs.append(f'"{head.strip()}" has {len(verdict_lines(body))} verdict lines, not exactly one')
-    if len(rounds) > MAX_ROUNDS:
-        errs.append(f'review.md has {len(rounds)} rounds: at most {MAX_ROUNDS} (after round {MAX_ROUNDS} without merge the job is blocked)')
+    limit = max_rounds(jid)
+    if len(rounds) > limit:
+        errs.append(f'review.md has {len(rounds)} rounds: at most {limit} (after round {limit} without merge the job is blocked; {grant_hint()})')
     if nums != list(range(len(nums), 0, -1)):
         errs.append(f'rounds are {", ".join(map(str, nums))}: they must count up from 1 with no gap, newest first '
                     f'(want {", ".join(map(str, range(len(nums), 0, -1)))})')
@@ -504,16 +533,17 @@ def round_problems(text):
 
 def round_status_problems(row, review, report):
     """The row must agree with the newest round's verdict: merge -> done; a non-merge in round N < 3 -> fix, or review once
-    report.md has "## Fix round N"; a non-merge in round 3 -> blocked with BLOCKED_BY_ROUNDS."""
+    report.md has "## Fix round N"; a non-merge in the last round (`max_rounds`) -> blocked with `blocked_by_rounds`."""
     st, n, v = row.get('status'), round_count(review), verdict(review)
     if v not in ('merge', 'merge after fixes', 'do not merge') or not n:
         return []   # reported by the verdict and round rules
     if v == 'merge':
         return [] if st == 'done' else [f'round {n} says merge, so the row should be done, not {st}']
-    if n >= MAX_ROUNDS:
-        if st == 'blocked' and row.get('blocked_by') == BLOCKED_BY_ROUNDS:
+    want_by = blocked_by_rounds(row.get('id'))
+    if n >= max_rounds(row.get('id')):
+        if st == 'blocked' and row.get('blocked_by') == want_by:
             return []
-        return [f'round {n} says "{v}": the row must be blocked with blocked_by="{BLOCKED_BY_ROUNDS}", not {st}']
+        return [f'round {n} says "{v}": the row must be blocked with blocked_by="{want_by}", not {st} ({grant_hint()})']
     fixed = bool(re.search(rf'^## Fix round {n}\b', report or '', re.M))
     if st == 'fix' and not fixed:
         return []
@@ -566,7 +596,7 @@ def problems(rows, read, folders=()):
             elif st == 'done' and verdict(review) != 'merge':
                 errs.append(f'{jid}: done, but the review verdict is "{verdict(review)}" (only "merge" makes a job done)')
             if jid not in S.legacy_rounds:
-                errs += [f'{jid}: {e}' for e in round_problems(review) + round_status_problems(r, review, report)]
+                errs += [f'{jid}: {e}' for e in round_problems(review, jid) + round_status_problems(r, review, report)]
         if st in ('review', 'done'):
             late = [d for d in r.get('depends_on', []) if by.get(d, {}).get('status') != 'done']
             if late:
@@ -629,8 +659,8 @@ def not_ready(action, jid, by, branches, on_branch=None):
             return f'job/{jid} has no {jid} row'
         if row.get('status') != action:
             return f'{jid} is {row.get("status")} on job/{jid}, not {action}' + (' (no report yet)' if row.get('status') == 'queued' else '')
-        if action == 'review' and rounds >= MAX_ROUNDS:
-            return f'{jid}: review.md already has {rounds} rounds; after round {MAX_ROUNDS} the job is blocked for {S.text["owner"]}' + ref('ref_rounds')
+        if action == 'review' and rounds >= max_rounds(jid):
+            return f'{jid}: review.md already has {rounds} rounds; after round {max_rounds(jid)} the job is blocked for {S.text["owner"]}' + ref('ref_rounds')
         if action == 'fix' and not rounds:
             return f'{jid} is fix on job/{jid} but its review.md has no round to answer'
         return None
@@ -1902,8 +1932,8 @@ def review_steps(jid, done_rounds=0, handback=False):
              f'gh pr view job/{jid} (gh pr create --draft --base main --head job/{jid} if there is none), gh pr ready job/{jid}, '
              f'git push, gh pr merge job/{jid} --auto --squash (ready before the push, so the pushed head gets a real policy run' + ref('ref_ready', ': {}') + '); '
              f'otherwise push, leave the draft pull request open (never gh pr ready) and set '
-             + (f'status=fix review={jd}/{jid}/review.md (a fix session answers it, then round {n + 1})' if n < MAX_ROUNDS else
-                f'status=blocked blocked_by="{BLOCKED_BY_ROUNDS}" review={jd}/{jid}/review.md (round {MAX_ROUNDS} is the last: {T["owner"]} decides)'))
+             + (f'status=fix review={jd}/{jid}/review.md (a fix session answers it, then round {n + 1})' if n < max_rounds(jid) else
+                f'status=blocked blocked_by="{blocked_by_rounds(jid)}" review={jd}/{jid}/review.md (round {n} is the last: {T["owner"]} decides)'))
     return (f'{jid}: review branch job/{jid} (git checkout job/{jid}) following {T["review_doc"]}. You must not have built it, fixed it or '
             f'reviewed an earlier round: CI\'s policy check refuses a round written in a session that wrote report.md or an earlier round.\n'
             + (f'Read {jd}/{jid}/handback.md after the report: the builder\'s own words; the report says what the orchestrator added.\n' if handback else '')
