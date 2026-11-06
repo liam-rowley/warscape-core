@@ -1,0 +1,11 @@
+{
+  "id": "W136",
+  "description": "**`doc_paths` crashes rather than reports on a missing path inside a consumer's submodule.** Seen in napoleon J78; the reviewer did not reproduce it, so reproduce first. A missing path should be a finding, with a host test. Raised: J78 review round 1, 2026-11-06.",
+  "title": "doc_paths crashes on a missing path inside the submodule",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
