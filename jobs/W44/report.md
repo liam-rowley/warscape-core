@@ -2,7 +2,7 @@
 
 W44 adds `wsc audit`: twelve metrics read from git, the jobs registry and, online, `gh`, compared with `[audit]` thresholds and written as findings with stable ids. On the core it matches the 2026-11-05 hand counts exactly at `f743242`. **The build session did not run the `wsc --root ../napoleon-remastered` calibration**, because its git was confined to its worktree. The orchestrator ran it at `9550e58`: 9 ready rows against the hand count of 12, explained by the branches, and `J78` gating 10. Its output, and what the fixes change, are in Fix round 1. Branch `job/W44`, session b692882c.
 
-Usage: 195 tool calls; models: opus; 2 sessions, counted by hand, about, build 120 and fix round 1 about 75, 2026-11-06
+Usage: 186 tool calls; models: opus; 2 sessions, counted by hand, about, build 120 and fix round 1 about 66, 2026-11-06
 
 ## What was built
 - `warscape/audit.py`: one function per metric returning `(value, details, findings)`, `record()` that assembles them, and `render_md()`, a pure function of the JSON.
