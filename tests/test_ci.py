@@ -529,12 +529,12 @@ class CoreConfig(unittest.TestCase):
         cls.sets = ci.input_sets(cls.cfg)
 
     def test_input_sets(self):
-        cases = {'docs/BACKLOG.md': set(), 'jobs/W21/report.md': set(), 'registries/jobs/W21.json': set(), 'README.md': set(),
+        cases = {'docs/BACKLOG.md': set(), 'jobs/W21/report.md': set(), 'registries/jobs/W21.json': set(), 'registries/decisions/C1.json': set(), 'README.md': set(),
                  'proxy/src/x.cpp': {'proxy'}, 'proxy/tools/build.sh': {'proxy', 'harness'}, 'proxy/tests/null_game/proxy/null/adapter.cpp': {'proxy', 'harness'},
                  'proxy/tests/host/t.cpp': {'proxy'}, 'harness/watcher.ps1': {'harness'}, 'tests/test_moved_tools.py': {'harness'},
                  'warscape/ci.py': {'harness'}, 'ci/gates.yml.in': {'proxy', 'harness'}, '.github/workflows/gates.yml': {'proxy', 'harness'},
                  'wsc.toml': {'proxy', 'harness'}}
-        paper = ('docs/', 'jobs/', 'registries/jobs/', 'README.md')
+        paper = ('docs/', 'jobs/', 'registries/jobs/', 'registries/decisions/', 'README.md')
         for path, want in cases.items():
             got = {k for k, v in ci.classify([path], self.sets).items() if v}
             self.assertEqual(got, want if path.startswith(paper) else want | {'gates_windows'}, path)
@@ -542,7 +542,7 @@ class CoreConfig(unittest.TestCase):
     def test_gates_windows_skips_paperwork_only(self):   # W42
         def runs(*files):
             return ci.classify(list(files), self.sets)['gates_windows']
-        paper = ['docs/X.md', 'docs/a/b.md', 'jobs/W1/brief.md', 'jobs/W1/review.md', 'registries/jobs/W1.json', 'README.md', 'CLAUDE.md']
+        paper = ['docs/X.md', 'docs/a/b.md', 'jobs/W1/brief.md', 'jobs/W1/review.md', 'registries/jobs/W1.json', 'registries/decisions/C1.json', 'README.md', 'CLAUDE.md']
         for f in paper:
             self.assertFalse(runs(f), f)
         self.assertFalse(runs(*paper))
@@ -552,6 +552,12 @@ class CoreConfig(unittest.TestCase):
             self.assertTrue(runs(f), f)
             self.assertTrue(runs('docs/X.md', f), f)
         self.assertTrue(ci.classify(None, self.sets)['gates_windows'])   # an unknown base runs everything
+
+    def test_every_plan_glob_is_paperwork_to_the_windows_gates(self):   # W43 review: the two lists are kept by hand, so a new plan glob fails here
+        from warscape.repo import Ctx
+        for glob in Ctx.load(ROOT).config['policy']['plan']:
+            path = glob.replace('**', 'x/y').replace('*', 'x')
+            self.assertFalse(ci.classify([path], self.sets)['gates_windows'], glob)
 
     def test_required_checks_and_no_artifacts(self):
         self.assertEqual(self.cfg['required_checks'], ['gates (ubuntu-latest)', 'gates (windows-latest)', 'policy', 'proxy', 'harness-windows'])

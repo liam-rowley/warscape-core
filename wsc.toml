@@ -95,7 +95,7 @@ required_checks = ["gates (ubuntu-latest)", "gates (windows-latest)", "policy", 
 # installer case kits, the moved-tools test and the library its Python helpers import. A workflow or template change runs both (W21).
 # gates_windows: everything but paperwork (W42), the [policy] plan set with the whole job folder; ubuntu runs the gates on every push.
 [ci.inputs]
-gates_windows = '^(?!docs/|jobs/|registries/jobs/|README\.md$|CLAUDE\.md$)'
+gates_windows = '^(?!docs/|jobs/|registries/jobs/|registries/decisions/|README\.md$|CLAUDE\.md$)'
 proxy = '^\.github/workflows/|^ci/|^proxy/|^wsc\.toml$'
 harness = '^\.github/workflows/|^ci/|^harness/|^proxy/tools/|^proxy/tests/null_game/|^tests/test_moved_tools\.py$|^warscape/|^wsc\.toml$'
 
