@@ -27,13 +27,12 @@ changed as a result; the rest are built as written. No existing test assertion c
   it once per tick through a new `pc_lock` seam, and `defer_reason` holds a `needs_pc` start. Buttons never read it. `ACCEPTANCE_PURPOSE` is held to `harness/acceptance.py` by a host test.
 - **Docs:** `docs/CONSUMING.md` (the key and one line, paid for by cuts in the same section: 30,662 to 30,688 bytes, under the 30,720 cap), `docs/UPGRADING.md`, the `jobq.py` module docstring, the verb header and
   its `wsc.jobs` tool row.
-- **`docs/AUDIT_METRICS.md:41`:** one phrase changed. See deviations.
 
 ## Evidence
 Tests: `python3 -m unittest tests.test_jobs` on 2026-11-06. Red before the build: 174 tests, 36 failed or errored, every one in the new classes (`SessionCap`, `AgentList`,
 `NextAtTheCap`, `Sessions`, `AcceptanceLock`, `MaxSessionsKey`). Green after it: 174 tests, OK. The six classes cover each case of deliverable 4.
 
-CI_LINE
+CI: the `gates` workflow, run 42182495196 at commit `b836059` (the build): `gates (ubuntu-latest)`, `gates (windows-latest)` and `harness-windows` success; `proxy` skipped, as nothing it watches changed. Local: `python3 wsc.py gates` at the same commit, 14 ok, 2 warn, 0 failed, 2026-11-06.
 
 Read on the PC on 2026-11-06 with Claude Code 2.1.319, read-only (no session was stopped by this job):
 
@@ -91,10 +90,8 @@ claude rm --help
   No harness at all (`job.sh` exits 64, or no bash) means no lock and no deferral, as the first session recommended. A stale lock defers nothing, as the watcher is about to expire it.
 - **`jobs sessions` lists background rows only,** so the interactive row is not shown.
 - **`--stop-finished` was not run on this PC.** It would end other sessions' processes, and nothing in the brief needs it; `claude stop`'s behaviour is Liam's own test above, and the verb's is stubbed.
-- **`docs/AUDIT_METRICS.md:41` is outside the brief.** `113dc72` on main retired `docs/DECISIONS.md` and left this line citing it, so the `doc_paths` gate failed on main and would have failed this
-  branch's required CI. The line names napoleon's file, so it now says "its decisions view".
 - **The brief's "two keys" is one key,** `max_sessions`, as its own parenthesis says.
-- `origin/main` was merged into the branch first (10 commits behind).
+- `origin/main` was merged into the branch, first 10 commits behind and again before the final push. Main's own fix to `docs/AUDIT_METRICS.md:41` (`b776a3c`) won over the same fix made here, so this job does not change that file.
 
 ## Open questions
 1. **The core and other games stay uncapped by default.** The count sees every background session on the PC, but only a repo with `max_sessions` set refuses. A core or empire autopilot can still launch

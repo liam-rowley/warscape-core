@@ -38,5 +38,5 @@ rename detection: a move touches both names.
 The lanes ignore this machine's PC on purpose: `jobs view` shows a `needs_pc` row as waiting where the PC is absent, and a finding must not depend on where the audit ran.
 
 ## What a game sets
-`overhead_phases` (its pipeline phase) and `startup_docs` (what its sessions read first, for napoleon its decisions view and `docs/plans/PLAN.md`); the rest have defaults that
+`overhead_phases` (its pipeline phase) and `startup_docs` (what its sessions read first, for napoleon its decisions file and `docs/plans/PLAN.md`); the rest have defaults that
 work. `ci_check_minutes` takes the check names as `[ci] required_checks` writes them.
