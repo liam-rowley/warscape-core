@@ -13,10 +13,10 @@ Usage: 30 tool calls; models: sonnet; 1 session, call count estimated by the ses
 - Red before the fix (this PC, Git Bash, 2026-11-06): the new test against the unfixed `job.sh` failed twice: `0.7813723087310791 not greater than or equal to 1.0 : run 1 ended early` and `0.8718643188476562 not greater than or equal to 1.0 : run 0 ended early`.
 - Green after the fix (2026-11-06): `python3 -m unittest tests.test_job_sh`, 35 tests OK. `date +%s%N` prints nanoseconds in Git Bash (checked 2026-11-06).
 - Full `python3 wsc.py gates`, 2026-11-06: 14 ok, 2 warn (hooks path form, 5 skipped tests needing capstone/POSIX sh), 0 failed, 1383 host tests passed.
-- CI run ids and the elapsed time of the `--wait 3` half on each runner: PENDING, not yet verified.
+- CI run 42213700864 on PR #161, verified 2026-11-06: `gates (ubuntu-latest)` pass (2m15s), `gates (windows-latest)` pass (8m23s), `harness-windows` pass. The test asserts the `--wait 3` half took 3.0 to 6.0 s on both, so both are inside that window. CI does not log the elapsed time of that half, so the brief's measured figure per runner is not available.
 
 ## Deviations from the brief and why
-- None in the code. The CI runner timings are not in this report yet (see Evidence).
+- The per-runner elapsed time of the `--wait 3` half is not reported: CI does not print it, only the assertion window (3.0 to 6.0 s) passed.
 
 ## Open questions
 - `ctl` and job-result waits left alone, as recommended; no `later` row filed.
