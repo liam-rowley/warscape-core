@@ -1,0 +1,11 @@
+{
+  "id": "W124",
+  "description": "**Proposals hardcode the decisions registry name**: `warscape/proposals.py` `load` keeps only a registry called `decisions`, though `[policy] decisions = \"registry:<name>\"` allows any name and `docs/PROPOSALS.md` tells a game to declare it. Read `decisions_registry(config)` instead. Why: another name is a KeyError in `apply_rows` and in `check`, so in the `jobs` gate. Depends on W45 merging. From W45 review round 1, 2026-11-06.",
+  "title": "Proposals hardcode the decisions registry name",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
