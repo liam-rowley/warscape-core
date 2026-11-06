@@ -424,9 +424,7 @@ void TestLints() {
         const size_t lk = hl.find("Lock l;", loop), mw = hl.find("MsgWaitForMultipleObjects(", loop), pm = hl.find("PeekMessageW(", loop);
         CHECK(mw != std::string::npos && pm != std::string::npos && lk != std::string::npos);
         CHECK(mw < lk && pm < lk);                                  // drained before the loop body takes the lock
-        const size_t rl = hl.find("void RelocateLocked()"), ok = hl.find("PlacementVerified(", rl), end = hl.find("
-}
-", ok);
+        const size_t rl = hl.find("void RelocateLocked()"), ok = hl.find("PlacementVerified(", rl), end = hl.find("\n}", ok);
         CHECK(rl != std::string::npos && ok != std::string::npos && end != std::string::npos);
         const std::string succ = hl.substr(ok, end - ok);
         CHECK(succ.find("WriteStatus()") != std::string::npos);
