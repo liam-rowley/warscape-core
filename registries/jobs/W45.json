@@ -13,5 +13,13 @@
   ],
   "brief": "jobs/W45/brief.md",
   "report": "jobs/W45/report.md",
-  "review": "jobs/W45/review.md"
+  "review": "jobs/W45/review.md",
+  "budget_lifts": [
+    {
+      "date": "2026-11-06",
+      "from": 150,
+      "to": 200,
+      "why": "two fix rounds: round 2 was widened by Liam from the named route to the whole forgery class, each route through the real judge, on top of a build of 75 and fix round 1 of 25"
+    }
+  ]
 }
