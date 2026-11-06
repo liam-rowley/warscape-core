@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.packs",
+  "kind": "script",
+  "path": "discovery/packs.py",
+  "purpose": "compare two Warscape installs' data\\\\*.pack sets (header, type, flags, entry count, top folders, index sha256) and map each content kind (top folder) to the packs that carry it; list loose data\\\\ files and which shadow pack entries",
+  "usage": "python3 discovery/packs.py [--games <adapter>/games.json] [--out discovery/diff/packs.json]",
+  "when": "J6 packs area; re-run after a game update (the output is deterministic, so a git diff shows what changed); J7 builds its pack reader adapter from this",
+  "not_a_verb": "reads multi-GB game packs in place on the PC (index only), outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

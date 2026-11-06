@@ -1,0 +1,7 @@
+{
+  "id": "C29",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W33)",
+  "decision": "**Patch pages, proxy threads and the release file rules.** (1) The patch writer changes and restores protections once per page, each page with its own recorded value, and reads every page back (VirtualQuery): a per-site record restored a page shared by two sites, or a site's second page, as RWX (audit 2026-11-03 C3). (2) No proxy thread starts in DllMain: `StartThread` refuses while `Rt().inDllMain`; the dev threads start at the first `Direct3DCreate9`, the state thread only for `dev.state_json` or `dev.timeline`, the ctl thread only for `dev.ctl` or `dev.autostart` (`DevThreadsFor`; audit C4). (3) `proxy.file_rules` is the release file-rules key, not a dev key: a release ships its data rules with every `dev.*` key off (audit G2). napoleon J78 re-checks `napoleon.proxy.init_heap_corruption` on the PC.",
+  "reversible": "yes"
+}

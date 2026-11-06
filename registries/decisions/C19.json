@@ -1,0 +1,7 @@
+{
+  "id": "C19",
+  "date": "2026-11-02",
+  "who": "proposed (Claude, meta/fix-brief-registry-deadlock), accepted by Liam's merge",
+  "decision": "**The core's registry views are not committed** (`[views] commit = false`, the C15 mechanism napoleon J55 built). Under C18 a `brief/W<n>` branch may change only its brief and its row, but the core committed `registries/jobs.md`, which every `reg set` rewrites: `policy` refused the branch with the view in it and the `registries` gate refused the branch without it (stale view), so no core brief could pass both (reproduced 2026-11-02 on a throwaway `brief/W1`). The other fix, letting `brief/` also change the view, was refused: it widens a rule C18 made narrow on purpose, and a committed view is a second copy of the rows that can only be wrong, never more right. The views are rendered to the git-ignored `_scratch/registries/`, the nine tracked `registries/*.md` and the `linguist-generated` attribute for them are gone, and the finished `[policy] bootstrap = [\"napoleon-j62\"]` entry is removed with them (B48). A game repo with a jobs registry fails the same way if it commits views; refusing that combination in `wsc jobs check` is B49.",
+  "reversible": "yes"
+}

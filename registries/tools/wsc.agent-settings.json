@@ -1,0 +1,11 @@
+{
+  "id": "wsc.agent-settings",
+  "kind": "verb",
+  "path": "warscape/verbs/agent_settings.py",
+  "purpose": "Add or remove one allowed command rule in a Claude Code settings file (.claude/settings.json) without a one-off ask, only when the repo's `[agent_settings] safe` patterns allow it: the guard holds Liam's judgement, the verb never edits a hook or a deny entry.",
+  "usage": "wsc agent-settings allow \"<rule>\" [\"<rule>\" ...] [--file .claude/settings.json]  |  wsc agent-settings remove \"<rule>\" [...] [--file ...]   (exit 0 done or already so, 1 the write failed (the file is unchanged), 2 refused: the failed check, and Liam decides)",
+  "when": "a session keeps asking for the same read-only command (git status, a read-only wsc verb, gh pr view); configure the safe list in wsc.toml [agent_settings] first.",
+  "verb": "agent-settings",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.layouts",
+  "kind": "script",
+  "path": "discovery/layouts.py",
+  "purpose": "list every UI layout file (Version0NN) and uied.templates record of two games with its version and whether the ported codec (uic.py, tpl.py) round-trips it byte for byte, plus the font names the layouts reference",
+  "usage": "python3 discovery/layouts.py [--games <adapter>/games.json] [--out discovery/diff/layouts.json]   (needs the extract: discovery/README.md)",
+  "when": "J6 layouts area; re-run after a codec change (a V039 field decoded) to see the round-trip count move; the fonts pass reads detail.fonts_referenced",
+  "not_a_verb": "reads extracted game files and the loose uied.templates in the install, outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

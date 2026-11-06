@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.fonts",
+  "kind": "script",
+  "path": "discovery/fonts.py",
+  "purpose": "list both games' CUF0 bitmap fonts (header metrics, glyphs, pair table, sha256, byte-exact round trip through cuf.py) and map the font names layouts reference (\"Ingame 12, Bold\") to files",
+  "usage": "python3 discovery/fonts.py [--games <adapter>/games.json] [--out discovery/diff/fonts.json]   (run layouts.py first: it reads layouts.json detail.fonts_referenced)",
+  "when": "J6 fonts area; the engine-drawn text path of UI_PIPELINE (D7) relies on the name map and the round trip",
+  "not_a_verb": "reads extracted game files, outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

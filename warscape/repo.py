@@ -82,7 +82,8 @@ DEFAULTS = {
     },
     # the pull-request policy (`wsc policy`; warscape/policy.py)
     'policy': {
-        'decisions': '',                   # repo-relative append-only decisions file ('' = not checked)
+        'decisions': '',                   # repo-relative append-only decisions file, or "registry:<name>", one file per row (core W43); '' = not checked
+        'decisions_retired': '',           # the Markdown file a repo moved off: while it exists, the `registries` gate holds its rows to the row files and `policy` refuses a change to its table (core W43)
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
@@ -197,6 +198,12 @@ def find_root(start=None):
     raise ConfigError(f'no {CONFIG_NAME} found in {p} or any parent (run from a repo that declares its registries, or pass --root)')
 
 
+def decisions_registry(cfg):
+    """The registry `[policy] decisions` names (`registry:<name>`, core W43), or '' for a Markdown path or none."""
+    v = cfg['policy']['decisions']
+    return v[len('registry:'):] if v.startswith('registry:') else ''
+
+
 def load_config(root):
     path = Path(root) / CONFIG_NAME
     try:
@@ -239,6 +246,11 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: release.annotated_from must be "" or X.Y.Z')
     if not isinstance(rel['consumers'], list) or not all(isinstance(c, dict) and set(c) <= {'name', 'repo', 'adapter', 'ref'} for c in rel['consumers']):
         raise ConfigError(f'{CONFIG_NAME}: release.consumers must list tables with name, repo, adapter and ref')
+    dreg = decisions_registry(cfg)
+    if dreg and dreg not in cfg['registries']:
+        raise ConfigError(f'{CONFIG_NAME}: policy.decisions names registry {dreg}: declare it in [registries]')
+    if dreg and dreg not in cfg['storage']['dir']:
+        raise ConfigError(f'{CONFIG_NAME}: policy.decisions names registry {dreg}: list it in [storage] dir (one file per row)')
     if not isinstance(cfg['policy']['decisions_cite_job'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
     if cfg['policy']['reviewer_code'] not in ('warn', 'error'):

@@ -535,8 +535,10 @@ def problems(rows, read, folders=()):
                 errs.append(f'{jid}: status {st} needs {f}={want}')
             if text is not None and not r.get(f):
                 errs.append(f'{jid}: {want} exists but the row has no {f}= (set it, with the status that goes with it)')
-        if semver_rule(jid) and st not in ('needs_brief', 'blocked') and not r.get('semver'):
+        if semver_rule(jid) and st not in ('needs_brief', 'blocked', 'later') and not r.get('semver'):
             errs.append(f'{jid}: status {st} needs semver=<patch|minor|major|none> (from {S.prefix}{S.semver_from} on, C27)')
+        if st == 'later' and read(f'{S.jobs_dir}/{jid}/brief.md') is not None:
+            errs.append(f'{jid}: has a brief but is still later (set status=queued brief={S.jobs_dir}/{jid}/brief.md)')
         if st == 'needs_brief' and read(f'{S.jobs_dir}/{jid}/brief.md') is not None:
             errs.append(f'{jid}: has a brief but is still needs_brief (set status=queued brief={S.jobs_dir}/{jid}/brief.md)')
         brief = read(f'{S.jobs_dir}/{jid}/brief.md')
@@ -1166,6 +1168,32 @@ def load_rows(text):
     return [strict_loads(l) for l in (text or '').splitlines() if l.strip()]
 
 
+# ------------------------------------------------------------------ later rows (W43)
+def later_text(change, why, raised):
+    """A backlog line's cells as a row description, each kept whole."""
+    return change + (f' Why: {why}' if why else '') + (f' Raised: {raised}' if raised else '')
+
+
+def later_row(jid, cells, area):
+    """The `later` row of one backlog table row `[number, change, why, raised]`. Model and phase are placeholders until it is promoted and briefed."""
+    bid, change = cells[0], cells[1]
+    bold = re.match(r'\*\*(.+?)\*\*', change)
+    title = bold.group(1).rstrip(':') if bold else change[:80]
+    return {'id': jid, 'description': later_text(*cells[1:]), 'title': title, 'phase': 1, 'status': 'later', 'model': S.models[0], 'needs_pc': False,
+            'depends_on': [], 'backlog_id': bid, **({'area': area} if area else {})}
+
+
+def later_problems(tables, rows, path):
+    """One line per backlog table row with no row, or whose text the row's description does not hold."""
+    by, errs = {r.get('backlog_id'): r for r in rows}, []
+    for cells in tables:
+        if cells[0] not in by:
+            errs.append(f'{path}: {cells[0]} has no later row')
+        elif later_text(*cells[1:]) != by[cells[0]].get('description'):
+            errs.append(f'{path}: {cells[0]} differs from row {by[cells[0]]["id"]}')
+    return errs
+
+
 # ------------------------------------------------------------------ view
 # (key, heading, what it means): the page's sections, in reading order.
 LANES = [('progress', 'In progress', 'a job/ or brief/ branch is open on origin'),
@@ -1175,6 +1203,7 @@ LANES = [('progress', 'In progress', 'a job/ or brief/ branch is open on origin'
          ('waiting', 'Queued, waiting on dependencies', 'brief written; a dependency is not done yet, or it needs the PC and this machine has none'),
          ('brief', 'Needs a brief', 'no brief yet; one can be written once the dependencies make sense'),
          ('blocked', 'Blocked', 'stopped on something outside the queue'),
+         ('later', 'Later', 'recorded for later: nothing picks these up; set status=needs_brief to promote one, batched by area'),
          ('done', 'Done', 'reviewed and merged')]
 
 
@@ -1188,6 +1217,8 @@ def lane(r, by, branches, on_branch=None):
         st, r = br['status'], br
     if st == 'done':
         return 'done', ''
+    if st == 'later':
+        return 'later', r.get('area', '')
     if st == 'review':
         return 'review', ''
     if st == 'fix':
@@ -1336,7 +1367,7 @@ input {{ width:100%; padding:8px 10px; border:1px solid var(--line); border-radi
 .id {{ font-weight:700; font-family:ui-monospace, Consolas, monospace; }}
 .status, .dep {{ font-size:12px; border-radius:10px; padding:1px 8px; border:1px solid currentColor; text-decoration:none; }}
 .s-done {{ color:var(--done); }} .s-review, .s-fix {{ color:var(--review); }} .s-queued {{ color:var(--queued); }}
-.s-needs_brief {{ color:var(--needs); }} .s-blocked, .s-unknown {{ color:var(--blocked); }}
+.s-needs_brief, .s-later {{ color:var(--needs); }} .s-blocked, .s-unknown {{ color:var(--blocked); }}
 .note {{ color:var(--review); font-size:14px; }} .desc {{ margin:6px 0; }} .meta, .usage, .cardline {{ color:var(--muted); font-size:13px; }}
 .usage.over {{ color:var(--blocked); font-weight:600; }}
 .doc {{ margin-top:6px; }} .doc summary {{ cursor:pointer; color:var(--accent); }}

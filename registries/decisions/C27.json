@@ -1,0 +1,7 @@
+{
+  "id": "C27",
+  "date": "2026-11-04",
+  "who": "Liam",
+  "decision": "**Release tags by workflow (W29).** Job rows carry a `semver` field and job branches stop editing `VERSION`; on a green `main` a workflow computes the version, merges a `release/vX.Y.Z` branch that changes only `VERSION`, and tags the merge commit. This ends the VERSION race between parallel jobs (2026-11-04: W10, W20 and W22 renumbered on merge). When W29 lands it replaces `CLAUDE.md`'s \"Tags (`vX.Y.Z`) are cut by Liam only\"; until then the orchestrator tags a green merge whose `VERSION` matches. Raised by the 2026-11-03 audit (napoleon-remastered `docs/audits/AUDIT_2026-11-03.md`, automation 1 and 2). Liam's words: \"Approve\".",
+  "reversible": "yes"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "C4",
+  "date": "2026-10-28",
+  "who": "Liam",
+  "decision": "Living-doc size cap 30 KB, dated records exempt, as a config value (`wsc.toml` `[docs] max_kb`). KB means KiB (1024 bytes) (proposed, Claude).",
+  "reversible": "yes"
+}

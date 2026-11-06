@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.ui_atlas",
+  "kind": "script",
+  "path": "discovery/ui_atlas.py",
+  "purpose": "write the static UI atlas (discovery/ui/<context>.json.gz, scripts.json.gz, summary.json) from the layouts, uied.templates records and compiled UI scripts, and generate the ui_elements rows (status atlas) from it",
+  "usage": "python3 discovery/ui_atlas.py [atlas|rows|live|art|all] [--games <adapter>/games.json] [--run harness/runs/<run id>]   (or `wsc discovery ui`; needs the extract: discovery/README.md)",
+  "when": "J10; re-run after a codec change, a game update or a change to the unit plan (UNITS, PIECES); the contract stage of every screen reads the atlas file named in the row's vanilla_source",
+  "not_a_verb": "reads extracted game files; `wsc discovery ui` runs it and `wsc discovery check` checks its results",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

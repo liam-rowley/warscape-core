@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.gate",
+  "kind": "script",
+  "path": "discovery/gate.py",
+  "purpose": "check that each registry is above its floor (<adapter>/gate.json), that the row shapes the later phases rely on hold, that every committed result is what its inputs give (recomputed offline, never a green someone else saw) and print the findings table with its ratchet",
+  "usage": "python3 core/wsc.py discovery gate [--install] [--write] [--json OUT]   (this module is a library; the verb is warscape/verbs/discovery.py)",
+  "when": "after any discovery pass or registry change; `wsc discovery check` includes it, and the tests gate runs it on this repo (discovery/tests/test_discovery_gate.py)",
+  "not_a_verb": "a library module; `wsc discovery gate` is the verb action",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

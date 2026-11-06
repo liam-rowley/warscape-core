@@ -1,0 +1,11 @@
+{
+  "id": "saves.esf_map",
+  "kind": "script",
+  "path": "saves/esf_map.py",
+  "purpose": "library for a game's save map: navigate records by name, read values by child position @N, find record paths, and grep every value that equals an id",
+  "usage": "from esf_map import Save; s = Save(path); s.sub(span, 'NAME'); s.vals(span)[N]; s.items(span, 'ARRAY'); s.path('WORLD', 'FACTION_ARRAY')  |  python3 -I saves/esf_map.py SAVE id ID",
+  "when": "writing a game's semantic map (a game repo's save_map.py) or chasing an id through a save (both ends of every link); field meanings live in saves/SAVE_FORMAT.md",
+  "not_a_verb": "a game-agnostic library and id grep run on the PC against saves outside the repo (warscape-core candidate, D10)",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

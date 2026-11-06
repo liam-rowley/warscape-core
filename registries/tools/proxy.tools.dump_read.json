@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.dump_read",
+  "kind": "script",
+  "path": "proxy/tools/dump_read.py",
+  "purpose": "classify a crash or hang dump: exception record, stack depth vs the TEB limit, shortest repeating frame cycle and who owns it, graphics modules loaded",
+  "usage": "python3 proxy/tools/dump_read.py DUMP [DUMP...] [--exe NAME] [--cdb PATH] [--sym-cache DIR] [--threads] [--json OUT] [--raw DIR]   (needs WinDbg: winget install Microsoft.WinDbg; --exe: the game exe's module, default the dump's own main module)",
+  "when": "a crash or hang leaves a dump in %LOCALAPPDATA%\\\\CrashDumps\\\\<mod> or <mod>\\\\dumps; copy dumps to _scratch before reading (WER keeps 5). The markdown goes into the run report; offsets only, never the dump.",
+  "not_a_verb": "wraps an external debugger on a local dump",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

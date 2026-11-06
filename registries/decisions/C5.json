@@ -1,0 +1,7 @@
+{
+  "id": "C5",
+  "date": "2026-10-28",
+  "who": "proposed (Claude, PR 1)",
+  "decision": "Repo configuration is TOML (`wsc.toml`, read with stdlib `tomllib`) so it can carry comments; registries stay JSONL.",
+  "reversible": "yes"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.layout",
+  "kind": "script",
+  "path": "proxy/tools/layout.py",
+  "purpose": "print (or return) the game repo root, the core's own root, the proxy core sources, the RmlUi pin file, the game's own proxy host tests, and the game's proxy, harness and discovery adapters",
+  "usage": "python3 proxy/tools/layout.py [game-root|own-root|proxy-src|proxy-adapter|harness-adapter|discovery-adapter|ui-pins|proxy-tests|all]   (default all: one `name<TAB>path` line each; proxy-tests prints an empty line when the game has none)",
+  "when": "every core tool that needs a game path imports it (python) or runs it (bash: build.sh, job.sh, shot.sh); run it by hand to see what a tool will use",
+  "not_a_verb": "a path resolver shared by the proxy and harness tools (bash and python), not a registry operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

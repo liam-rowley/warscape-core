@@ -1,0 +1,11 @@
+{
+  "id": "wsc",
+  "kind": "script",
+  "path": "wsc.py",
+  "purpose": "Entry point of the warscape-core CLI: puts the core on sys.path and runs the `wsc` verbs (reg, find, gates, plus a repo's own verbs).",
+  "usage": "python3 wsc.py <verb> ...   (from a game repo with the core at core/: python3 core/wsc.py <verb> ...; `--help` lists the verbs)",
+  "when": "every registry change, lookup or gate run; it is the only way into the core.",
+  "not_a_verb": "it is the launcher every verb runs through.",
+  "status": "live",
+  "last_used": "2026-10-28"
+}

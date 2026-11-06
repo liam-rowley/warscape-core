@@ -1,0 +1,7 @@
+{
+  "id": "C11",
+  "date": "2026-10-29",
+  "who": "proposed (Claude, napoleon J5)",
+  "decision": "New `hooks` gate (warning, skipped when `CI` is set): the pre-push hook is wired (`core.hooksPath`) in this clone, so \"set the hook once per clone\" is checked instead of remembered.",
+  "reversible": "yes"
+}

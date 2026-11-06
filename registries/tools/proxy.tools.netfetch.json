@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.netfetch",
+  "kind": "script",
+  "path": "proxy/tools/netfetch.py",
+  "purpose": "`retry()` (and `transient()`) wrap each download and git fetch of fetch_lua.py, fetch_ui.py and fetch_dxvk.py on transient network errors, one stderr line per retry; `ci-cache` prints the cache key (the pins) and the raw download paths for $GITHUB_OUTPUT",
+  "usage": "python3 proxy/tools/netfetch.py ci-cache   (game root: proxy/tools/layout.py game-root; paths relative to the working directory); the fetchers import retry, transient, _git_ok and _force_remove",
+  "when": "CI's proxy job runs `ci-cache` before `build.sh all` (the `{{wsc fetch_cache}}` render block); the fetchers call retry() wherever they run (build.sh, --docker, CI, the PC)",
+  "not_a_verb": "a library of the fetchers plus CI's cache key, not a registry operation",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

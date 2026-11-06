@@ -7,8 +7,8 @@ unless asked. (Ranking rules carried from empire-remastered `assets/find.py`.)
 import re
 
 WORD = re.compile(r'[^\W_]+')
-STRONG = ('id', 'purpose', 'description', 'claim', 'when', 'action', 'binding')
-SUMMARY = ('purpose', 'description', 'claim', 'action', 'role')
+STRONG = ('id', 'backlog_id', 'purpose', 'description', 'decision', 'claim', 'when', 'action', 'binding')
+SUMMARY = ('purpose', 'description', 'decision', 'claim', 'action', 'role')
 
 
 def _flat(v):
@@ -28,13 +28,14 @@ def score_row(row, words):
     strong = set(_tokens(' '.join(_flat(row.get(k)) for k in STRONG)))
     weak = set(_tokens(_flat(row)))
     hit, score = 0, 0.0
+    named = {_flat(row.get(k)).casefold() for k in ('id', 'backlog_id')}
     for w in words:
         exact_s, pre_s = w in strong, any(t.startswith(w) for t in strong)
         exact_w, pre_w = w in weak, any(t.startswith(w) for t in weak)
         if not (pre_s or pre_w):
             continue
         hit += 1
-        score += (3 if pre_s else 1) * (2 if (exact_s or exact_w) else 1)
+        score += (3 if pre_s else 1) * (2 if (exact_s or exact_w) else 1) + (20 if w in named else 0)   # W43: the row itself before rows that cite it
     return hit, score
 
 

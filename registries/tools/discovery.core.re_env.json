@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.re_env",
+  "kind": "script",
+  "path": "discovery/re_env.py",
+  "purpose": "create or check the venv the static RE tools run in (capstone 5.0.6 and pefile 2024.8.26, each wheel checked against a pinned sha256 before install, nothing vendored); prints the venv's python path",
+  "usage": "python3 discovery/re_env.py <dir> [--check]   (e.g. a scratch folder outside the repo; then run <dir>/venv/Scripts/python -I discovery/console_cmds.py ...)",
+  "when": "before any static RE of a game exe (J15 console, J9 engine sites); --check to see the venv is the pinned one",
+  "not_a_verb": "sets up a local tool environment outside the repo (D30), no registry or game file is touched",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

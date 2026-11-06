@@ -148,7 +148,7 @@ failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside eac
 claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
-decisions = "docs/DECISIONS.md"    # append-only: | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
+decisions = "docs/DECISIONS.md"    # append-only table, or "registry:<name>" (CONSUMING_OPTIONS.md)
 decision_prefix = "D"
 bootstrap = []                     # names exempt from the branch-kind rules: only the PR that adds the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" turns this and rules A-E off

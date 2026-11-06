@@ -1,0 +1,7 @@
+{
+  "id": "C6",
+  "date": "2026-10-28",
+  "who": "proposed (Claude, PR 1)",
+  "decision": "The pre-push hook runs the fast gates on every push to any branch (Empire's checked main only); bypass is `git push --no-verify` with a reason in the commit.",
+  "reversible": "yes"
+}

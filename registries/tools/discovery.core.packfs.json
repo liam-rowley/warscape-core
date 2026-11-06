@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.packfs",
+  "kind": "script",
+  "path": "discovery/packfs.py",
+  "purpose": "list, stat and read a Warscape game's files across its PFH0 packs and loose data\\\\ files (read by index offset, never a copy)",
+  "usage": "from packfs import PackFS; fs = PackFS.from_games(games, paths.TARGET); fs.list() / fs.stat(path) / fs.read(path) / fs.copies()   (library)",
+  "when": "every J7 pass (asset index, registry, refs, sheets, loc, db); J6's passes keep using extracted.py, switching is optional",
+  "not_a_verb": "a library module imported by the discovery passes, which read multi-GB packs in place on the PC",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

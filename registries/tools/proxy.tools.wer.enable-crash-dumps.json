@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.wer.enable-crash-dumps",
+  "kind": "script",
+  "path": "proxy/tools/wer/Enable crash dumps.cmd",
+  "purpose": "turn on WER LocalDumps (full crash dumps, out of process) for the game's exe only (its proxy adapter's identity.json); asks for admin rights once",
+  "usage": "double-click it (Liam, once per PC); undo with \"Disable crash dumps.cmd",
+  "when": "before the first PC test of the proxy; the dumps go to %LOCALAPPDATA%\\CrashDumps\\<mod_dir>",
+  "not_a_verb": "a Windows double-click wrapper around wer_localdumps.ps1",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

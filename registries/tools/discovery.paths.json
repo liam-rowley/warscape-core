@@ -1,0 +1,11 @@
+{
+  "id": "discovery.paths",
+  "kind": "script",
+  "path": "discovery/paths.py",
+  "purpose": "give the discovery modules the game repo root (REPO), the discovery adapter folder (ADAPTER) and the two game names (TARGET, REFERENCE) from layout.py and the adapter's games.json",
+  "usage": "from paths import REPO, ADAPTER, TARGET, REFERENCE, adapter_file   (library); `configure(root)` re-resolves them for another repo",
+  "when": "every discovery module imports it instead of finding the game by its own location; names are data: games.json \"target\" and \"reference\" (the game the tools run on, the game it is compared with)",
+  "not_a_verb": "a path and name resolver imported by the discovery modules, like proxy/tools/layout.py which it uses",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

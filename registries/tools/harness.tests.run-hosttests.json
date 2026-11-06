@@ -1,0 +1,11 @@
+{
+  "id": "harness.tests.run-hosttests",
+  "kind": "script",
+  "path": "harness/tests/Run-HostTests.ps1",
+  "purpose": "run the harness host test suites (unit, integration or all) under the PowerShell that launches it and exit non-zero on any failure",
+  "usage": "powershell -NoProfile -ExecutionPolicy Bypass -File Run-HostTests.ps1 [-Suite unit|integration|all] [-Repo <repo root>] [-Only <case-name regex>] [-Repeat <n>]",
+  "when": "CI job harness-windows runs it with -Suite all under Windows PowerShell 5.1; locally -Suite unit works under pwsh on Linux",
+  "not_a_verb": "a PowerShell test runner, not a repo operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

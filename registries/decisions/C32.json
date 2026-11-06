@@ -1,0 +1,7 @@
+{
+  "id": "C32",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W26), reversible",
+  "decision": "**A job is claimed on pick-up, and the autopilot reviews only a green head.** `wsc jobs next` creates `job/<id>` (or `brief/<id>`) on origin before it prints the steps, with a create-only push of `origin/main` (`--force-with-lease=refs/heads/<b>:`, an empty lease: the ref must not exist; a plain push would fast-forward an empty claim); a lost race moves on to the next ready job, any other failure claims nothing. An empty claim is listed after 24 h, never released by a tool. `pick_next` orders by (phase, number); `[jobs] pc_state` / `WSC_PC_STATE` hold back a `needs_pc` build where the PC state folder is absent. `--auto` starts a review only when the head's checks are green (a fix waits only while CI runs or has not reported), one `needs_pc` row at a time, and prunes dead worktree registrations each tick. Reverse: drop the claim from `next_claim` (the steps then say to push), or the CI rule in `JobServer.defer_reason`.",
+  "reversible": "yes"
+}

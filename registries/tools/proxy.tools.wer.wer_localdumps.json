@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.wer.wer_localdumps",
+  "kind": "script",
+  "path": "proxy/tools/wer/wer_localdumps.ps1",
+  "purpose": "turn Windows Error Reporting LocalDumps on, off or report it for ONE exe (default: the game's exe, from its proxy adapter's identity.json): full dumps written out of process, so they work when the game's heap is corrupt and the in-process minidump is empty",
+  "usage": "powershell -ExecutionPolicy Bypass -File wer_localdumps.ps1 -Mode status|enable|disable [-ExeName <game exe>] [-DumpFolder <path>] [-DumpCount 5]   (enable/disable need an elevated prompt: \"Enable crash dumps.cmd\")",
+  "when": "once per PC before PC tests (Liam runs \"Enable crash dumps.cmd\"); after any start-up crash read these dumps FIRST (empire-remastered LEARNINGS lesson 23)",
+  "not_a_verb": "runs on Windows as administrator, outside the repo checkout",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.fetch_ui",
+  "kind": "script",
+  "path": "proxy/tools/fetch_ui.py",
+  "purpose": "fetch RmlUi, FreeType, Lua and the stb headers at the commits and sha256 of the game's UI pin file into <game>/build/ui/src, check each, patch luaconf.h to float",
+  "usage": "python3 proxy/tools/fetch_ui.py [--pins FILE] [--out DIR] [--check]   (defaults: proxy/tools/layout.py ui-pins, <game root>/build/ui/src; --check: validate the pin file against schemas/ui_pins.schema.json only, no network)",
+  "when": "build.sh runs it before compiling the DLL or the UI host tests; the review viewer's build runs it too (one fetcher, one pin file); --check in a game's tests or by hand after editing the pin file; never commit the output",
+  "not_a_verb": "needs network and writes build output, not a registry operation; build.sh calls it",
+  "status": "live",
+  "last_used": "2026-11-02"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.shaders",
+  "kind": "script",
+  "path": "discovery/shaders.py",
+  "purpose": "list both games' fx\\\\ effect sources (sha256, size, technique names, includes) and diff them file by file (identical, changed with a line-diff size, new, gone), flagging shadow, imposter, sprite and LOD names for J8",
+  "usage": "python3 discovery/shaders.py [--games <adapter>/games.json] [--out discovery/diff/shaders.json]   (needs the extract: discovery/README.md)",
+  "when": "J6 shaders area; J8 (runtime shader catalogue, frame anatomy) starts from the flagged files; re-run after a game update",
+  "not_a_verb": "reads extracted game files, outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

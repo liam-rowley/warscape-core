@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.tpl",
+  "kind": "script",
+  "path": "discovery/tpl.py",
+  "purpose": "split data\\\\ui\\\\templates\\\\uied.templates into records and round-trip each record's textures and component through uic.py",
+  "usage": "python3 discovery/tpl.py <uied.templates>   |   import tpl; tpl.split(bytes); tpl.parse_record(rec); tpl.serialise_record(doc, ver)",
+  "when": "reading the UiEd template library (J6 layouts pass; later the UI atlas)",
+  "not_a_verb": "a binary codec library, ported unchanged from empire-remastered ui_scale_mod/tools/tpl.py",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

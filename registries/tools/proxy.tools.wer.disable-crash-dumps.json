@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.wer.disable-crash-dumps",
+  "kind": "script",
+  "path": "proxy/tools/wer/Disable crash dumps.cmd",
+  "purpose": "turn WER LocalDumps for the game's exe off again (removes only its own registry subkey); asks for admin rights once",
+  "usage": "double-click it",
+  "when": "when crash dumps are no longer wanted",
+  "not_a_verb": "a Windows double-click wrapper around wer_localdumps.ps1",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

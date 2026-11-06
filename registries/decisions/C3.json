@@ -1,0 +1,7 @@
+{
+  "id": "C3",
+  "date": "2026-10-28",
+  "who": "proposed (Claude, PR 1)",
+  "decision": "Schemas are checked by a closed stdlib subset of JSON Schema 2020-12 (`warscape/schema.py`): any keyword it does not implement is refused, never ignored. If the subset falls short, the fallback is to vendor `fastjsonschema` (pure Python, no dependencies), not to grow the subset into a full validator.",
+  "reversible": "yes"
+}

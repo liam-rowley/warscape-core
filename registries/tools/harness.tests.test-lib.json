@@ -1,0 +1,11 @@
+{
+  "id": "harness.tests.test-lib",
+  "kind": "script",
+  "path": "harness/tests/Test-Lib.ps1",
+  "purpose": "tiny shared test kit for the harness host tests (Test-Case, assertions, Wait-Until, temp folders, a test adapter); dot-sourced by Test-Unit.ps1 and Test-Integration.ps1",
+  "usage": ". \"$PSScriptRoot\\Test-Lib.ps1\"   (not run on its own)",
+  "when": "only from the harness host tests; ASCII only, no Pester (Windows PowerShell 5.1 ships Pester 3 and the runner another)",
+  "not_a_verb": "a dot-sourced PowerShell library for the host tests",
+  "status": "live",
+  "last_used": "2026-10-31"
+}
