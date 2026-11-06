@@ -792,6 +792,102 @@ class Lock(DeployBase):
         self.assertIn("held by 'other'", r.stderr)
 
 
+class UninstallWaitsForRestore(DeployBase):
+    """W94: `pc_deploy uninstall` refuses on the watcher's pending profile restore (profiles/_active.json), as `set` does (B39): a restore that
+    runs after the uninstall writes the saved config files, the mod ini included, back into the game folder."""
+
+    def setUp(self):
+        super().setUp()
+        bash_or_skip(self, found=FOUND_BASH)
+        os.environ.pop('CLAUDE_CODE_SESSION_ID', None)
+        os.environ['WSC_SESSION_ID'] = 'sess-w94'
+        self.w = self.state / 'watcher'
+        (self.w / 'profiles').mkdir(parents=True)
+        (self.w / 'watcher.status').write_text(json.dumps({'processes': [], 'lock': {'owner': 'o1'}}), encoding='utf-8')
+        (self.w / 'watcher.alive').write_text('x')
+        self.active = self.w / 'profiles' / '_active.json'
+        self.before_install = pd.snapshot(self.game)
+        quiet(pd.install, self.kit, self.game, self.state)
+        self.installed = pd.snapshot(self.game)
+        self.rec = (self.state / 'install.json').read_bytes()
+        self.active.write_text(json.dumps({'name': 'j9-prof', 'owner': 'o1'}), encoding='utf-8')
+
+    def un(self, **kw):
+        return quiet(pd.uninstall, self.game, self.state, **kw)
+
+    def assertNothingMoved(self):
+        self.assertEqual(pd.diff_snapshots(self.installed, pd.snapshot(self.game)), [])
+        self.assertEqual((self.state / 'install.json').read_bytes(), self.rec)
+        self.assertFalse((self.state / '_to_delete').exists())
+
+    def test_a_pending_restore_refuses_and_moves_nothing(self):
+        sleeps = []
+        r, _ = self.un(wait_restore=3, sleep=sleeps.append)
+        self.assertIsInstance(r, SystemExit)
+        msg = str(r)
+        for s in ('pc_deploy uninstall:', 'j9-prof', 'owner o1', 'held by o1', 'not running', 'put back'):
+            self.assertIn(s, msg)
+        self.assertEqual(sleeps, [1, 1, 1])
+        self.assertNothingMoved()
+        self.assertFalse((self.w / 'game.lock').exists())
+
+    def test_wait_restore_zero_refuses_at_once(self):
+        sleeps = []
+        r, _ = self.un(wait_restore=0, sleep=sleeps.append)
+        self.assertIsInstance(r, SystemExit)
+        self.assertEqual(sleeps, [])
+        self.assertNothingMoved()
+
+    def test_a_restore_that_finishes_during_the_wait_lets_uninstall_proceed(self):
+        def sleep(_):
+            self.active.unlink()
+        ok, _ = self.un(wait_restore=5, sleep=sleep)
+        self.assertIs(ok, True)
+        self.assertEqual(pd.diff_snapshots(self.before_install, pd.snapshot(self.game)), [])
+
+    def test_no_watcher_proceeds_with_one_line(self):
+        shutil.rmtree(self.w)
+        ok, out = self.un()
+        self.assertIs(ok, True)
+        self.assertIn('cannot be seen', out)
+
+    def test_assume_closed_does_not_skip_the_check(self):
+        r, _ = self.un(assume_closed=True, wait_restore=0)
+        self.assertIsInstance(r, SystemExit)
+        self.assertNothingMoved()
+
+    def test_a_profile_applied_between_the_check_and_the_lock_is_refused_and_the_lock_released(self):
+        self.active.unlink()
+        real = pd.game_lock
+        def late(*a, **kw):   # the profile lands after the first check, before the lock is taken
+            self.active.write_text(json.dumps({'name': 'late', 'owner': 'o2'}), encoding='utf-8')
+            return real(*a, **kw)
+        with mock.patch.object(pd, 'game_lock', late):
+            r, _ = self.un(wait_restore=0)
+        self.assertIsInstance(r, SystemExit)
+        self.assertIn('late', str(r))
+        self.assertNothingMoved()
+        self.assertFalse((self.w / 'game.lock').exists())
+
+    def test_the_cli_has_wait_restore_on_uninstall(self):
+        r = subprocess.run([sys.executable, str(ROOT / 'proxy/tools/pc_deploy.py'), 'uninstall', '--game', str(self.game), '--state', str(self.state),
+                            '--wait-restore', '0'], capture_output=True, text=True, env={**os.environ, 'WSP_GAME_ROOT': str(pd.ROOT)})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn('unrecognized', r.stderr)
+        self.assertIn('j9-prof', r.stderr)
+
+    def test_each_shape_of_active_json(self):
+        # the watcher removes the file when idle (Remove-Quiet) and writes a JSON object when a profile is active; null and {} are what
+        # Get-Active, napoleon's profile_active and the status line's profile_active all read as "none"; a file nobody can read stays pending
+        for name, raw, pending in (('missing', None, False), ('null', b'null', False), ('empty object', b'{}', False),
+                                   ('named', b'{"name": "p", "owner": "o"}', True), ('unreadable', b'\xff\xfe{not json', True)):
+            with self.subTest(name):
+                self.active.unlink(missing_ok=True)
+                if raw is not None:
+                    self.active.write_bytes(raw)
+                self.assertEqual(pd.pending_restore(self.state) is not None, pending)
+
+
 class AtomicWrite(DeployBase):
     """H7: the ini (and install.json) is written to a same-folder temp file and os.replace'd into place; a replace that keeps failing leaves the
     ini byte-identical and no temp file."""
