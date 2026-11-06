@@ -273,6 +273,8 @@ def answer(ctx, answers, quote, branch, today=None, taken=()):
     record = pp.answers_path(ctx.config['audit']['dir'], branch)
     if not record:
         raise ValueError(f'{branch} is not decide/<YYYY-MM-DD>[-<n>]: answers land only on a decide/ branch (C41)')
+    if (ctx.root / record).exists():
+        raise ValueError(f'{record} already holds a round of answers and is never rewritten: answer on {pp.next_decide(branch)}')
     owner = ctx.config['jobs']['text'].get('owner')
     if not owner:
         raise ValueError('[jobs.text] owner is not set: an answer must name who gave it')

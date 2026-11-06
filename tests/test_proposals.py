@@ -194,6 +194,16 @@ class Forgeries(unittest.TestCase):
         del head[ANS]
         self.refused(judge('decide/2026-11-06', {path(): text(row())}, head, head_rows={'W200': job()}), ANS)
 
+    def test_decide_cannot_rewrite_an_earlier_answers_file(self):
+        self.refused(judge('decide/2026-11-06', {ANS: 'old quote'}, {ANS: 'new quote'}), 'decide/2026-11-06-2')
+
+    def test_decide_cannot_delete_an_earlier_answers_file(self):
+        self.refused(judge('decide/2026-11-06', {ANS: 'old quote'}, {}), 'decide/2026-11-06-2')
+
+    def test_a_reused_second_round_names_the_third(self):
+        f = ANS.replace('.md', '_2.md')
+        self.refused(judge('decide/2026-11-06-2', {f: 'old quote'}, {f: 'new quote'}), 'decide/2026-11-06-3')
+
     def test_decide_row_not_in_the_answers_file(self):
         self.refused(judge('decide/2026-11-06', {path(): text(row())}, decide_head(extra={ANS: '> yes\n'}), head_rows={'W200': job()}), 'does not name')
 
@@ -555,6 +565,16 @@ class Folder(unittest.TestCase):
                 self.answer(bad)
         self.assertEqual(self.status()['status'], 'open')
         self.assertFalse((self.root / ANS).exists())
+
+    def test_answer_refuses_an_existing_record_and_writes_nothing(self):
+        self.put(row())
+        f = self.root / ANS
+        f.parent.mkdir(parents=True)
+        f.write_text('old quote', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'decide/2026-11-06-2'):
+            self.answer({ID: 'no'})
+        self.assertEqual(f.read_text(encoding='utf-8'), 'old quote')
+        self.assertEqual(self.status()['status'], 'open')
 
     def test_the_registry_outside_storage_dir_is_refused(self):
         f = self.root / 'wsc.toml'

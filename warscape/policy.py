@@ -43,7 +43,7 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
 Anything else is refused. On every branch kind (`proposal_problems`, W45): only `decide/` writes an answer, so `plan/`, which merges itself (C40), cannot approve anything for the
 owner. Its one exception is a row the base's `[audit] auto_apply` lists, untagged, at its recommendation, with nothing else changed. A `plan/` branch may add and fill open rows, close
 an answered row, and close an open row as `gone`, but on an existing row never change `class` or change or remove `tag`; no other kind touches a row. An answered row keeps its content, its status goes only to `closed`, and no row is ever deleted. An
-`ANSWERS_` file changes only on `decide/`.
+`ANSWERS_` file changes only on `decide/`, which adds its own and never rewrites or deletes one the base has.
  Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
 YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. With `decisions = "registry:<name>"` (core W43)
@@ -277,6 +277,12 @@ def answers_path(audit_dir, branch):
     return f'{audit_dir}/ANSWERS_{m.group(1)}{"_" + m.group(2) if m.group(2) else ""}.md' if m else None
 
 
+def next_decide(branch):
+    """The decide/ name after a good `branch`, whose ANSWERS file is free of the one it would rewrite."""
+    m = DECIDE.fullmatch(branch)
+    return f'decide/{m.group(1)}-{int(m.group(2) or 1) + 1}'
+
+
 def option_kind(r, key):
     return next((o.get('kind') for o in r.get('options') or [] if isinstance(o, dict) and o.get('key') == key), None)
 
@@ -357,6 +363,8 @@ def proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, he
     for p in changed:
         if p.startswith(f"{cfg['audit_dir']}/ANSWERS_") and kind != 'decide' and base_file(p) != head_file(p):
             errs.append(f'{p}: an ANSWERS file quotes the owner, so it changes only on a decide/ branch')
+        if kind == 'decide' and p == record and base_file(p) is not None and base_file(p) != head_file(p):
+            errs.append(f'{p}: the record of an earlier round of the owner quoted is never rewritten or deleted: answer on {next_decide(branch)}')
         if not p.startswith(d + '/'):
             continue
         name, old_t, new_t = p[len(d) + 1:], base_file(p), head_file(p)
