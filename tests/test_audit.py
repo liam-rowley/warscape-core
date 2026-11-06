@@ -632,7 +632,7 @@ class Proposals(Case):
     def proposals_fixture(self):
         f = self.fixture()
         at = int(30 * 1024 * 0.9)
-        t = (f.root / 'wsc.toml').read_text(encoding='utf-8').replace('[registries]\n', '[registries]\nproposals = "core:proposals"\n', 1)
+        t = (f.root / 'wsc.toml').read_text(encoding='utf-8').replace('[registries]\n', '[registries]\nproposals = "core:proposals"\n', 1).replace('dir = ["jobs"]', 'dir = ["jobs", "proposals"]', 1)
         f.commit('plan: docs (#1)', {'wsc.toml': t, 'docs/BIG.md': 'x' * at}, 2)
         return f
 
