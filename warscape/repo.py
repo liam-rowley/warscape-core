@@ -38,7 +38,10 @@ DEFAULTS = {
         'exempt': [],
         'path_ignore': [],                 # doc_paths gate (W28): backticked tokens (exact, or globs) that look like a path but are not one of this repo's
     },
-    'tests': {'dirs': ['tests'], 'timeout_s': 600},
+    'tests': {'dirs': ['tests'], 'timeout_s': 600,    # timeout_s: one deadline per folder, across all workers
+              'workers': 1,                # modules run at once, each in its own process (W139); 1 = one process for the folder
+              'first': [],                 # module names to start first, the long ones; the rest follow by name. Only read above 1 worker
+              'warn_at': 0.75},            # the gate warns when a folder took more than this share of timeout_s; 0 = off
     # wsc agent-settings (W35, C35): the Claude Code command rules an agent may add to .claude/settings.json without asking, e.g.
     # "Bash(git status:*)"; a rule is added only when one of these covers it (itself, or extended by whole words without a write flag).
     # Empty (the default) = the verb is not configured. exact_only = true: only the patterns themselves.
@@ -270,6 +273,13 @@ def load_config(root):
     ms = cfg['jobs']['max_sessions']
     if isinstance(ms, bool) or not isinstance(ms, int) or ms < 0:
         raise ConfigError(f'{CONFIG_NAME}: jobs.max_sessions must be a whole number of at least 0')
+    tw, tf, ta = cfg['tests']['workers'], cfg['tests']['first'], cfg['tests']['warn_at']
+    if isinstance(tw, bool) or not isinstance(tw, int) or tw < 1:
+        raise ConfigError(f'{CONFIG_NAME}: tests.workers must be a whole number of at least 1')
+    if not isinstance(tf, list) or not all(isinstance(x, str) and x for x in tf):
+        raise ConfigError(f'{CONFIG_NAME}: tests.first must be a list of module names')
+    if isinstance(ta, bool) or not isinstance(ta, (int, float)) or not 0 <= ta <= 1:
+        raise ConfigError(f'{CONFIG_NAME}: tests.warn_at must be a number from 0 to 1')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     audit_problem(cfg['audit'])

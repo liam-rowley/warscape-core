@@ -3,6 +3,12 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## The `tests` gate: timings, workers, headroom (W139)
+
+Nothing is required at the bump, and `workers` stays 1: one process per folder and the same result lines. Three things show up without a change: the log now has a `timing:` line and each folder's
+slowest modules (the `--durations` flag needs Python 3.12), and a folder over 75% of `timeout_s` warns (`[tests] warn_at`, `0` is off). To opt in, read those timings first, then set
+`workers` and `first`: [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "The `tests` gate". This is no DLL or harness input, so a pin bump to it needs no acceptance run for it.
+
 ## `wsc proposals` and `decide/` (W45, C41)
 
 A new core verb, a shipped schema and a branch kind; nothing is required at the bump, and without the registry nothing runs. A game verb named `proposals` in `[cli] verb_dirs` now refuses
