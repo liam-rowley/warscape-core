@@ -3,13 +3,15 @@
   "description": "Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) R4 (core half), R9, automation 4. Re-scoped by C41 (plan/audit-loop): later items are W43's later job rows (Liam, 2026-11-05) and the Waiting on Liam lane is W45's, so neither is built here. What stays: a later row carries trigger_paths, and policy warns when a branch touches one; a brief's open questions (recommended:, 'default after: <date>', an optional taste, risk or legal tag that never defaults) become W45 proposals of kind question, drafted by jobs check or a verb; jobs check lists the due ones, and a decide/ branch applies them as one decision row naming each. After W26 and W31 (jobq.py), W43 and W45.",
   "title": "Brief questions as proposals, and trigger paths on later rows",
   "phase": 1,
-  "status": "needs_brief",
-  "model": "sonnet",
+  "status": "queued",
+  "model": "opus",
   "needs_pc": false,
+  "semver": "minor",
   "depends_on": [
     "W26",
     "W31",
     "W43",
     "W45"
-  ]
+  ],
+  "brief": "jobs/W32/brief.md"
 }
