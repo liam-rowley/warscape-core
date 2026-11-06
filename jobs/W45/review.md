@@ -1,5 +1,35 @@
 # W45 review
 
+## Round 4 (2026-11-06, branch job/W45 at eeee6cf)
+
+**Verdict: merge.**
+
+The four things this round had to read all hold: `0bfc589`, `0ae0a89`, the merge `cfcfddf` and `4047691`. The two guards in `warscape/policy.py` do not interfere, through the real judge, and each merge joint has a test that fails without it. Every required check is green on `eeee6cf`, but `gates (windows-latest)` needed a second attempt: the first hit the time limit. No test failed, and nothing in the job's code is wrong, so this does not block the merge, but the suite is now close enough to the limit that it will happen again (should-fix 1). I changed no file outside this folder and the row.
+
+### Findings
+
+**Should-fix 1, not for this branch: the Windows host tests have lost their headroom under `[tests] timeout_s`.** Attempt 1 of run 42297959568 at `eeee6cf`, job 128168139132, failed with `tests: timed out after 1080 s`, and all 15 other gates were ok. Attempt 2 on the same commit, job 128177416061, passed 1563 tests in 812.7 s. So one tree spans 813 s to over 1080 s, by runner alone. Main without W45 already reached 971.9 s (1401 tests, run 42259250732; 748.2 s to 971.9 s across its last runs). W45 adds about 160 tests, and `tests/test_proposals_judge.py` alone takes 119.8 s on this PC. The limit cannot simply rise: the job's own cap is 20 minutes. The merge itself should not turn main red, as a pass marker now holds this input tree. The next job that changes a Windows input can time out on a slow runner with nothing wrong, and a red run there costs a rerun. Filed as a later row with what to fix: fewer clones in the real-judge fixtures, or the suite split across two jobs.
+
+**Later, into W134: on `decide/` a grant's refusal names a step `decide/` refuses.** `grant_problems` at `warscape/policy.py:487` says "set it in the same pull request", and `decide_problems` then refuses that with `adds job rows only`, which does not name `meta/`. Seen with a grant for a queued row on `decide/2026-11-08`. It fails closed, only the hint is wrong.
+
+**Noted, no action:** a second grant on `decide/` needs no job-row change, so it passes while the first grant's round is unused. `meta/` allows the same, and `test_a_second_grant_is_accepted_while_the_base_row_is_blocked` pins it.
+
+### What was checked
+- **`0bfc589`.** The combined diff has one hand edit, the count in `tests/test_schema.py:11`. 13 schemas ship, and the comment adds up: eleven registry schemas, `ui_pins`, `acceptance_pass`. The missing trailer on this commit touches neither `report.md` nor `review.md`, and `policy` does not refuse it.
+- **`0ae0a89`.** One word in `docs/CONSUMING.md`, the link intact. After the merge the file is 30645 bytes against 30720, as the report says.
+- **`cfcfddf`, `warscape/policy.py`.** Read as a combined diff: the two blocks sit one after the other and neither was edited. In `check`, `proposal_problems` then `grant_problems` run before the bootstrap return, where main calls `grant_problems`. The other files the merge joined by hand, `docs/CONSUMING.md`, `docs/REVIEW.md`, `docs/UPGRADING.md` and `warscape/jobq.py`, keep both sides. `git diff origin/main HEAD` on every shared file drops nothing of W132 or W18, and the row keeps the branch's fields with `blocked_by` gone.
+- **The two guards together, 10 cases through `python3 wsc.py policy` (parent and `--judge` child), real commits on real branch names in a throwaway clone of this head.** The base held an open proposal with no tag, a queued job and a job blocked as after a grant. Refused, each by the right guard: `meta/` with a grant and a proposal change (proposal guard only); `plan/` with a grant (grant guard only); `plan/` with a grant and a forged answer (both, plus the ANSWERS rule); a job branch with both (both); `decide/` with a first grant and a good answer (`adds job rows only`); `decide/` with `reversible=yes`; `decide/` for a job not blocked; `decide/soon`. Ok, as they should be: `decide/` with a grant for a blocked row and a good answer, with the decision row separate and with one row doing both.
+- **Mutation check of the joints, shipped tests only.** In the throwaway clone, committed so the judge reads them, each run through `tests/test_grant_round.py` and `tests/test_proposals_judge.py`: without `proposal_problems` in `check`, many fail; without `grant_problems`, many fail; `GRANT_KINDS` without `decide`, exactly `test_on_decide_a_grant_needs_the_row_already_blocked_on_the_base` fails. Control: 54 tests pass.
+- **`4047691`.** The comment is now true (read against `decide_problems` and `grant_problems`), the test pins both halves, and the only code change is that comment. The report's account of it holds.
+- **CI on the final head, read myself.** Run 42297959568 at `eeee6cf`. `gates (ubuntu-latest)` passed, 1563 tests, 180.4 s. `gates (windows-latest)`: attempt 1 and 2 above; attempt 2's marker reads `commit=eeee6cfe8d6f`. `proxy` and `harness-windows` skipped, and that is not a pass on its own: the `changes` log names their pass markers from run 42295783364 at `4047691`, whose run was cancelled only after those two jobs succeeded, and `eeee6cf` changes neither input tree. `policy` skipped on the draft; the ready step below gets it a real run.
+- **Locally.** `python3 wsc.py gates` at `eeee6cf` on this Windows PC, 2026-11-06: 14 ok, 2 warn, 0 failed, 1563 tests, 963.4 s, with other work running on the PC. The warns are this worktree's hook path and the known skips.
+- **Against the latest origin/main.** `b38d357`, one `plan/` commit past the branch's base, changing only job rows (W135 to W138, W61). Rows only, so no Windows input changed. In a throwaway clone the head merged with it cleanly, and `python3 wsc.py gates --fast` on that tree: 14 ok, 1 warn (the clone's hook), 0 failed. Main does not require a branch to be up to date.
+- **Fix round 3's claims.** Round 3's findings answered as it says, W130 is a `later` row on main, and the grant C261106-8586 is on main. `[audit] auto_apply` stays empty. No workflow changed.
+
+### Notes
+- Do not fill `auto_apply` before W130 is done: round 3's list stands.
+- Report question 5 stays Liam's. This round adds only that main moved again during the review, harmlessly.
+
 ## Round 3 (2026-11-06, branch job/W45 at 735e3bc)
 
 **Verdict: merge after fixes.**
