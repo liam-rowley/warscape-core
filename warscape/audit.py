@@ -63,6 +63,7 @@ class Audit:
     heads_error: str = ''
     _rows: dict = None
     _tree: dict = None
+    _sizes: dict = None
 
     @property
     def cfg(self):
@@ -98,7 +99,9 @@ class Audit:
     @property
     def sizes(self):
         """{path: bytes} of every file at main."""
-        return {p: n for p, n in self.tree.items() if n is not None}
+        if self._sizes is None:
+            self._sizes = {p: n for p, n in self.tree.items() if n is not None}
+        return self._sizes
 
     def jobs(self):
         """The job merges in the window, newest first."""
@@ -426,6 +429,18 @@ def doc_caps(a):
     return len(near), {'docs': len(docs), 'near': near}, out
 
 
+def core_tags(a, sub):
+    """The tag names of the core at `sub`: origin's when online, without a write, because a finding must not depend on how fresh this clone's store
+    is; the local store's with --offline. Online, an origin that cannot be read fails the metric rather than falling back to a stale answer."""
+    if a.offline:
+        p = a.run(['git', '-C', str(sub), 'tag', '--list', 'v*'], capture_output=True, text=True, timeout=60, env=git_env())
+        return (p.stdout or '').split() if p.returncode == 0 else []
+    p = a.run(['git', '-C', str(sub), 'ls-remote', '--tags', 'origin', 'v*'], capture_output=True, text=True, timeout=60, env=git_env())
+    if p.returncode != 0:
+        raise ValueError(f'git ls-remote --tags in {sub.name}/ failed: {(p.stderr or "").strip()[:200]}; --offline reads the local store')
+    return [line.rsplit('refs/tags/', 1)[-1] for line in p.stdout.splitlines()]   # an annotated tag's `^{}` line fails VTAG
+
+
 def pin_lag(a):
     folder = a.ctx.config['ci']['core']
     if not folder:
@@ -436,10 +451,10 @@ def pin_lag(a):
     sub = a.ctx.root / folder
     if not (sub / '.git').exists():
         raise Skip(f'{folder}/ is not checked out here: its tags cannot be read')
-    p = a.run(['git', '-C', str(sub), 'tag', '--list', 'v*'], capture_output=True, text=True, timeout=60, env=git_env())
-    tags = [tuple(map(int, m.groups())) for t in (p.stdout or '').split() if (m := VTAG.fullmatch(t))] if p.returncode == 0 else []
+    tags = [tuple(map(int, m.groups())) for t in core_tags(a, sub) if (m := VTAG.fullmatch(t))]
+    where = f'in the local {folder}/ store (--offline: origin may be newer)' if a.offline else f'at the origin of {folder}/'
     if not tags:
-        raise Skip(f'{folder}/ holds no vX.Y.Z tag')
+        raise Skip(f'no vX.Y.Z tag {where}')
     new, old = max(tags), tuple(map(int, pinned.groups()))
     n = a.cfg['max_pin_lag']
     # a newer major is behind by at least the limit, whatever its minor says
@@ -447,8 +462,8 @@ def pin_lag(a):
     newest = '.'.join(map(str, new))
     out = []
     if lag >= n:
-        out.append(finding('pin_lag', 'pin_lag', '', 'medium', lag, n, 'above', f'The pin is {a.ctx.config["core"]["version"]} and the newest tag in {folder}/ is {newest}: {lag} minor versions behind.'))
-    return lag, {'pinned': a.ctx.config['core']['version'], 'newest': newest}, out
+        out.append(finding('pin_lag', 'pin_lag', '', 'medium', lag, n, 'above', f'The pin is {a.ctx.config["core"]["version"]} and the newest tag {where} is {newest}: {lag} minor versions behind.'))
+    return lag, {'pinned': a.ctx.config['core']['version'], 'newest': newest, 'tags_from': 'local store' if a.offline else 'origin'}, out
 
 
 def throughput(a):

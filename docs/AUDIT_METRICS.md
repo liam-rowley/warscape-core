@@ -29,7 +29,7 @@ rename detection: a move touches both names.
 | `brief_cost` | median brief and report bytes; brief merges against job merges | `brief_heavy`: median brief over `max_brief_ratio` median reports |
 | `startup_read` | KiB of `CLAUDE.md`, `README.md`, `startup_docs` | `startup_heavy`: over `max_startup_kb` |
 | `doc_caps` | living docs (the `doc_size` gate's list) | `doc_cap:<path>`: at `doc_cap_share` of `[docs] max_kb` or more |
-| `pin_lag` | `[core] version` against the newest `vX.Y.Z` tag in the `[ci] core` folder (a game) | `pin_lag`: at least `max_pin_lag` minors behind; a newer major counts as the limit |
+| `pin_lag` | `[core] version` against the newest `vX.Y.Z` tag at the origin of the `[ci] core` folder (a game), read with `ls-remote`; `--offline`: its local store, and the evidence and `details.tags_from` say so | `pin_lag`: at least `max_pin_lag` minors behind; a newer major counts as the limit |
 | `throughput` | job and brief merges a day against the window before | `slowdown`: under `slowdown_ratio`; no finding with nothing before |
 | `ci_durations` | online: median minutes per required check over the last `ci_runs` runs per workflow on main, a skipped job not counted | `slow_check:<name>`: over `ci_check_minutes[<name>]`, else `ci_check_default` |
 

@@ -604,6 +604,40 @@ class PinLag(Case):
         self.core(g, 'v1.0.0')
         self.assertIn('pin_lag', g.ids())
 
+    def core_origin(self, f, *tags):
+        """Give core/ an origin that holds `tags`, none of them fetched: a store behind its origin."""
+        bare = f.root.parent / 'core-origin.git'
+        f.git('clone', '-q', '--bare', str(f.root / 'core'), str(bare), cwd=f.root.parent)
+        f.git('remote', 'add', 'origin', str(bare), cwd=f.root / 'core')
+        for t in tags:
+            f.git('tag', '-a', '-m', t, t, 'main', cwd=bare)
+
+    def test_online_it_reads_origins_tags_so_a_stale_store_cannot_silence_it(self):
+        f = self.game('0.36.0')
+        self.core(f, 'v0.38.0')
+        self.core_origin(f, 'v0.42.0')
+        self.assertNotIn('pin_lag', f.ids())                   # offline: the store's 2
+        rec = f.audit(offline=False, only=['pin_lag'])
+        x = self.finding(rec, 'pin_lag')
+        self.assertEqual(x['value'], 6)
+        self.assertIn('at the origin of core/', x['evidence'])
+        self.assertEqual(rec['metrics']['pin_lag']['details'], {'pinned': '0.36.0', 'newest': '0.42.0', 'tags_from': 'origin'})
+        self.assertEqual(f.git('tag', '--list', cwd=f.root / 'core').split(), ['v0.38.0'])   # read, nothing written
+
+    def test_offline_says_it_read_the_store(self):
+        f = self.game('0.30.0')
+        self.core(f, 'v0.38.0')
+        rec = f.audit()
+        self.assertIn('--offline', self.finding(rec, 'pin_lag')['evidence'])
+        self.assertEqual(rec['metrics']['pin_lag']['details']['tags_from'], 'local store')
+
+    def test_online_an_unreadable_origin_fails_the_metric(self):
+        f = self.game('0.30.0')
+        self.core(f, 'v0.38.0')                                # no origin in core/
+        rec = f.audit(offline=False, only=['pin_lag'])
+        self.assertEqual([x['metric'] for x in rec['failed']], ['pin_lag'])
+        self.assertEqual(rec['findings'], [])
+
     def test_the_core_itself_has_no_pin(self):
         rec = self.fixture().audit()
         self.assertEqual([s for s in rec['skipped'] if s['metric'] == 'pin_lag'][0]['reason'], '[ci] core is empty: this repo pins no core')
