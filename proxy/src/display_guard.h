@@ -209,26 +209,43 @@ inline PosVerdict GatePos(const Pos& in, bool own, bool targetKnown, bool inside
 // owns (a game that presents from a worker thread), SetWindowPos goes asynchronous and the window's own thread handles
 // WM_WINDOWPOSCHANGING later, so the calling thread's id cannot tell the guard's move from the engine's: the move was dropped and the
 // window stayed cloaked for good. The guard arms this record before each placement; a position message that moves and sizes to
-// exactly that rect within kOwnMoveMs is the guard's (an engine move to the very same rect is harmless). Physical pixels: at a
-// scaled target DPI a DPI-unaware window thread sees other numbers, and only the same-thread case is recognised (logged at resolve).
+// exactly that rect within kOwnMoveMs is the guard's (an engine move to the very same rect is harmless). At a scaled target DPI a
+// DPI-unaware window thread sees the same rect in logical pixels (W18, B22): the arming also carries that rect (logical, when it
+// differs from want), accepted with each edge within kLogicalSlack pixels (the conversion rounds). Anything else stays the engine's.
 constexpr unsigned kOwnMoveMs = 2000;
-struct OwnMove { bool armed = false; Rect want; double at = 0; };   // at: monotonic seconds of the arming
+constexpr long kLogicalSlack = 1;
+struct OwnMove { bool armed = false; Rect want; Rect logical; bool haveLogical = false; double at = 0; };   // at: monotonic seconds of the arming
+inline bool NearRect(const Pos& in, const Rect& r, long slack) {
+    auto d = [](long a, long b) { return a > b ? a - b : b - a; };
+    return d(in.x, r.l) <= slack && d(in.y, r.t) <= slack && d(in.x + in.cx, r.r) <= slack && d(in.y + in.cy, r.b) <= slack;
+}
+inline bool OwnMoveArmed(const OwnMove& m, const Pos& in, double now) {   // armed, in time, a move and a size
+    return m.armed && now >= m.at && (now - m.at) * 1000.0 <= kOwnMoveMs && !(in.flags & (kSwpNoMove | kSwpNoSize));
+}
 inline bool IsOwnMove(const OwnMove& m, const Pos& in, double now) {
-    if (!m.armed || now < m.at || (now - m.at) * 1000.0 > kOwnMoveMs || (in.flags & (kSwpNoMove | kSwpNoSize))) return false;
-    return in.x == m.want.l && in.y == m.want.t && in.cx == Width(m.want) && in.cy == Height(m.want);
+    if (!OwnMoveArmed(m, in, now)) return false;
+    if (in.x == m.want.l && in.y == m.want.t && in.cx == Width(m.want) && in.cy == Height(m.want)) return true;
+    return m.haveLogical && NearRect(in, m.logical, kLogicalSlack);
 }
 
 // ---- the window sweep ---------------------------------------------------------------------------------------------------------
 // A top-level window of the process that the guard did not create (a DLL's own CreateWindowExW or MessageBoxW, a CRT or loader
 // dialog) is not in the guarded set, so no gate sees it. The guard thread sweeps every top-level window of the process every
 // kSweepPolls polls (~250 ms; J13 review should-fix 2) and at start-up: a visible unguarded window larger than the helper size is
-// hidden unless it lies wholly inside a known target. The sweep runs outside the guard's lock (it takes it per window).
+// hidden unless it lies wholly inside a known target. The sweep runs outside the guard's lock (it takes it per window). It is the
+// backstop: a WinEvent hook on EVENT_OBJECT_SHOW (W18, B19) hides a window the moment it is shown, by the same rule (ShowEventHides).
 constexpr unsigned kSweepPolls = 62;   // x 4 ms poll
 inline bool SweepDue(unsigned poll) { return poll % kSweepPolls == 0; }
 inline bool SweepHides(bool visible, bool guarded, const Rect& r, bool targetKnown, const Rect& target) {
     if (!visible || guarded) return false;
     if (Width(r) <= kHelperMax && Height(r) <= kHelperMax) return false;
     return !(targetKnown && Inside(r, target));
+}
+// The show-time hook's decision for one event: only the window object itself (not a caret or a menu), a top-level window of this
+// process, then the sweep's rule.
+inline bool ShowEventHides(bool isWindowObject, bool topLevel, bool sameProcess, bool visible, bool guarded, const Rect& r, bool targetKnown, const Rect& target) {
+    if (!isWindowObject || !topLevel || !sameProcess) return false;
+    return SweepHides(visible, guarded, r, targetKnown, target);
 }
 
 // ---- devices (CreateDevice / Reset) --------------------------------------------------------------------------------------------
@@ -329,6 +346,7 @@ struct Status {
     bool haveTarget = false; Monitor target;
     long winW = 0, winH = 0, clientW = 0, clientH = 0, bbW = 0, bbH = 0;
     int exitCode = 0;
+    unsigned relocations = 0;      // verified relocations since start (W18, B23); the status is rewritten after each
 };
 inline std::string JsonStr(const std::string& s) {
     std::string o = "\"";
@@ -350,7 +368,7 @@ inline std::string StatusJson(const Status& s) {
     } else j += "null";
     snprintf(b, sizeof b, ", \"window\": [%ld, %ld], \"client\": [%ld, %ld], \"backbuffer\": [%ld, %ld], \"exit_code\": %d", s.winW, s.winH, s.clientW,
              s.clientH, s.bbW, s.bbH, s.exitCode);
-    return j + b + ", \"written_utc\": " + JsonStr(s.utc) + "}\n";
+    return j + b + ", \"relocations\": " + std::to_string(s.relocations) + ", \"written_utc\": " + JsonStr(s.utc) + "}\n";
 }
 
 }  // namespace dg
