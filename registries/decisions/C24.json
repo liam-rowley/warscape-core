@@ -1,0 +1,7 @@
+{
+  "id": "C24",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W23)",
+  "decision": "**A pull request is judged with its base's rules.** `wsc policy` writes the base's rule inputs into a temporary folder outside every repository (inside the core, the base commit's tree; in a game, the core commit the base's gitlink pins, read from the submodule's object store, plus the base's `wsc.toml`, `[gates] dirs` and `[jobs] legacy` file) and runs the base's code there in a child process (`wsc policy --judge`, versioned by `JUDGE_API` in `warscape/policy.py`). The head is only git objects (its diff, the blobs the rules read, its trailers), so a branch that changes the rules is judged by the old ones, with a note. It fails closed; a base without `JUDGE_API` (every base before W23) is judged in-process as before, with a note. **CI's `policy` runs on `pull_request_target`** (amends C18): GitHub runs main's copy of the workflow, the job checks out the base and fetches the head as data, and no step checks out, builds, caches or runs the head; `wsc ci render` refuses a policy template without it. **`policy`-stage gate modules run from the base tree** and read the head only through git at the shas in `ctx.facts` (`repo`, `base`, `head`; amends C22). `[policy]` globs match by path segment. Accepted residual: a forged or same-named `policy` status (`docs/CONSUMING.md`, \"What the `policy` check does not prove\").",
+  "reversible": "yes"
+}

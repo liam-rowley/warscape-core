@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.imagehdr",
+  "kind": "script",
+  "path": "discovery/imagehdr.py",
+  "purpose": "read w, h, mips and pixel format (dxt5, bgra8, rgb8, ...) from the first bytes of a DDS, TGA, PNG or JPG file, without decoding it",
+  "usage": "from imagehdr import info; info(data, ext='.dds') -> {'w': 256, 'h': 256, 'mips': 9, 'pixel': 'dxt5'} or None   (library)",
+  "when": "the J7 asset index (every tga, dds, png and jpg gets its dimensions) and the registry's format field; ported from empire-remastered ui_scale_mod/asset_inventory/inv_headers.py dds_info",
+  "not_a_verb": "a library module imported by discovery/assets.py",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

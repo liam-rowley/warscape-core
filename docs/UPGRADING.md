@@ -3,6 +3,11 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## `wsc audit` (W44, C41)
+
+A new core verb and an `[audit]` table; nothing is required at the bump. A game verb named `audit` in `[cli] verb_dirs` now refuses to load: rename it. The keys a game sets:
+[AUDIT_METRICS.md](AUDIT_METRICS.md) "What a game sets".
+
 ## Hooks and gate keys added in 0.24.0 (C23)
 
 - **`.githooks/commit-msg`** refuses a commit whose message has no `Claude-Session:` trailer with a value (read with `git interpret-trailers --parse`, as `policy` reads
@@ -100,3 +105,7 @@ What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROX
   retires its own copy's `tools` row at the bump.
 - **Proof on a PC:** host tests model the switches; only the game shows the fix works. After the bump, change the resolution in the game with the key on
   and read the log lines above. The wine smoke has no DXVK window, so it cannot.
+
+## Decisions as row files and `later` rows (core W43)
+
+Nothing is forced: a repo keeps its Markdown decisions file, and a pin bump past W43 changes nothing until it opts in (CONSUMING_OPTIONS.md, "Decisions as one file per row"). The `later` status and the `backlog_id` and `area` fields are in the core's jobs schema from this release on.

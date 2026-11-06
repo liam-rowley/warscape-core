@@ -1,0 +1,7 @@
+{
+  "id": "C13",
+  "date": "2026-10-31",
+  "who": "proposed (Claude, napoleon J12), accepted by Liam's merge",
+  "decision": "**Pillow on the PC side only.** C2 (standard library only) stays the rule for `warscape/`, the gates and the host tests. A PC-side harness tool may import Pillow (`harness/acceptance.py` compares shots), checked before its first use (`acceptance.py run_problems` refuses a run without it), and never imported by a gate or a host test without a skip.",
+  "reversible": "yes"
+}

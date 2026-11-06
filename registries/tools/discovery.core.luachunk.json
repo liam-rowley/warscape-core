@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.luachunk",
+  "kind": "script",
+  "path": "discovery/luachunk.py",
+  "purpose": "parse and re-emit Lua 5.1 chunks (Warscape layout: 4-byte int/size_t/Instruction, 4-byte float) for the API inventory",
+  "usage": "python3 discovery/luachunk.py roundtrip <dir|file>...   (library for api_inventory.py and lua_api.py)",
+  "when": "J6 Lua API pass; ported unchanged from empire-remastered ui_scale_mod/tools/luachunk.py (parses all 497 UI scripts of the later game as-is)",
+  "not_a_verb": "a bytecode reader for game files, not a registry operation",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

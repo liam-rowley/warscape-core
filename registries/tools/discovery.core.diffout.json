@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.diffout",
+  "kind": "script",
+  "path": "discovery/diffout.py",
+  "purpose": "build, validate and write one area's diff file (sorted, deterministic, no timestamps) so a re-run diffs cleanly",
+  "usage": "from diffout import row, write; write(path, area, rows, detail)   (library; the area tools in discovery/ call it)",
+  "when": "every discovery diff pass (J6) writes its JSON through this; the README generator (`wsc discovery render`) reads the same schema",
+  "not_a_verb": "a library module imported by the area readers, which run on the PC without the repo's core checkout",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

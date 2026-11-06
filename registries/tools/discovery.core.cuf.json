@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.cuf",
+  "kind": "script",
+  "path": "discovery/cuf.py",
+  "purpose": "parse and re-serialise CUF0 bitmap fonts byte for byte (header metrics, cmap, glyphs, pair-advance table)",
+  "usage": "python3 discovery/cuf.py FILE.cuf ...  (round-trip self test)   |   from cuf import Cuf; Cuf.parse(bytes).serialise()",
+  "when": "reading or regenerating engine-drawn fonts (J6 fonts pass; UI_PIPELINE engine text)",
+  "not_a_verb": "a binary codec library, ported unchanged from empire-remastered ui_scale_mod/tools/cuf.py",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

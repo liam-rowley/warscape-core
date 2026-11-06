@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.build_dev_pack",
+  "kind": "script",
+  "path": "proxy/tools/build_dev_pack.py",
+  "purpose": "generate the wrapper chunks (each runs the vanilla script through <mod_dir>/lua/wsp.lua and pumps the Lua bridge)",
+  "usage": "python3 proxy/tools/build_dev_pack.py [--adapter DIR] [--out FILE] [--list]   (DIR: the proxy adapter folder, default proxy/tools/layout.py proxy-adapter)",
+  "when": "pc_deploy.py kit runs it (the pack ships in the kit as <mod>/packs/); after any change to wrappers.txt or the wrapper template",
+  "not_a_verb": "writes a game-format binary from repo sources; pc_deploy.py calls it",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

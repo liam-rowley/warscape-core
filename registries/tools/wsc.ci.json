@@ -1,0 +1,11 @@
+{
+  "id": "wsc.ci",
+  "kind": "verb",
+  "path": "warscape/verbs/ci.py",
+  "purpose": "`inputs` prints which slow CI jobs a diff needs and each input set's tree hash (the CI pass-marker key); `check-settings` reads (never changes) the repository settings the pipeline needs (required checks, auto-merge, review rules) and says what is missing; `notify` posts one comment on the open pull request of a branch whose CI run failed, naming each failed job and step with the configured hint; `main-health` (run by the `main_health` job after a push to main) opens, updates or closes one issue per red required job of the run, so a red main is never silent; `render` writes the repo's workflows from their templates (`--check`: fail when a committed workflow differs)",
+  "usage": "wsc ci inputs (--base <sha or ''> | --local) [--head REF] | wsc ci check-settings [--repo owner/name] [--branch main] | wsc ci notify --run-id <id> --attempt <n> --branch <head branch> [--repo owner/name] [--dry-run] | wsc ci main-health --run-id <id> [--attempt <n>] [--repo owner/name] [--dry-run] | wsc ci render [--check]",
+  "when": "automatic in CI (the `changes`, `notify` and `main_health` jobs, and the `ci_render` gate); by hand: `inputs` to see whether a branch will run a slow job, `notify --dry-run` to see the comment a run would get, `main-health --dry-run --run-id <a main run>` to see which issues it would open or close, `render` after a change to wsc.toml [ci] or a workflow template; `check-settings` at start-up or after a change to the workflows or the repository settings",
+  "verb": "ci",
+  "status": "live",
+  "last_used": "2026-11-02"
+}

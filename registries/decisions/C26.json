@@ -1,0 +1,7 @@
+{
+  "id": "C26",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W10), reversible",
+  "decision": "**The game-lock owner is the session.** The holder of `game.lock` is the pair (owner, session); the default owner of `ctl.py` and `acceptance.py` is the session id (`--session`, `$WSC_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`) and they refuse without one; free-text owners still work under the pair rule. One owner rule `^[a-z0-9][a-z0-9_-]{0,39}$` in `job.sh`, compared exactly by the watcher (1.4.0), which also accepts the lock's `session=` as the request owner. `job.sh ctl` and `shot.sh` need the lock; `touch` and `unlock` act on the holder's lock only. The `game.lock` line format does not change. Reversible: the pair rule and the defaults are in `job.sh`, `ctl.py`, `acceptance.py`",
+  "reversible": "yes"
+}

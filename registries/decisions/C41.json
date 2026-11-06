@@ -1,0 +1,7 @@
+{
+  "id": "C41",
+  "date": "2026-11-05",
+  "who": "proposed (Claude, plan/audit-loop, at Liam's request for \"a self improving system with my approvals\"), accepted by Liam's merge",
+  "decision": "**The pipeline audits itself; Liam answers, the queue applies.** `wsc audit` (W44) measures the pipeline from git, the registries and CI against `[audit]` thresholds and writes a dated record of findings with stable ids; no model computes a number. An audit session (W47, on a cadence) turns new findings into proposal rows (W45: evidence, options with apply recipes, a recommendation, a class, an optional taste, risk or legal tag). Liam answers the open ones in one message; the answers, quoted in `docs/audits/ANSWERS_<date>.md`, land on a `decide/<date>` branch that may change only proposal rows, new decision rows and new `needs_brief` rows, and only Liam merges it, so the approval stays his once `plan/` merges itself. Accepted job options become rows the autopilot briefs and builds (W46, after the W41 cap); the next audit re-measures each applied proposal and closes it or re-raises it with the delta. Classes in `[audit] auto_apply` (empty at first; a `wsc.toml` change, so a `meta/` branch) are accepted at their recommendation without a question; a tagged proposal never is. A declined proposal is not re-raised until its metric worsens past `[audit] reraise_margin`. W32 is re-scoped onto W43's `later` rows and W45's proposals.",
+  "reversible": "yes"
+}

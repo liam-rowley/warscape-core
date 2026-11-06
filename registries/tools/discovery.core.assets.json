@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.assets",
+  "kind": "script",
+  "path": "discovery/assets.py",
+  "purpose": "write discovery/assets/index.tsv.gz (every copy: size, sha256, format, kind, effective, image w/h/mips/pixel), refs.json (UI art paths named by layouts, templates, scripts and db files), summary.json, and the UI-first rows of registries/assets.jsonl with roles from <adapter>/asset_roles.json",
+  "usage": "python3 discovery/assets.py [--games <adapter>/games.json] [--stage index|refs|registry|all]   (or `wsc discovery assets`); then `wsc reg render assets`",
+  "when": "J7; re-run after a game update (the hashes are cached under /extract/<target>/, keyed on each pack's size and mtime, so a re-run reads only what changed)",
+  "not_a_verb": "reads ~22 GB of game packs in place on the PC; `wsc discovery assets` runs it",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

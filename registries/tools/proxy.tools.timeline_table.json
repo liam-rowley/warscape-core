@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.timeline_table",
+  "kind": "script",
+  "path": "proxy/tools/timeline_table.py",
+  "purpose": "compare load phases across launches and arms (baseline vs intro skip vs autostart): t from process start, in seconds",
+  "usage": "timeline_table.py ARM=FILE[,FILE...] [ARM=...] [--json OUT] [--md]   (a FILE may be a folder: every timeline*.json in it)",
+  "when": "after a PC run of N launches per arm (J3 baseline and cuts, later regression checks); the table goes into the run report and the",
+  "not_a_verb": "reads PC run output, writes a report table",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

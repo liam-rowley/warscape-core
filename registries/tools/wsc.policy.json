@@ -1,0 +1,11 @@
+{
+  "id": "wsc.policy",
+  "kind": "verb",
+  "path": "warscape/verbs/policy.py",
+  "purpose": "Refuse a pull request whose branch is not a reviewed job, a brief, a planning change or an infrastructure change, or whose base is not in `[policy] bases`, judged with the base's rules (its core, wsc.toml and `policy`-stage gate modules, in a child process), and warn on a workflow input a job's brief does not name; the rules are in warscape/policy.py",
+  "usage": "wsc policy --branch <head branch> [--base origin/main] [--head <rev>, default HEAD]   (CI: --head <the pull request head sha>, on pull_request_target); wsc policy --commit-msg <file>   (the commit-msg hook, C23); wsc policy --scan [--repo <clone>] [--base origin/main] [--since <rev>] [--rule A-F]   (W40)",
+  "when": "automatic in CI (the `policy` job) and, with `[policy] commit_msg_hook = true`, in .githooks/commit-msg; locally (after `git fetch`) before opening a pull request to see what CI will say; the job steps (`wsc jobs next|review|fix`) name it; --scan (after `git fetch`) before a rule's warning becomes an error, to count what it would have refused",
+  "verb": "policy",
+  "status": "live",
+  "last_used": "2026-11-02"
+}

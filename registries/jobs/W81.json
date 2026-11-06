@@ -1,0 +1,12 @@
+{
+  "id": "W81",
+  "description": "**`job.sh lock --wait` measures whole seconds**: `harness/job.sh` sets its deadline from `date +%s`, so `--wait 3` started late in a second ends after about 2.06 s; `tests/test_job_sh.py` `test_lock_wait_takes_a_lock_released_meanwhile_and_times_out_with_124` asserts 2.5 and flakes. Fix the deadline, or set the floor to 2.0 Why: red on unrelated branches (W34, run 41934314012; W31, run 42075839757, 2.067 s; W44, run 42138672224, 2.065 s), on a required check, so it can stop an auto-merge Raised: W34 report; W34 review Later 2, 2026-11-05; W44 review round 2, 2026-11-06",
+  "title": "`job.sh lock --wait` measures whole seconds",
+  "phase": 1,
+  "status": "needs_brief",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B91",
+  "area": "core"
+}

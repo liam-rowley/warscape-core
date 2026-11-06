@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.lua_api",
+  "kind": "script",
+  "path": "discovery/lua_api.py",
+  "purpose": "run the ported API inventory over a game's compiled UI scripts and diff the engine API names against the reference game's engine_api.json (same | adapter | new | gone per family)",
+  "usage": "python3 discovery/lua_api.py [--games <adapter>/games.json] [--out discovery/diff/lua_api.json]",
+  "when": "J6 Lua API area; re-run after a game update (deterministic output, so a git diff shows what changed); J9 starts its per-screen API surface from the name lists",
+  "not_a_verb": "reads extracted game scripts (git-ignored /extract/) and the reference game's engine_api.json read-only, outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

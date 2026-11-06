@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.exe_strings",
+  "kind": "script",
+  "path": "discovery/exe_strings.py",
+  "purpose": "list each ASCII and UTF-16LE string (4+ printable characters, NUL-terminated) in the exe's non-executable sections with its RVA, section, the code sites whose relocated operand points at it (count and first four instruction RVAs) and the data dwords that point at it (count and first two: name tables, Lua registration tables), into a sorted deterministic tsv.gz; `find` searches that table without the RE venv",
+  "usage": "<re venv python> -I discovery/exe_strings.py build <exe> [--out <adapter>/exe_strings.tsv.gz] [--check]; python3 discovery/exe_strings.py find <regex> [--table ...] [--refs] [-n 50]; or wsc find <word> (exe-shaped words, as literals)",
+  "when": "J9 and every later RE session on the exe: `find` a tweaker, Lua or prefs name first, then x86re.py on the code RVAs it lists; build again (and --check in review) after a game update",
+  "not_a_verb": "reads a game exe in place (read only) and writes one discovery table; outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "C34",
+  "date": "2026-11-04",
+  "who": "Liam",
+  "decision": "**Liam's answers to the open questions of the 2026-11-04 briefs.** W29: the release credential is a GitHub App (Liam sets it up from the W29 report's steps); a failing consumer adapter compile warns, it does not block the tag. W27: rule A counts every change outside `jobs/<id>/` and the job's row as code, docs and `DECISIONS.md` included. W26: review waits for green CI, fix waits only while CI is running; an empty claim is listed after 24 h and Liam releases it. W28: the `doc_paths` gate is an error. W35: CI maps kept 90 days plus the release rule; no sidecar committed. All other open questions in the W26, W27, W28, W29 and W35 briefs take the brief's recommended default (W26 Q3-Q5, W27 Q1 and Q3, W28 Q1, Q3, Q4, W29 Q3-Q6, W35 Q1, Q2, Q4).",
+  "reversible": "yes"
+}

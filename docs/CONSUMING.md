@@ -148,7 +148,7 @@ failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside eac
 claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
-decisions = "docs/DECISIONS.md"    # append-only: | <prefix><n> | YYYY-MM-DD | who | decision | yes/no |
+decisions = "docs/DECISIONS.md"    # append-only table, or "registry:<name>" (CONSUMING_OPTIONS.md)
 decision_prefix = "D"
 bootstrap = []                     # names exempt from the branch-kind rules: only the PR that adds the pipeline
 session_trailer = "Claude-Session" # who wrote the report may not write the review; "" turns this and rules A-E off
@@ -272,8 +272,8 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
 lines and never refuse. `jobs review` and the autopilot claim the round on origin (`refs/claims/*`). A report beside `jobs/<id>/handback.md` needs
 `## Orchestrator additions`. A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
 
-## Gate changes in 0.36.0 (W28, C31)
-Moved to [UPGRADING.md](UPGRADING.md) on 2026-11-04 (the 30 KB cap): `[gates] skip` ids, `verified_dates`, strict `json`, `doc_paths`, `gen_tables.py`.
+## Auditing the pipeline (W44, C41)
+`wsc audit` measures the queue against `[audit]`; rules and keys: [AUDIT_METRICS.md](AUDIT_METRICS.md).
 
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher

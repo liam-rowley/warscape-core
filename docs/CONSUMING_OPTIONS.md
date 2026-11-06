@@ -42,3 +42,21 @@ commit = false              # views go to the git-ignored dir (default "_scratch
 - **Removing a row (W15):** `python3 core/wsc.py reg remove <reg> <id>...` replaces `git rm registries/<name>/<file>.json`. It refuses, writing
   nothing, while an `x-ref` field, a tool's `superseded:<id>`, a tool file still in the repo or a `jobs/<id>/` folder points at a row, or when
   the removal adds a check problem; rows that only point at each other go in one call.
+
+## Decisions as one file per row (core W43, opt-in)
+
+`[policy] decisions` stays a Markdown path until a repo changes it, and the Markdown rule is unchanged. A table every branch appends to, with a next number each branch picks,
+collides on every parallel branch; one file per row with a drawn id does not.
+```toml
+[registries]
+decisions = "core:decisions"
+[storage]
+dir = ["jobs", "decisions"]
+[policy]
+decisions = "registry:decisions"             # a row file on the base never changes, moves or goes
+decisions_retired = "docs/DECISIONS.md"      # between the two pull requests below
+plan = [..., "registries/decisions/*"]       # and in meta, or a plan/ branch cannot add a row
+```
+- **Ids:** old rows keep their numbers. A new id is `<decision_prefix><yymmdd>-<4 hex>` from `wsc reg add decisions --mint who=... decision=... reversible=yes|no`; `policy` refuses a new number. A reversal is a new row whose `replaces` names the old one.
+- **Moving takes two pull requests,** because a pull request is judged with its base's rules, and those refuse a head without the Markdown rows. First, after the pin bump: `wsc reg migrate decisions --from-md docs/DECISIONS.md`, `--check` the same way, the keys above, every row line of the file left as it is (its prose may change). While `decisions_retired` is set and the file exists, `policy` refuses a head that changes the file's table, on every branch and with the base's rules, so a branch cut before the key cannot land a row; the `registries` gate also fails on a row the row files lack. Second: a `meta/` branch deletes the file and the key.
+- **`later` rows:** a job status for work recorded but not started. `jobs next`, `jobs review` and the autopilot ignore it, `jobs view` shows it, and status `needs_brief` promotes it. Pick them up batched by `area`, not one job each. `wsc jobs later --from-md FILE [--area NAME] [--check]` moves a `| # | Change | Why | Raised |` table into such rows, the old number in `backlog_id`, which `wsc find` resolves.

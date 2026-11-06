@@ -6,10 +6,11 @@ Verb: reg
 """
 import json
 import re
+from datetime import datetime, timezone
 
 from .. import tools
-from ..registry import RegistryError, load_all, load_from_config
-from ..repo import CONFIG_NAME
+from ..registry import RegistryError, load_all, load_from_config, md_table_rows, mint_id
+from ..repo import CONFIG_NAME, decisions_registry
 
 NAME = 'reg'
 HELP = 'add, set, check or render registry rows'
@@ -24,6 +25,7 @@ def add_arguments(p):
     a.add_argument('--id', help='tools: row id (default: wsc.<verb> or the path slug)')
     a.add_argument('--status', help='tools: status (live, or superseded:<id>)')
     a.add_argument('--missing', action='store_true', help='tools: add a row for every tool file without one')
+    a.add_argument('--mint', action='store_true', help='the `[policy] decisions` registry: draw a new id (<prefix><yymmdd>-<4 hex>); date defaults to today (W43)')
     s = sub.add_parser('set', help='change fields of one row (key:=null removes a field)')
     s.add_argument('registry')
     s.add_argument('id')
@@ -38,7 +40,9 @@ def add_arguments(p):
     r.add_argument('--out', metavar='DIR', help='write the views to DIR instead of their configured place (wsc.toml [views])')
     m = sub.add_parser('migrate', help='move a registry to the other storage (one JSONL, or one file per row) and update wsc.toml [storage] dir')
     m.add_argument('registry')
-    m.add_argument('--to', required=True, choices=('dir', 'jsonl'))
+    m.add_argument('--to', choices=('dir', 'jsonl'))
+    m.add_argument('--from-md', metavar='FILE', help='add a row for each table row of this Markdown file, columns from the schema\'s x-view (W43); rows already there are left alone')
+    m.add_argument('--check', action='store_true', help='--from-md: write nothing; exit 1 naming each table row lost or changed')
 
 
 def parse_items(items):
@@ -117,6 +121,24 @@ def migrate(ctx, name, to):
     return f'migrated {name}: {len(new.rows)} rows from {old.rel_path} to {new.rel_path}; {CONFIG_NAME} [storage] dir = {names}'
 
 
+def from_md(ctx, name, path, check):
+    """`reg migrate N --from-md FILE [--check]`: (exit code, text). Rows already there stay as they are, so a run after a merge adds only what is new."""
+    reg = _pick(load_all(ctx), [name])[0]
+    text = (ctx.root / path).read_text(encoding='utf-8')
+    cols = reg.schema.get('x-view', {}).get('columns') or []
+    rows = md_table_rows(text, len(cols))
+    if check:
+        errs = reg.md_problems(text, path)
+        return (1, '\n'.join(errs)) if errs else (0, f'{path}: {len(rows)} rows, every one in {reg.rel_path}')
+    have = reg.by_id()
+    new = [dict(zip(cols, c)) for c in rows if c[0] not in have]
+    for r in new:
+        reg.add(r)
+    reg.save()
+    reg.write_view()
+    return 0, f'{path}: added {len(new)} rows to {reg.rel_path}, {len(rows) - len(new)} already there'
+
+
 def _problems(ctx, regs):
     """Every registry's check plus the tools coverage check: the backstop of `remove` compares this before and after."""
     out = []
@@ -170,6 +192,12 @@ def remove(ctx, regs, name, ids):
 
 def run(args, ctx):
     if args.action == 'migrate':
+        if args.from_md:
+            rc, text = from_md(ctx, args.registry, args.from_md, args.check)
+            print(text)
+            return rc
+        if not args.to:
+            raise RegistryError('reg migrate needs --to dir|jsonl or --from-md FILE')
         print(migrate(ctx, args.registry, args.to))
         return 0
     regs = load_all(ctx)
@@ -192,6 +220,11 @@ def run(args, ctx):
         elif args.action == 'add':
             row = json.loads(args.json) if args.json else {}
             row.update(parse_items(args.items))
+            if args.mint:
+                if reg.name != decisions_registry(ctx.config) or 'id' in row:
+                    raise RegistryError('--mint draws the id of a row of the `[policy] decisions` registry: give no id, and no other registry')
+                row['id'] = mint_id(ctx.config['policy']['decision_prefix'], set(reg.by_id()))
+                row.setdefault('date', datetime.now(timezone.utc).strftime('%Y-%m-%d'))
             reg.add(row)
             print(f'added {reg.name}:{row["id"]}')
         else:

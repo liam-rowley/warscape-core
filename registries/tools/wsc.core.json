@@ -1,0 +1,11 @@
+{
+  "id": "wsc.core",
+  "kind": "verb",
+  "path": "warscape/verbs/core.py",
+  "purpose": "`bump <tag>` in a game repo: fetch the core's tags, refuse a dirty tree, a malformed or missing tag, a lightweight tag where the new core wants annotated ones and the core itself; check the tag out in the submodule, write `[core] version` in wsc.toml (a text edit that keeps its comments), re-render the workflows when the repo has `[ci] core`, and make one commit of the gitlink, wsc.toml and the workflows with the session trailer; name every game verb whose NAME the new core now owns (it deletes nothing)",
+  "usage": "python3 core/wsc.py core bump vX.Y.Z [--no-commit] [--session ID]   (session: --session, $WSC_SESSION_ID or $CLAUDE_CODE_SESSION_ID; none is a refusal)",
+  "when": "in a game repo, after the core's release workflow tagged a new version (docs/CONSUMING.md, \"Upgrading and releasing\"); never inside the core",
+  "verb": "core",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

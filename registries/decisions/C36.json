@@ -1,0 +1,7 @@
+{
+  "id": "C36",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W36)",
+  "decision": "**A job's unnamed workflow input warns; a non-default base is refused; the commit match reads command position.** `[policy] workflow_paths` (default `.github/workflows/**`, `ci/**`): a job branch's change to a matching path, or the rendered file of a changed template, that the job's brief on the base does not contain is a `policy` warning, not a refusal, because the W36 scan found 13 merged job branches of 95 (3 core, 10 napoleon) it would have refused, past the brief's kill criterion of 3; the forged-status residual of W23 is narrowed, not closed, until a later row hardens it. `[policy] bases` (default `main`, `[]` = any): a `--base origin/<name>` not listed is refused before the head is read, and stacked pull requests are not part of the pipeline; a base whose core predates W36 fails open. `warscape/trailer.py` follows git's global options and aliases defined in the command, and `git` counts only where a command starts, so `echo git commit` is no commit and a wrapper it does not know is unseen (the commit-msg hook and `policy` still read the commit).",
+  "reversible": "yes"
+}

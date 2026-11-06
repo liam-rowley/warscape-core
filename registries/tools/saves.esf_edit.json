@@ -1,0 +1,11 @@
+{
+  "id": "saves.esf_edit",
+  "kind": "script",
+  "path": "saves/esf_edit.py",
+  "purpose": "parse an ESF save into a tree, write it back byte for byte, and edit it (set a value, copy or remove a record-array item) with every end offset, count and the name table rebuilt",
+  "usage": "python3 -I saves/esf_edit.py info|roundtrip|tree FILE... | dump FILE SPEC | set FILE SPEC @N VALUE -o OUT | copy-item|remove-item FILE SPEC INDEX [--to I] -o OUT",
+  "when": "the round-trip gate on every new save (sha-equal, no unknown tag); a save needed in another state (a game's recipes import this). SPEC: [//]A/B[3]/C (Esf.select). Writes only with -o, never over the input",
+  "not_a_verb": "a game-agnostic ESF codec run on the PC against saves outside the repo (warscape-core candidate, D10)",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

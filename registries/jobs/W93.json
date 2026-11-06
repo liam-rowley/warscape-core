@@ -1,0 +1,12 @@
+{
+  "id": "W93",
+  "description": "**`wsc jobs review` and the `--auto` start test that the branch merges**: a `git merge-tree --write-tree` of the head and `origin/main`, and on a conflict name the files and send the job to a fix session before a round is claimed Why: W31's `jobs review` said `all 9 checks passed or were skipped` on a branch 8 commits behind `main` with two conflicts and a taken decision number: gates run on the branch's own tree and a draft skips `policy`, so a whole round went on it Raised: W31 review round 1 Later 2, 2026-11-05",
+  "title": "`wsc jobs review` and the `--auto` start test that the branch merges",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B103",
+  "area": "core"
+}

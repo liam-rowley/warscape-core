@@ -1,0 +1,7 @@
+{
+  "id": "C16",
+  "date": "2026-11-01",
+  "who": "proposed (Claude, napoleon J8)",
+  "decision": "**One shader hash convention for every core tool: canonical FNV-1a-64 over the bytecode up to and including the walked end token** (`proxy/src/capture.h` `ShaderHash`, host-tested with a CTAB that holds `0x0000FFFF`), never a cut at the first `0x0000FFFF` DWORD and never the dropped-digit basis empire-remastered used; a game repo's offline tools use the same test vectors. The frame capture (`dev.capture`) records every device call of the captured frames, not the first draw per shader pair, and hooks nothing with its key off.",
+  "reversible": "yes (a new convention renames every catalogued shader)"
+}

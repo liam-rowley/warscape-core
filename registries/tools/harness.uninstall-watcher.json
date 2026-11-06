@@ -1,0 +1,11 @@
+{
+  "id": "harness.uninstall-watcher",
+  "kind": "script",
+  "path": "harness/Uninstall watcher.cmd",
+  "purpose": "double-click uninstaller for the watcher: stops it, removes the logon task and moves the installed harness files to _to_delete (jobs, logs and runs are kept)",
+  "usage": "double-click it in the harness kit folder; the PowerShell script is install.ps1 -Uninstall",
+  "when": "when the watcher should leave the PC; nothing in the game folder is touched",
+  "not_a_verb": "a Windows double-click wrapper around install.ps1",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

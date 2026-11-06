@@ -1,0 +1,11 @@
+{
+  "id": "harness.update",
+  "kind": "script",
+  "path": "harness/update.ps1",
+  "purpose": "in-place update of the live watcher from a harness kit with a dead-man switch: the new watcher must come up, answer a noop job and stay alive, or the old files are put back byte for byte",
+  "usage": "started detached by the watcher's \"update kit=<kit id>\" job (exit 0 CONFIRMED, 1 REVERTED, 2 ABORT before any change, 3 revert copy failed, 4 NOTHING TO DO) (a copy of this file runs, because the update replaces src\\update.ps1); by hand: powershell -File update.ps1 -Root <watcher root> -Kit <kit dir> [-NoopS 60] [-HealthyS 90] [-StableS 30]",
+  "when": "whenever harness files change on the PC after the first install (never copy them by hand); the first install is \"Install watcher.cmd",
+  "not_a_verb": "runs on the PC under Windows PowerShell 5.1, outside the repo checkout",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

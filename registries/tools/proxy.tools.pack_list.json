@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.pack_list",
+  "kind": "script",
+  "path": "proxy/tools/pack_list.py",
+  "purpose": "find files inside the game's packs (movies, UI scripts, layouts, battle presets) without a pack editor.",
+  "usage": "pack_list.py PACK [PACK ...] [--grep TEXT ...] [--ext .luac|none ...] [--under ui ...] [--extract OUTDIR] [--json]",
+  "when": "discovery for the dev control channel (J3: start-up movies, front-end scripts); a stand-in until the asset index (J7)",
+  "not_a_verb": "reads the game's binary packs in the game folder on the PC; a standalone discovery reader until J7's asset index",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

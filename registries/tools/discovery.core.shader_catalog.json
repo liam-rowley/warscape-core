@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.shader_catalog",
+  "kind": "script",
+  "path": "discovery/shader_catalog.py",
+  "purpose": "turn frame captures (proxy dev.capture: <capture_dir>\\\\<name>\\\\frame.txt and shaders\\\\<hash>.vs|ps) into committed per-capture summaries (passes, render targets, shader use, constant uploads), the shader bytecode and its disassembly, the fx source and technique of each shader (compiled from the game's own fx sources with the game's compiler version), the catalogue <adapter>/shader_catalog.json and the generated tables of <adapter>/frame_anatomy.md",
+  "usage": "python3 discovery/shader_catalog.py import --run <run id> [--captures DIR (default: games.json <target>.captures)] [--name N ...] | fxmap [--fx extract/<target>/data/fx] [--work DIR] | build [--check] | hash <file>   (import and fxmap need Windows: D3DCompiler_47 and d3dx9_40 from System32; build --check runs anywhere)",
+  "when": "after captures on the PC (import), after a game update or a new capture (fxmap, build); `build --check` in the tests gate keeps the catalogue and the anatomy tables in step with their inputs",
+  "not_a_verb": "reads PC captures and calls Windows D3D DLLs, outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

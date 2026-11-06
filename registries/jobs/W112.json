@@ -1,0 +1,12 @@
+{
+  "id": "W112",
+  "description": "**`wer_localdumps.ps1` names its missing arguments**: `proxy/tools/wer/wer_localdumps.ps1` run outside a repo without `-ExeName` and `-DumpFolder` fails with \"no proxy adapter identity.json\"; say \"pass -ExeName and -DumpFolder\" instead, and let `-Mode status` accept the unexpanded `%LOCALAPPDATA%` folder a player release passes Why: napoleon's player release had no way to run it (audit 2026-11-03 G1); napoleon J74 now writes the arguments into the shipped .cmd from identity.json Raised: napoleon J74 report, 2026-11-04",
+  "title": "`wer_localdumps.ps1` names its missing arguments",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B85",
+  "area": "harness"
+}

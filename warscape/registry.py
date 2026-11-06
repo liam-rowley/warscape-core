@@ -15,7 +15,9 @@ Schema: "core:N" means the core's `schemas/N.schema.json`; anything else is a re
 `load_schema`, which resolves `x-extends`.
 
 Registry extensions in the schema (ignored by the validator):
-  x-view:   {"title": str, "columns": [field, ...]}            columns of the generated table (default: id, description)
+  x-view:   {"title": str, "columns": [field, ...]}            columns of the generated table (default: id, description); `sort`: [field, ...] orders
+                                                                the rows by those fields, numbers in them as numbers (default: id as text); `full`:
+                                                                true keeps long cells whole (W43; the default cuts them at 200 characters)
   x-unique: [[field, ...], ...]                                 field tuples that must be unique across rows (compared case-insensitively)
   x-wildcard: {field: value}                                   a row with this value in an x-unique field clashes with every value
   x-chord:  {"field": f, "flag": g}                             in every x-unique tuple holding f, values of f are `<mod>+...+<key>` chords
@@ -43,6 +45,8 @@ Registry extensions in the schema (ignored by the validator):
 """
 import json
 import re
+import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -368,10 +372,22 @@ class Registry:
         out += [f'{len(self.rows)} rows. Search every registry: `wsc find <words>`.', '']
         if self.rows:
             out += ['| ' + ' | '.join(cols) + ' |', '|' + '---|' * len(cols)]
-            for r in sorted(self.rows, key=lambda r: str(r.get('id', ''))):
-                out.append('| ' + ' | '.join(_cell(r.get(c), code=(c in ('id', 'path', 'usage'))) for c in cols) + ' |')
+            by = view.get('sort')
+            for r in sorted(self.rows, key=(lambda r: [natural(r.get(f, '')) for f in by]) if by else (lambda r: str(r.get('id', '')))):
+                out.append('| ' + ' | '.join(_cell(r.get(c), code=(c in ('id', 'path', 'usage')), full=view.get('full', False)) for c in cols) + ' |')
             out.append('')
         return '\n'.join(out)
+
+    def md_problems(self, text, path):
+        """Every table row of the Markdown `text` against the rows, by field value, in `x-view` column order: one line per row lost or changed."""
+        cols, by, errs = self.schema['x-view']['columns'], self.by_id(), []
+        for cells in md_table_rows(text, len(cols)):
+            want, have = dict(zip(cols, cells)), by.get(cells[0])
+            if have is None:
+                errs.append(f'{path}: row {cells[0]} has no row in {self.rel_path} (wsc reg migrate {self.name} --from-md {path})')
+            elif any(have.get(c, '') != v for c, v in want.items()):
+                errs.append(f'{path}: row {cells[0]} differs from {self.rel_path}: ' + ', '.join(c for c, v in want.items() if have.get(c, '') != v))
+        return errs
 
     def view_stale(self):
         try:
@@ -507,7 +523,7 @@ def _write(p, text):
         f.write(text)
 
 
-def _cell(v, code=False):
+def _cell(v, code=False, full=False):
     if v is None or v == '' or v == []:
         return ''
     if isinstance(v, list):
@@ -519,9 +535,37 @@ def _cell(v, code=False):
     else:
         s = str(v)
     s = ' '.join(s.split()).replace('|', '\\|')
-    if len(s) > 200:
+    if len(s) > 200 and not full:
         s = s[:197] + '...'
     return f'`{s}`' if code and '`' not in s else s
+
+
+def natural(v):
+    """A sort key that reads the numbers in `v` as numbers: C2 before C10."""
+    return [int(p) if p.isdigit() else p for p in re.split(r'(\d+)', str(v))]
+
+
+def mint_id(prefix, taken, today=None, rand=None):
+    """A new id `<prefix><yymmdd>-<4 hex>` that is not in `taken` (W43): nothing is counted, so two branches need not agree on a next number. The
+    rows on another branch cannot be seen; two that draw one id meet as an add/add on one path, which git refuses."""
+    today, rand = today or datetime.now(timezone.utc).strftime('%y%m%d'), rand or (lambda: secrets.token_hex(2))
+    while True:
+        rid = f'{prefix}{today}-{rand()}'
+        if rid not in taken:
+            return rid
+
+
+def md_table_rows(text, width):
+    """[[cell, ...]] of the table rows of Markdown `text` whose first cell is an id (a capital and a number), `width` cells each: a `\\|` is a pipe
+    inside a cell, a row short of cells is padded with '', and a row with too many is an error, never a guess at which cell it belongs to."""
+    out = []
+    for line in text.splitlines():
+        if re.match(r'\|\s*[A-Z][0-9]+\s*\|', line):
+            cells = [c.strip().replace('\\|', '|') for c in re.split(r'(?<!\\)\|', line.strip().strip('|'))]
+            if len(cells) > width:
+                raise RegistryError(f'row {cells[0]} has {len(cells)} cells, not {width}: escape the pipe in the cell as \\|')
+            out.append(cells + [''] * (width - len(cells)))
+    return out
 
 
 def load_all(ctx):

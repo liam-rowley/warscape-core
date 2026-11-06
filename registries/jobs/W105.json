@@ -1,0 +1,12 @@
+{
+  "id": "W105",
+  "description": "**Acceptance runner: a free-RAM floor, and `build.sh smoke` for a game without a `GestureAdapter`**: (a) `harness/acceptance.py`: refuse to start below a free-RAM floor, or re-measure a single load outlier once (napoleon acc3 to acc5 broke at about 2 GB free; acc6 passed 21 of 21 at about 20 GB); (b) `proxy/tools/build.sh smoke` step 6: accept a game without a `GestureAdapter` (B57 is the hook gate, not this step) Why: (a) cost napoleon a 20-pass sitting; in the next job that changes `acceptance.py` or `build.sh` anyway Raised: napoleon J30 review Later 6, 2026-11-04",
+  "title": "Acceptance runner: a free-RAM floor, and `build.sh smoke` for a game without a `GestureAdapter`",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B74",
+  "area": "harness"
+}

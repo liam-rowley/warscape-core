@@ -1,0 +1,11 @@
+{
+  "id": "githooks.pre-push",
+  "kind": "script",
+  "path": ".githooks/pre-push",
+  "purpose": "Refuse a push while the fast gates fail (`wsc gates --fast`: schemas, registries, tool rows, strict JSON, Windows paths, doc size, undated \"verified\", conflict markers).",
+  "usage": "git config core.hooksPath .githooks   (once per clone; in a game repo with the core at core/: git config core.hooksPath core/.githooks). Bypass once with git push --no-verify and say why in the commit.",
+  "when": "automatic on every git push, any branch; under a minute, no network.",
+  "not_a_verb": "git runs hooks by file name; this one only calls `wsc gates --fast`.",
+  "status": "live",
+  "last_used": "2026-10-28"
+}

@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import checks, core_version, tools
-from .registry import RegistryError, load_all, load_schema
-from .repo import git_env
+from .registry import RegistryError, id_to_file, load_all, load_schema
+from .repo import decisions_registry, git_env
 from .schema import check_schema
 
 
@@ -60,6 +60,9 @@ def gate_registries(ctx):
     errs = []
     for r in regs.values():
         errs += r.check(regs)
+    retired, dreg = ctx.config['policy']['decisions_retired'], decisions_registry(ctx.config)
+    if retired and dreg in regs and (text := _read(ctx, retired)) is not None:   # W43: a stale branch's Markdown row fails here, never vanishes
+        errs += regs[dreg].md_problems(text, retired)
     n = sum(len(r.rows) for r in regs.values())
     return Result('registries', 'error' if errs else 'ok',
                   f'{len(errs)} registry problems' if errs else f'{len(regs)} registries, {n} rows, all valid and rendered', errs)
@@ -333,7 +336,7 @@ def gate_doc_paths(ctx):
     `[docs] path_ignore`, prefix globs (`rml_mod/**`) where it can."""
     tracked, subs = _tracked(ctx)
     paths = checks.run_ref_index(tracked)[0]
-    skip = {ctx.config['policy']['decisions']}
+    skip = {ctx.config['policy']['decisions'], ctx.config['policy']['decisions_retired']}
     jdir = ctx.config['jobs']['dir'].rstrip('/') + '/'
     docs = {p: t for p in checks.living_docs(ctx.files(), ctx.config['docs'], _generated(ctx))
             if p not in skip and not p.startswith(jdir) and f'/{jdir}' not in p and (t := _read(ctx, p)) is not None}
@@ -423,13 +426,19 @@ def skips(ctx):
     """`{gate: decision id}` from `[gates] skip` (W28): each entry is `"<gate>:<decision id>"`, and the id is a row of the `[policy] decisions`
     file, so a skip is never silent and always says why. A bare name, an empty id or an id the file lacks is a ValueError that names the fix."""
     entries, out, errs = ctx.config['gates']['skip'], {}, []
-    path = ctx.config['policy']['decisions']
-    text = _read(ctx, path) if path else None
+    path, dreg = ctx.config['policy']['decisions'], decisions_registry(ctx.config)
+    text = _read(ctx, path) if path and not dreg else None
+    folder = ctx.root / ctx.config['registries_dir'] / dreg
     for e in entries:
         gate, _, did = str(e).partition(':')
         gate, did = gate.strip(), did.strip()
         if not did:
             errs.append(f'"{e}" has no decision id: write "{gate}:<decision id>", the {path or "[policy] decisions"} row that says why it is skipped')
+        elif dreg:
+            if (folder / id_to_file(did)).is_file():
+                out[gate] = did
+            else:
+                errs.append(f'"{e}": {did} is not a row of {path} (add the decision first, then skip under its id)')
         elif text is None:
             errs.append(f'"{e}": no decisions file to find {did} in (set [policy] decisions in wsc.toml)' if not path else f'"{e}": {path} is missing')
         elif not re.search(rf'^\|\s*{re.escape(did)}\s*\|', text, re.M):

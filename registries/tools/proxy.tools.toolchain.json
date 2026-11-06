@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.toolchain",
+  "kind": "script",
+  "path": "proxy/tools/toolchain.py",
+  "purpose": "hold the pinned ubuntu:24.04 image digest and the exact apt versions of the mingw-w64 packages that make the DLL; print them for apt and docker; check the installed toolchain against them",
+  "usage": "python3 proxy/tools/toolchain.py apt | image | installed | check <cxx>   (apt: `pkg=version ...` sorted on one line; image: the image reference; installed: the pinned packages' installed versions on one line; check: exit 0 with one `toolchain: pinned:` line, else one line per difference, the fix, and exit 2)",
+  "when": "CI's proxy job installs `$(toolchain.py apt)`; build.sh reads `image` and `apt` for --docker, runs `check \"$CXX\"` before the first mingw compile of dll, all and repro, and stamps the cached UI objects with `installed`",
+  "not_a_verb": "a build helper like build_id.py, read by build.sh and CI, not a registry operation",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

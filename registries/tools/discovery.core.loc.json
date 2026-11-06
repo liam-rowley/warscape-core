@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.loc",
+  "kind": "script",
+  "path": "discovery/loc.py",
+  "purpose": "decode Warscape .loc string tables (byte-exact) and write discovery/loc/keys.tsv.gz (file, key, text length, text sha1, flag, patch state) and summary.json; the text goes to /extract/<target>/loc/",
+  "usage": "python3 discovery/loc.py [--games <adapter>/games.json]   (or `wsc discovery loc`)   |   from loc import decode, encode",
+  "when": "J7; re-run after a game update; the db pass (db.py) should run first so the prefix cross-check sees the db schema",
+  "not_a_verb": "reads the game's language packs in place on the PC; `wsc discovery loc` runs it",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

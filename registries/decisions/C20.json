@@ -1,0 +1,7 @@
+{
+  "id": "C20",
+  "date": "2026-11-03",
+  "who": "proposed (Claude, napoleon J64, core W4), accepted by Liam's merge",
+  "decision": "**The discovery passes live here** (`discovery/`, the `discovery` verb, `proxy/tools/exe_info.py`) and find a game only through `wsc.toml` `[discovery] adapter` (`layout.py` `discovery_adapter()`) and the names in its `games.json` (`target`, `reference`); no module finds the game by its own place and none names a game (`NoGameNames` covers `discovery/`, no allowlist entry). **Optional extras stay out of the gates**: Pillow (`sheets`) and the RE environment (capstone and pefile: `x86re`, `console_cmds`, `exe_strings build`, made by `re_env.py`, wheel sha256 pins in that file, Pillow pin in `discovery/requirements.txt`) are PC-side only, checked before first use with a message that names the fix, and no gate or host test imports them without a skip (C2 and C13 stand). The committed results and the adapter files stay in the game repo; a re-run is byte for byte the same.",
+  "reversible": "no"
+}

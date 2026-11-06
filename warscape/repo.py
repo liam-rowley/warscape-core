@@ -82,7 +82,8 @@ DEFAULTS = {
     },
     # the pull-request policy (`wsc policy`; warscape/policy.py)
     'policy': {
-        'decisions': '',                   # repo-relative append-only decisions file ('' = not checked)
+        'decisions': '',                   # repo-relative append-only decisions file, or "registry:<name>", one file per row (core W43); '' = not checked
+        'decisions_retired': '',           # the Markdown file a repo moved off: while it exists, the `registries` gate holds its rows to the row files and `policy` refuses a change to its table (core W43)
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo
@@ -121,6 +122,35 @@ DEFAULTS = {
         'template_dir': 'ci',
         'policy_extra_steps': '',          # YAML steps inserted before the policy command in the rendered `policy` job
         'required_checks': [],             # checks main must require (`wsc ci check-settings`); [] = the workflows' job ids but changes, notify
+    },
+    # the pipeline measured (`wsc audit`, W44, C41; warscape/audit.py; each rule in docs/AUDIT_METRICS.md)
+    'audit': {
+        'dir': 'docs/audits',              # where --record writes AUDIT_<date>.json and .md
+        'window_days': 7,                  # the default window: the last this many days
+        'window_jobs': 20,                 # work_mix reads this many last merged jobs
+        'hot_exempt': [],                  # hot_files: globs that do not count, beside the job folders and rows
+        'hot_file_share': 0.25,            # hot_file: at least this share of the window's job merges...
+        'hot_file_min': 5,                 # ...and at least this many of them
+        'hot_file_high': 0.5,              # hot_file is high from this share
+        'both_sides_min': 3,               # conflict_file: changed on both sides of at least this many branch merges
+        'max_job_hours': 24,               # long_job: over this from the oldest commit to the merge
+        'max_job_files': 60,               # wide_job: over this many files in the squash commit
+        'branch_exposure_share': 0.5,      # branch_exposure: at least this share of jobs merged main into their branch
+        'overhead_phases': [],             # work_mix: the phases that are pipeline work; [] = overhead_share is off
+        'max_overhead_share': 0.4,         # overhead_share: over this share of the last window_jobs
+        'pc_serial_min': 4,                # pc_serial: at least this many ready rows...
+        'pc_serial_share': 0.75,           # ...at least this share of them needs_pc
+        'chokepoint_fanout': 4,            # chokepoint: at least this many not-done rows wait on the row, directly or not
+        'min_round1_merge': 0.5,           # review_churn: under this share of done jobs merged in round 1
+        'max_brief_ratio': 1.5,            # brief_heavy: the median brief over this many median reports
+        'startup_docs': [],                # startup_read: read at the start of a session, beside CLAUDE.md and README.md
+        'max_startup_kb': 40,              # startup_heavy: over this many KiB
+        'doc_cap_share': 0.9,              # doc_cap: a living doc at this share of [docs] max_kb or more
+        'max_pin_lag': 5,                  # pin_lag: at least this many minor versions behind the newest core tag
+        'slowdown_ratio': 0.5,             # slowdown: under this ratio of merges a day to the window before
+        'ci_runs': 20,                     # ci_durations: this many last runs on main, per workflow
+        'ci_check_default': 10,            # slow_check: a median over this many minutes, for a check not in ci_check_minutes
+        'ci_check_minutes': {},            # check name -> its own limit (stays empty here: _merge refuses keys a non-empty default table lacks)
     },
 }
 
@@ -168,6 +198,12 @@ def find_root(start=None):
     raise ConfigError(f'no {CONFIG_NAME} found in {p} or any parent (run from a repo that declares its registries, or pass --root)')
 
 
+def decisions_registry(cfg):
+    """The registry `[policy] decisions` names (`registry:<name>`, core W43), or '' for a Markdown path or none."""
+    v = cfg['policy']['decisions']
+    return v[len('registry:'):] if v.startswith('registry:') else ''
+
+
 def load_config(root):
     path = Path(root) / CONFIG_NAME
     try:
@@ -210,6 +246,11 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: release.annotated_from must be "" or X.Y.Z')
     if not isinstance(rel['consumers'], list) or not all(isinstance(c, dict) and set(c) <= {'name', 'repo', 'adapter', 'ref'} for c in rel['consumers']):
         raise ConfigError(f'{CONFIG_NAME}: release.consumers must list tables with name, repo, adapter and ref')
+    dreg = decisions_registry(cfg)
+    if dreg and dreg not in cfg['registries']:
+        raise ConfigError(f'{CONFIG_NAME}: policy.decisions names registry {dreg}: declare it in [registries]')
+    if dreg and dreg not in cfg['storage']['dir']:
+        raise ConfigError(f'{CONFIG_NAME}: policy.decisions names registry {dreg}: list it in [storage] dir (one file per row)')
     if not isinstance(cfg['policy']['decisions_cite_job'], bool):
         raise ConfigError(f'{CONFIG_NAME}: policy.decisions_cite_job must be true or false')
     if cfg['policy']['reviewer_code'] not in ('warn', 'error'):
@@ -222,7 +263,24 @@ def load_config(root):
             raise ConfigError(f'{CONFIG_NAME}: {t}.{k} must be a number of at least 0')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
+    audit_problem(cfg['audit'])
     return cfg
+
+
+def audit_problem(au):
+    """Raise ConfigError on an `[audit]` value of the wrong type: each default's type is the rule, and a window or a run count is at least 1."""
+    for k, default in DEFAULTS['audit'].items():
+        v = au[k]
+        if isinstance(default, str):
+            good = isinstance(v, str) and v
+        elif isinstance(default, list):
+            good = isinstance(v, list) and all(isinstance(x, (str, int)) and not isinstance(x, bool) for x in v)
+        elif isinstance(default, dict):
+            good = isinstance(v, dict) and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v.values())
+        else:
+            good = isinstance(v, (int, float)) and not isinstance(v, bool) and v >= (1 if k in ('window_days', 'window_jobs', 'ci_runs') else 0)
+        if not good:
+            raise ConfigError(f'{CONFIG_NAME}: audit.{k} has the wrong type or range (default: {default!r})')
 
 
 @dataclass

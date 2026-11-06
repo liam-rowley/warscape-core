@@ -1,0 +1,7 @@
+{
+  "id": "C40",
+  "date": "2026-11-05",
+  "who": "Liam",
+  "decision": "**`plan/` branches merge themselves on green CI, like `brief/`; `meta/` stays the owner's.** The core's side of napoleon D62, which an agent working there can now act on here too. Liam's words: \"I also don't need to be approving plan prs, they can be automatic\". Accepted meanwhile: a `plan/` branch can change docs, this file included, with no human review, on green CI alone; a \"proposed\" line on one is accepted by its merge. Owner: `docs/REVIEW.md`.",
+  "reversible": "yes"
+}

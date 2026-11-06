@@ -1,0 +1,11 @@
+{
+  "id": "W116",
+  "description": "**The frozen-file rule misses a line with no leading pipe**: `warscape/policy.py` `retired_file_problems`: `C42 | 2026-11-06 | Liam | A stale row | yes` appended to a frozen decisions file passes `policy`, `--check` and `gates --fast`. It cannot turn `main` red, as no parser reads it as a row, but GitHub renders it as one and it has no row file. The core's window closes when `docs/DECISIONS.md` is deleted; it matters only for a game's own window. Raised: W43 review round 2, item 8, 2026-11-06",
+  "title": "The frozen-file rule misses a line with no leading pipe",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}

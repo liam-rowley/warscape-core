@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.exe",
+  "kind": "script",
+  "path": "discovery/exe.py",
+  "purpose": "diff two Warscape exes' PE facts (sections, imports, size, LAA/ASLR/NX, strings) and search the other exe for every reference-game guard-site, patch-site and named-function signature with relocated and relative dwords masked; hits are candidates (unique, shared, multiple, none), never engine sites",
+  "usage": "python3 discovery/exe.py [--games <adapter>/games.json] [--out discovery/diff/exe.json]",
+  "when": "J6 exe area; J9 starts its engine_sites from the unique hits (each verified there with anchor bytes and a run id); re-run after a game update",
+  "not_a_verb": "reads both game exes in place (read only), outside the wsc registry operations",
+  "status": "live",
+  "last_used": "2026-11-03"
+}
