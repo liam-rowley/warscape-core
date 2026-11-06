@@ -825,7 +825,7 @@ class UninstallWaitsForRestore(DeployBase):
         r, _ = self.un(wait_restore=3, sleep=sleeps.append)
         self.assertIsInstance(r, SystemExit)
         msg = str(r)
-        for s in ('pc_deploy uninstall:', 'j9-prof', 'owner o1', 'held by o1', 'not running', 'put back'):
+        for s in ('pc_deploy uninstall:', 'j9-prof', 'owner o1', 'held by o1', 'not running', 'config files back'):
             self.assertIn(s, msg)
         self.assertEqual(sleeps, [1, 1, 1])
         self.assertNothingMoved()
