@@ -46,7 +46,7 @@
     "grants_round": {
       "type": "string",
       "pattern": "^[A-Z][1-9][0-9]*$",
-      "description": "W132: the job id that gets one more review round. Only a `meta/` branch (merged by the owner) may add a row with this field; the job must be blocked after its rounds."
+      "description": "W132: the job id that gets one more review round. Only a `meta/` branch may add a row with this field (the owner merges it by rule; nothing enforces who merges), in the pull request that sets the job's row to blocked after its rounds; reversible is no."
     }
   },
   "x-view": {
