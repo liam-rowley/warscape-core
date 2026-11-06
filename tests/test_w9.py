@@ -75,6 +75,21 @@ class LaunchBuild(unittest.TestCase):
         p.evidence_dir = d / 'ev'
         return p, calls, order, sleeps, log
 
+    def test_every_lost_launch_keeps_its_own_evidence_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            p, *_ = self.make(d, [])
+            p.keep_attempt_evidence(1, 'first loss')
+            p.keep_attempt_evidence(1, 'second loss')   # a second call, as a later ctl.py scene would make
+            p.keep_attempt_evidence(2, 'third loss')
+            got = sorted((f.parent.name, f.read_text(encoding='utf-8')) for f in (Path(d) / 'ev').glob('attempt_*/job_output.txt'))
+            self.assertEqual(got, [('attempt_1', 'first loss'), ('attempt_2', 'second loss'), ('attempt_3', 'third loss')])
+
+    def test_the_build_comes_from_the_first_launch(self):
+        with tempfile.TemporaryDirectory() as d:
+            p, *_ = self.make(d, [])
+            p.launches = [{'pid': 1, 'build': 'A', 'dll_sha256_logged': None, 'utc': 'u'}, {'pid': 2, 'build': 'B', 'dll_sha256_logged': None, 'utc': 'u'}]
+            self.assertEqual(p.build_info(strict=True)['build'], 'A')
+
     def launch(self, p):
         with mock.patch.object(ctl, 'ident_mod', lambda a: 'nullmod'):
             return p.launch()
@@ -107,7 +122,7 @@ class LaunchBuild(unittest.TestCase):
             self.launch(p)
             self.assertEqual([l['build'] for l in p.launches], ['build1', 'build2'])
             with mock.patch.object(ctl, 'ident_mod', lambda a: 'nullmod'):
-                self.assertEqual(p.build_info(strict=True)['build'], 'build2')
+                self.assertEqual(p.build_info(strict=True)['build'], 'build1')   # decision 1: the pass takes launches[0]
 
     def test_the_non_strict_read_keeps_the_kit_fallback_for_perf_labels(self):
         with tempfile.TemporaryDirectory() as d:
@@ -236,10 +251,11 @@ def baseline():
 class RunLoop(unittest.TestCase):
     """cmd_run with a fake PcEnv and a scripted run_pass: attempts, flakes, the pass file's 'x' mode, the ledger line from the file's hash."""
 
-    def run_cmd(self, outcomes, extra=(), ad_extra=None, preexisting=None):
+    def run_cmd(self, outcomes, extra=(), ad_extra=None, preexisting=None, during=None):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__('shutil').rmtree(d, ignore_errors=True))
         repo, state = d / 'repo', d / 'state'
+        self.repo_seen = repo
         (repo / 'harness' / 'runs').mkdir(parents=True)
         state.mkdir()
         b = d / 'b.json'
@@ -272,6 +288,8 @@ class RunLoop(unittest.TestCase):
                         'watcher_sha256': 'w' * 64, 'watcher_kit_sha256': 'w' * 64, 'launches': [{'pid': 1, 'build': 'abc', 'dll_sha256_logged': None, 'utc': 'u'}]}
 
         def run_pass(bl, env):
+            if during:
+                during(repo)
             r = script.pop(0)
             return (r == 'pass'), (steps_ok() if r == 'pass' else steps_ok(**{'hist_nile:scene': LOST if r == 'flake' else {'ok': False, 'reason': 'nope'}}))
         out = io.StringIO()
@@ -309,9 +327,13 @@ class RunLoop(unittest.TestCase):
         self.assertEqual(doc['evidence']['baseline_sha256'], acc.sha(repo.parent / 'b.json'))
 
     def test_a_pass_file_is_never_overwritten(self):
-        rc, lines, repo, _ = self.run_cmd(['pass'], ['--passes', '1'])
+        def race(repo):   # the pass file appears while the pass runs: cmd_run must not replace it
+            f = repo / 'harness' / 'runs' / 'r1' / 'pass_01.json'
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b'EARLIER EVIDENCE')
         with self.assertRaises(FileExistsError):
-            open(repo / lines[0]['evidence'], 'x')
+            self.run_cmd(['pass'], ['--passes', '1'], during=race)
+        self.assertEqual((self.repo_seen / 'harness' / 'runs' / 'r1' / 'pass_01.json').read_bytes(), b'EARLIER EVIDENCE')
 
     def test_max_flakes_may_only_lower_the_adapters_allowance(self):
         rc, lines, _, _ = self.run_cmd(['pass', 'flake'], ['--passes', '2', '--max-flakes', '0'])
@@ -341,7 +363,10 @@ class RunPassEvidence(unittest.TestCase):
     def env(self, launches, dll=HEX, lost_on=None):
         class C:
             def run(s, verb, *a):
-                return {'status': 'ok', 'reason': '', 'check': {'k': 1}, 'load_s': 1.0}
+                return {'status': 'ok', 'reason': '', 'check': {'k': 1}, 'load_s': 1.0, **({'shot': str(shot)} if verb == 'shot' else {})}
+        shot = Path(tempfile.mkdtemp()) / 's.jpg'
+        shot.write_bytes(b'JPEG')
+        self.addCleanup(lambda: __import__('shutil').rmtree(shot.parent, ignore_errors=True))
         seq = [{}, {}]
 
         def start(n):
@@ -366,6 +391,13 @@ class RunPassEvidence(unittest.TestCase):
         ok, steps = acc.run_pass(baseline(), self.env([self.L('a'), self.L('b')]))
         self.assertFalse(ok)
         self.assertFalse(steps['build_stable']['ok'])
+
+    def test_a_shot_that_cannot_be_hashed_fails_the_step(self):
+        e = self.env([self.L('a')])
+        e['ctl'].run = lambda verb, *a: {'status': 'ok', 'reason': '', 'check': {}, 'load_s': 1.0, **({'shot': 'C:/nowhere/x.jpg'} if verb == 'shot' else {})}
+        ok, steps = acc.run_pass(baseline(), e)
+        self.assertFalse(ok)
+        self.assertFalse([v for k, v in steps.items() if k.endswith(':shot')][-1]['ok'])
 
     def test_no_launch_line_cannot_pass(self):
         ok, steps = acc.run_pass(baseline(), self.env([self.L(None)]))
@@ -436,6 +468,36 @@ class PassFile(unittest.TestCase):
         self.assertTrue(any('build_id' in p for p in acc.pass_problems(d)))
         legacy = {'pass': 1, 'start_utc': 'a', 'build_id': 'abc', 'passed': True, 'steps': {}}
         self.assertIn('legacy', acc.pass_problems(legacy)[0])
+
+    def test_a_pass_that_proves_nothing_is_refused(self):
+        def bad(f):
+            d = good_doc()
+            f(d)
+            return acc.pass_problems(d)
+        self.assertTrue(bad(lambda d: d.update(passed=False)))
+        for k in ('exe_sha1', 'baseline_sha256', 'dll_sha256', 'watcher_sha256'):
+            self.assertTrue(bad(lambda d: d['evidence'].update({k: None})), k)
+        self.assertTrue(bad(lambda d: d['evidence'].update(launches=[])))
+        self.assertTrue(bad(lambda d: d['steps'].update({'land_x:shot': {'ok': True}}) or d['evidence'].update(shots={})))
+        self.assertEqual(bad(lambda d: d['steps'].update({'land_x:shot': {'ok': True}})), [])   # shots has land_x
+        d = good_doc()
+        d.update(result='fail', passed=False)
+        d['evidence'].update(exe_sha1=None, launches=[])
+        self.assertEqual(acc.pass_problems(d), [])   # only a pass must prove itself
+
+    def test_check_pass_refuses_a_named_ledger_that_is_missing_and_needs_no_adapter(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            pf = t / 'pass_01.json'
+            pf.write_text(json.dumps(good_doc()))
+            out = io.StringIO()
+
+            def no_adapter(root):
+                raise RuntimeError('no adapter')
+            with mock.patch.object(acc, 'ROOT', t), mock.patch.object(acc.layout, 'harness_adapter', no_adapter), contextlib.redirect_stdout(out):
+                self.assertEqual(acc.main(['check-pass', str(pf), '--ledger', str(t / 'typo.jsonl')]), 1)
+                self.assertEqual(acc.main(['check-pass', str(pf)]), 0)
+            self.assertIn('does not exist', out.getvalue())
 
     def test_the_line_must_agree_with_the_file(self):
         d = good_doc()
@@ -573,6 +635,35 @@ class StagedSaves(unittest.TestCase):
         with ctl.stage_save(self.row, self.ad, self.repo, say=said.append):
             self.assertEqual(self.target().read_bytes(), b'SAVEDATA')
         self.assertTrue(said and 'leftover' in said[0])
+        self.assertFalse(self.target().exists())
+
+    def test_the_leftover_goes_to_the_result_and_never_to_stdout(self):
+        self.target().parent.mkdir(parents=True)
+        self.target().write_bytes(b'OLD')
+        out = io.StringIO()
+        c = ctl.Ctl(lambda line, wait=0: (0, {'scene': 'frontend', 'status': 'ok'}), {self.row['id']: self.row}, self.ad, battles_dir=self.d)
+        c.state = lambda: {'scene': 'frontend'}
+        c._scene = lambda start, sid, *o: {'status': 'ok'}
+        with mock.patch.object(ctl, 'ROOT', self.repo), contextlib.redirect_stdout(out):
+            r = c.v_scene(0, self.row['id'])
+        self.assertEqual(out.getvalue(), '')
+        self.assertTrue('leftover' in r['staged_notes'][0])
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()) as err, ctl.stage_save(self.row, self.ad, self.repo):
+            pass
+        self.assertEqual(out.getvalue(), '')
+
+    def test_reset_on_a_staged_row_stages_the_save(self):
+        seen = []
+
+        def t(line, wait=0):
+            if line.startswith('reset'):
+                seen.append((line, self.target().exists()))
+            return 0, {'status': 'ok', 'scene': 'campaign'}
+        c = ctl.Ctl(t, {self.row['id']: self.row}, self.ad, battles_dir=self.d)
+        c.settle = lambda *a, **k: {'settled': True, 'scene': 'campaign'}
+        with mock.patch.object(ctl, 'ROOT', self.repo):
+            c.v_reset(0, self.row['id'])
+        self.assertEqual(seen, [('reset campaign:wsc_camp_start-2 240', True)])
         self.assertFalse(self.target().exists())
 
     def test_a_file_not_starting_with_wsc_is_never_removed(self):

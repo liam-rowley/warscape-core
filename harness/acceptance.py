@@ -17,7 +17,7 @@ Shots stay on the PC (<state>/acceptance/<run>/pass_NN/); each attempt commits h
 results, the shot sha256s, and the evidence block: exe, baseline, kit, DLL and watcher shas, the launches with the build of each from its own proxy.log line),
 and its ledger line names the run and that file and carries its sha256 (rule 79 refuses a line whose evidence is not committed). A lost headless start that
 survived the retry, before the build ran, is a `flake` (classify), not a fail; the adapter's acceptance.max_flakes (default 1, at most 3) are allowed per run
-and a flake never counts as a pass. A run id with evidence is refused, and the installed watcher must equal the core's watcher.ps1 byte for byte. `measure` makes the baseline from two
+and a flake never counts as a pass. A run id with evidence is refused, and the installed watcher must equal the core's watcher.ps1 in content, compared with LF line endings (CRLF is not a difference). `measure` makes the baseline from two
 passes: the first's load times and shots, the second's shot difference sets each step's threshold (a step above `NONDET_DIFF` is marked not
 deterministic, with why).
 """
@@ -232,6 +232,24 @@ def pass_problems(doc):
                 out.append(f'evidence.shots.{k} needs sha256 and bytes')
     elif 'evidence' in doc:
         out.append('evidence is an object')
+    if doc.get('result') == 'pass':   # H3: a pass that proves nothing is refused
+        out += pass_proof_problems(doc)
+    return out
+
+
+def pass_proof_problems(doc):
+    """What a `pass` must carry: passed true, the exe, baseline, DLL and watcher shas, a launch, and one shot entry per shot step."""
+    out = []
+    if doc.get('passed') is not True:
+        out.append('result pass needs passed true')
+    ev = doc.get('evidence') if isinstance(doc.get('evidence'), dict) else {}
+    out += [f'a pass needs evidence.{k}' for k in ('exe_sha1', 'baseline_sha256', 'dll_sha256', 'watcher_sha256') if not ev.get(k)]
+    if not ev.get('launches'):
+        out.append('a pass needs at least one launch in evidence.launches')
+    shots = ev.get('shots') if isinstance(ev.get('shots'), dict) else {}
+    for name, st in (doc.get('steps') or {}).items():
+        if name.endswith(':shot') and name[:-len(':shot')] not in shots:
+            out.append(f'step {name} has no entry in evidence.shots')
     return out
 
 
@@ -285,6 +303,8 @@ def run_pass(baseline, env):
         if r.get('shot') and Path(r['shot']).is_file():   # W9 (H3): the file ctl wrote, hashed where it lies
             b = Path(r['shot']).read_bytes()
             hashed = {'sha256': hashlib.sha256(b).hexdigest(), 'bytes': len(b)}
+        if r['status'] == 'ok' and not hashed:   # no file to hash is no proof of a shot
+            r = {**r, 'status': 'failed', 'reason': f"the shot file {r.get('shot')!r} is missing or unreadable, so it cannot be hashed"}
         if not record(f'{sid}:shot', r['status'] == 'ok', {'reason': r['reason'], 'check': r['check'], 'shot': r.get('shot'), **hashed}):
             return False, steps
         if s['deterministic']:
@@ -650,7 +670,12 @@ def shots_evidence(steps, baseline, baseline_dir):
 
 def cmd_check_pass(a):
     """Each FILE must be valid schema-2 evidence; with --ledger the ledger line naming it must agree (and exist)."""
-    lines = read_ledger(Path(a.ledger).read_text(encoding='utf-8')) if a.ledger and Path(a.ledger).exists() else None
+    lines = None
+    if a.ledger:
+        if not Path(a.ledger).is_file():
+            print(f'check-pass: the ledger {a.ledger} does not exist (a named ledger is never skipped)')
+            return 1
+        lines = read_ledger(Path(a.ledger).read_text(encoding='utf-8'))
     bad = 0
     for f in a.files:
         p = Path(f)
@@ -759,13 +784,12 @@ def cmd_measure(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(description='acceptance gate')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    adapter = str(layout.harness_adapter(ROOT))
     r = sub.add_parser('run'); r.add_argument('--passes', type=int, default=NEEDED); r.add_argument('--owner', default=None)
     r.add_argument('--baseline', default=str(BASELINE)); r.add_argument('--ledger', default=str(LEDGER)); r.add_argument('--run', required=True)
-    r.add_argument('--session', default=None); r.add_argument('--adapter', default=adapter); r.add_argument('--branch', default='')
+    r.add_argument('--session', default=None); r.add_argument('--adapter', default=None); r.add_argument('--branch', default='')
     r.add_argument('--max-flakes', type=int, default=None, dest='max_flakes')
     m = sub.add_parser('measure'); m.add_argument('--run', required=True); m.add_argument('--owner', default=None)
-    m.add_argument('--session', default=None); m.add_argument('--adapter', default=adapter)
+    m.add_argument('--session', default=None); m.add_argument('--adapter', default=None)
     c = sub.add_parser('check-baseline'); c.add_argument('--baseline', default=str(BASELINE))
     s = sub.add_parser('streak'); s.add_argument('--build', required=True); s.add_argument('--watcher', required=True); s.add_argument('--ledger', default=str(LEDGER))
     s.add_argument('--watcher-sha', default=None); s.add_argument('--max-flakes', type=int, default=0)
@@ -782,6 +806,7 @@ def main(argv=None):
         return 0 if n >= NEEDED else 1
     if a.cmd == 'check-pass':
         return cmd_check_pass(a)
+    a.adapter = a.adapter or str(layout.harness_adapter(ROOT))
     if a.cmd == 'measure':
         return cmd_measure(a)
     return cmd_run(a)

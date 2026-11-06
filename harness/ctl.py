@@ -157,9 +157,10 @@ def saves_dir(adapter):
 
 
 @contextlib.contextmanager
-def stage_save(row, adapter, repo_root, say=print):
+def stage_save(row, adapter, repo_root, say=None):
     """W9 (B51): copy the row's `save_file` (relative to the game repo) into the game's save folder as wsc_<id>, yield the target `campaign:<name>`,
-    remove that one file on exit. Refuses before any write on a missing file or a sha256 that differs from `save_sha256`; only a file named wsc_* is ever removed."""
+    remove that one file on exit. A leftover of an earlier run is overwritten and reported through say(text) (default: stderr, never stdout, which is the JSON result). Refuses before any write on a missing file or a sha256 that differs from `save_sha256`; only a file named wsc_* is ever removed."""
+    say = say or (lambda t: print(t, file=sys.stderr))
     d, ext = saves_dir(adapter)
     src = Path(repo_root) / row['save_file']
     if not src.is_file():
@@ -472,11 +473,15 @@ class Pc:
         return rec
 
     def keep_attempt_evidence(self, n, job_out):
-        """Copy a failed attempt's proxy.log, headless status file and the job's output into <evidence_dir>/attempt_<n>/ (the next launch recreates the first two)."""
+        """Copy a failed attempt's proxy.log, headless status file and the job's output into <evidence_dir>/attempt_<k>/, k the next free number (attempt.json names the attempt of its launch); an earlier folder is never replaced."""
         base = self.evidence_dir or (Path(self.a.get('state_dir', '.')) / '_scratch' / self.owner)
-        d = Path(base) / f'attempt_{n}'
+        k = 1
+        while (Path(base) / f'attempt_{k}').exists():   # each lost launch keeps its own folder, across calls and within one pass
+            k += 1
+        d = Path(base) / f'attempt_{k}'
         try:
             d.mkdir(parents=True, exist_ok=True)
+            (d / 'attempt.json').write_text(json.dumps({'launch_attempt': n, 'utc': utc()}), encoding='utf-8')
             (d / 'job_output.txt').write_text(job_out, encoding='utf-8')
             src = [self.log_path()]
             sf = (self.a.get('headless') or {}).get('status_file')
@@ -517,7 +522,7 @@ class Pc:
         inst = Path(self.a['state_dir']) / 'install.json'
         rec = json.loads(inst.read_text(encoding='utf-8')) if inst.exists() else {}
         if strict:
-            last = self.launches[-1] if self.launches else None
+            last = self.launches[0] if self.launches else None   # decision 1: a pass takes its build from its first launch (build_stable fails a later one that differs)
             if not last or not last.get('build'):
                 raise RuntimeError('no launch of this run logged its build in proxy.log (pid-matched load line): the build id is never guessed from the kit')
             return {'build': last['build'], 'kit': rec.get('kit_id'), 'dll_sha256': last.get('dll_sha256_logged')}
@@ -694,8 +699,12 @@ class Ctl:
         """W9 (B51): a row with save_file is staged under the harness name before the autostart and cleared after, whatever the outcome."""
         row = resolve_scenario(self.rows, sid)
         if row.get('save_file'):
-            with stage_save(row, self.adapter, ROOT):
-                return self._scene(start, sid, *opts)
+            notes = []
+            with stage_save(row, self.adapter, ROOT, say=notes.append):
+                res = self._scene(start, sid, *opts)
+            if notes and isinstance(res, dict):
+                res['staged_notes'] = notes   # kept as evidence in the result, not printed ahead of the JSON
+            return res
         return self._scene(start, sid, *opts)
 
     def _scene(self, start, sid, *opts):
@@ -1055,6 +1064,12 @@ class Ctl:
     def v_reset(self, start, sid=None):
         row = resolve_scenario(self.rows, sid) if sid else None
         target = scenario_target(row, self.battles_dir, self.adapter) if row else 'frontend'
+        if row and row.get('save_file'):   # a staged campaign row: its save is in the folder only while staged
+            with stage_save(row, self.adapter, ROOT, say=lambda t: None):
+                return self._reset(start, row, target)
+        return self._reset(start, row, target)
+
+    def _reset(self, start, row, target):
         rc, r = self.t(f'reset {target} 240', 260)
         if rc != 0 or not r:
             return make_result('reset', 'failed', f"step reset {target}: {(r or {}).get('reason', 'no result')}", start, evidence={'ctl': r})
