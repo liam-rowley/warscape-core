@@ -272,7 +272,7 @@ def run(ctx):                           # ctx: the repo context, plus ctx.stage 
 `## Orchestrator additions`. The owner grants a blocked job one more round with a `grants_round` decision row on `meta/` (W132, `docs/REVIEW.md`). A game: opt in to `decisions_cite_job` in its pin bump; stub `print_claims`/`take_claim` in tests that run `jobs review`.
 
 ## Auditing the pipeline (W44, C41)
-`wsc audit` measures the queue against `[audit]`; rules and keys: [AUDIT_METRICS.md](AUDIT_METRICS.md).
+`wsc audit` measures the queue: [AUDIT_METRICS.md](AUDIT_METRICS.md); answers: [PROPOSALS.md](PROPOSALS.md).
 
 ## The proxy, the harness and the save tools (0.4.0)
 Moved to [PROXY_HARNESS.md](PROXY_HARNESS.md) on 2026-11-04 (the 30 KB cap): what the core carries for a game (the proxy core, the watcher

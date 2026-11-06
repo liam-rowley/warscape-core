@@ -11,8 +11,10 @@ from `metrics` is in one of the two, so a missing finding never reads as a fixed
 A finding is `{id, metric, subject, severity, value, threshold, direction, evidence}`. Its id is `<rule>:<subject>` or `<rule>`, stable across runs: W45 suppresses and re-measures by
 it. `direction` is the worse way: `above` or `below`. Severity is `medium` unless the rule says otherwise.
 
+With a proposals registry (W45; [PROPOSALS.md](PROPOSALS.md)) a record may also hold, each only when not empty, so `version` stays 1: `suppressed`, the findings a declined or deferred row holds back, and `remeasured`, a verdict per applied row. Both read the rows at `main`.
+
 ## How a merge is read
-First-parent commits of main. A subject starting `<[jobs] id_prefix><n>:` or `<id> ` is a job merge, except `<id> brief`, a brief merge; `brief`, `plan`, `meta` and `release` start theirs; the rest are `other`
+First-parent commits of main. A subject starting `<[jobs] id_prefix><n>:` or `<id> ` is a job merge, except `<id> brief`, a brief merge; `brief`, `plan`, `meta`, `decide` and `release` start theirs; the rest are `other`
 (`throughput` details, `kinds`). A job can merge twice (W38: its row, then its work): each merge counts in `hot_files`, the id once elsewhere, measured to its last merge. No
 rename detection: a move touches both names.
 
@@ -28,7 +30,7 @@ rename detection: a move touches both names.
 | `review_loop` | rounds per done job in the window; share with one round and a plain `merge` | `review_churn`: under `min_round1_merge`. Details count lines with a bold `later` marker (no rule: W32) |
 | `brief_cost` | median brief and report bytes; brief merges against job merges | `brief_heavy`: median brief over `max_brief_ratio` median reports |
 | `startup_read` | KiB of `CLAUDE.md`, `README.md`, `startup_docs` | `startup_heavy`: over `max_startup_kb` |
-| `doc_caps` | living docs (the `doc_size` gate's list) | `doc_cap:<path>`: at `doc_cap_share` of `[docs] max_kb` or more |
+| `doc_caps` (not `<[jobs] dir>/**`: a finished brief will not change; the `doc_size` gate still reads them) | living docs (the `doc_size` gate's list) | `doc_cap:<path>`: at `doc_cap_share` of `[docs] max_kb` or more |
 | `pin_lag` | `[core] version` against the newest `vX.Y.Z` tag at the origin of the `[ci] core` folder (a game), read with `ls-remote`; `--offline`: its local store, and the evidence and `details.tags_from` say so | `pin_lag`: at least `max_pin_lag` minors behind; a newer major counts as the limit |
 | `throughput` | job and brief merges a day against the window before | `slowdown`: under `slowdown_ratio`; no finding with nothing before |
 | `ci_durations` | online: median minutes per required check over the last `ci_runs` runs per workflow on main, a skipped job not counted | `slow_check:<name>`: over `ci_check_minutes[<name>]`, else `ci_check_default` |

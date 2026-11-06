@@ -3,6 +3,11 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## `wsc proposals` and `decide/` (W45, C41)
+
+A new core verb, a shipped schema and a branch kind; nothing is required at the bump, and without the registry nothing runs. A game verb named `proposals` in `[cli] verb_dirs` now refuses
+to load: rename it. To adopt it: [PROPOSALS.md](PROPOSALS.md) "What a game declares". `doc_caps` no longer reads the job folders, so its findings on job briefs go.
+
 ## Session cap (W41)
 
 `[jobs] max_sessions` is off by default; a game on a shared PC sets it (napoleon: 4, its D59). It counts background sessions with a pid in any state, across every repo on the PC, so a

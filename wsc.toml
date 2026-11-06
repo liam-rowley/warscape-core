@@ -16,6 +16,7 @@ engine_sites = "core:engine_sites"
 config_keys = "core:config_keys"
 hotkeys = "core:hotkeys"
 engine_facts = "core:engine_facts"
+proposals = "core:proposals"            # the answer round, one file per row (W45, C41): docs/PROPOSALS.md
 
 [tools]
 include = [".githooks/*"]                                   # extensionless git hooks are tools too
@@ -25,7 +26,7 @@ retire_after_days = 0     # stays off in the core (C33): its tools are used thro
 
 [docs]
 max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the file name, or under records/ reports/ runs/) are exempt
-path_ignore = ["plan/", "brief/", "meta/", "job/", "release/",   # branch-name prefixes, not folders (doc_paths gate, W28)
+path_ignore = ["plan/", "brief/", "meta/", "decide/", "job/", "release/",   # branch-name prefixes, not folders (doc_paths gate, W28)
                "release/vX.Y.Z",                                 # the release branch pattern (W29): `.Z` reads as a file extension
                "core/", "reports/", "runs/", "records/",         # a game's core submodule; the dated-record folder names
                # other repos' paths, named on purpose (folders the core does not have; review W28 round 1):
@@ -43,7 +44,7 @@ timeout_s = 1080     # under the Windows job's 20 minutes (W42): the default 600
 
 # The core runs its own job queue (napoleon J62): rows in registries/jobs/<id>.json, folders in jobs/<id>/, ids W<n>, the same pipeline a game uses.
 [storage]
-dir = ["jobs", "tools", "decisions"]
+dir = ["jobs", "tools", "decisions", "proposals"]
 
 # Views are not committed (C19): a brief/ branch may change only its brief and its row, and a committed registries/jobs.md would have to change with the row.
 # `python3 wsc.py reg render` writes them to the git-ignored _scratch/registries/.
@@ -62,7 +63,7 @@ review_doc = "docs/REVIEW.md"
 owner = "Liam"
 rules_ref = "CLAUDE.md, Jobs"
 trailer_hint = 'by hand: git commit --trailer "Claude-Session: <session id>"'
-plan_summary = "docs, briefs, the jobs registry, README.md and CLAUDE.md"
+plan_summary = "docs, briefs, the jobs and proposals registries, README.md and CLAUDE.md"
 ref_merge = "C18"
 ref_brief_merge = "C18"
 
@@ -74,7 +75,7 @@ workflow_paths = [".github/workflows/**", "ci/**"]  # a job's change here that i
 bases = ["main"]           # the branches a pull request may target (W36)
 decisions = "registry:decisions"   # one file per row (W43): wsc reg add decisions --mint
 decision_prefix = "C"
-plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/decisions/*", "README.md", "CLAUDE.md"]
+plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/decisions/*", "registries/proposals/*", "README.md", "CLAUDE.md"]
 meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/decisions/*", "registries/tools/*", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
         "tests/**", "wsc.toml", ".gitattributes", ".gitignore", "schemas/*", "registries/*"]
 
@@ -94,7 +95,7 @@ required_checks = ["gates (ubuntu-latest)", "gates (windows-latest)", "policy", 
 # installer case kits, the moved-tools test and the library its Python helpers import. A workflow or template change runs both (W21).
 # gates_windows: everything but paperwork (W42), the [policy] plan set with the whole job folder; ubuntu runs the gates on every push.
 [ci.inputs]
-gates_windows = '^(?!docs/|jobs/|registries/jobs/|registries/decisions/|README\.md$|CLAUDE\.md$)'
+gates_windows = '^(?!docs/|jobs/|registries/jobs/|registries/decisions/|registries/proposals/|README\.md$|CLAUDE\.md$)'
 proxy = '^\.github/workflows/|^ci/|^proxy/|^wsc\.toml$'
 harness = '^\.github/workflows/|^ci/|^harness/|^proxy/tools/|^proxy/tests/null_game/|^tests/test_moved_tools\.py$|^warscape/|^wsc\.toml$'
 
