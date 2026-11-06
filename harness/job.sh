@@ -89,6 +89,7 @@ utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 lock_field() { [ -f "$ROOT/game.lock" ] && tr -d '\r' < "$ROOT/game.lock" | head -1 | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
 lock_owner() { lock_field owner; }
 lock_session() { lock_field session; }
+now_ms() { local n; n="$(date +%s%N)"; echo $(( n / 1000000 )); }   # GNU date; W81: a lock --wait deadline in whole seconds ended up to 1 s early
 lock_age() { local m; m="$(stat -c %Y "$ROOT/game.lock" 2>/dev/null)" || return 1; echo $(( $(date +%s) - m )); }
 # H12: the stale age is the watcher's own setting (watcher.ini lock_stale_min, key=value lines; absent, unparsable or < 1 = 20)
 stale_min() {
@@ -201,17 +202,19 @@ case "$cmd" in
       create && return 0
       LOCK_WHY="game.lock was taken by another agent at the same moment: refused (job.sh status, then retry)"; return 2
     }
-    end=$(( $(date +%s) + wait_s ))
+    end_ms=$(( $(now_ms) + wait_s * 1000 ))
     while :; do
       if lock_attempt; then
         echo "game.lock taken: $(lock_field owner) session=$session  (refresh at least every $(( ($(stale_min) + 1) / 2 )) min with: job.sh touch $owner; the watcher expires it after $(stale_min) min)"; exit 0
       fi
-      if [ "$(date +%s)" -ge "$end" ]; then
+      left_ms=$(( end_ms - $(now_ms) ))
+      if [ "$left_ms" -le 0 ]; then
         echo "$LOCK_WHY" >&2
         [ "$wait_s" -gt 0 ] && { echo "job.sh lock: no lock after ${wait_s}s" >&2; exit 124; }
         exit 2
       fi
-      sleep 2
+      [ "$left_ms" -gt 2000 ] && left_ms=2000   # poll every 2 s while time remains; the last sleep is only what is left
+      sleep "$(printf '%d.%03d' $(( left_ms / 1000 )) $(( left_ms % 1000 )))"
     done;;
   touch)
     owner="${2:-}"

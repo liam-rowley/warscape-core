@@ -299,8 +299,21 @@ class JobSh(unittest.TestCase):
         r = self.jobsh('lock', '--wait', '3', 'c', 's3', 'p')
         self.assertEqual(r.returncode, 124)
         self.assertIn("held by 'b'", r.stderr)
-        self.assertGreaterEqual(time.time() - t0, 2.5)
+        took = time.time() - t0
+        self.assertGreaterEqual(took, 3.0)   # never earlier than asked (W81)
+        self.assertLess(took, 6.0)           # and a hang fails too
         self.assertEqual(self.jobsh('lock', 'c', 's3', 'p').returncode, 2)   # no wait: a plain refusal stays 2
+
+    def test_lock_wait_never_ends_early_whenever_in_the_second_it_starts(self):
+        self.take('a', 's')
+        for i in range(6):
+            time.sleep(0.17 * (i + 1) % 1.0 + 0.05)   # start at different sub-second offsets
+            t0 = time.time()
+            r = self.jobsh('lock', '--wait', '1', 'c', 's3', 'p')
+            took = time.time() - t0
+            self.assertEqual(r.returncode, 124, r.stderr)
+            self.assertGreaterEqual(took, 1.0, f'run {i} ended early')
+            self.assertLess(took, 5.0)
 
     def test_holds(self):
         self.assertEqual(self.jobsh('holds', 'me').returncode, 2)
