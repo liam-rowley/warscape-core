@@ -1,0 +1,12 @@
+{
+  "id": "W121",
+  "description": "**A launch is not counted for about 1 s**: `warscape/jobq.py` `capped_sessions` needs a pid, and a session just launched is `working` with no pid until about +1.2 s. Have `JobServer` remember its own launches for a few seconds and count them. Why: A second button press in that window, or one during a tick, goes over the cap by one. Measured with a throwaway session, 2026-11-06. Raised: W41 review round 1, Later 1, 2026-11-06",
+  "title": "A launch is not counted for about 1 s",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B109",
+  "area": "core"
+}

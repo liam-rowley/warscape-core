@@ -1,0 +1,12 @@
+{
+  "id": "W123",
+  "description": "**A finished session keeps its cap slot until someone stops it**: a `done` row held its pid past 45 s, and only `jobs sessions --stop-finished` stops it, so `--auto` can sit at a full cap of `done` rows. W46 decides whether the tick stops them. First test what state a session shows while it waits for a background task (if `done`, a stop ends live work) and how long an unstopped `done` row keeps its pid. A `failed` or `stopped` row with a pid also counts and no verb stops it. Why: At napoleon's cap of 4 the queue can stall with only a log line. Raised: W41 review round 1, Later 3, 2026-11-06",
+  "title": "A finished session keeps its cap slot until someone stops it",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B111",
+  "area": "core"
+}

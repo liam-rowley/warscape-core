@@ -1628,6 +1628,380 @@ class UsageRule(unittest.TestCase):
         self.assertEqual(self.errs('J2', REPORT), [])
 
 
+def bg(name, state='working', pid=100, sid=None):
+    """One background row of `claude agents --json --all`; pid=None is a row with no process."""
+    a = {'kind': 'background', 'name': name, 'id': sid or name.lower().replace('-', '')[:8], 'state': state}
+    return a if pid is None else dict(a, pid=pid)
+
+
+INTERACTIVE = {'kind': 'interactive', 'name': 'by-hand', 'pid': 7, 'status': 'busy'}   # no id, no state (read on the PC, W41)
+
+
+class Capped(unittest.TestCase):
+    """Shared by the W41 cases: `[jobs] max_sessions` is set for one test and put back."""
+    make = Autopilot.make
+
+    def cap(self, n):
+        old = jv.S.max_sessions
+        jv.S.max_sessions = n
+        self.addCleanup(setattr, jv.S, 'max_sessions', old)
+
+    def many(self, *ids):
+        return {j: jv.Branch(row(j, status='review', model='sonnet'), 0, f'{j.lower()}head') for j in ids}
+
+    def snap(self, on, needs_pc=()):
+        rows = [dict(r, needs_pc=r['id'] in needs_pc) for r in LROWS] + [row(j, status='queued', needs_pc=j in needs_pc) for j in on if j not in LBY]
+        return lambda: (rows, files(), {f'job/{j}' for j in on}, on)
+
+
+class SessionCap(Capped):
+    """W41 decisions 1, 2 and 6, with Liam's 2026-11-06 answers: a background session counts when it has a pid, whatever its state."""
+
+    def press(self, srv, jid='J4'):
+        rows, _, branches, on = srv.snapshot()
+        return srv.start(jid, 'review', {r['id']: r for r in rows}, branches, on)
+
+    def button(self, agents):
+        return self.make({'J4': jv.Branch(row('J4', status='review', model='sonnet'), 0, 'j4head')}, agents=lambda: agents)
+
+    def test_cap_0_never_refuses(self):
+        self.cap(0)
+        srv = self.button([bg(f'J9{i}-build') for i in range(9)])
+        self.assertEqual(self.press(srv)[0], 200)
+        self.assertEqual(self.launched, ['J4-review'])
+
+    def test_at_the_cap_refuses_naming_them(self):
+        self.cap(2)
+        srv = self.button([bg('J90-build'), bg('J91-review', 'blocked')])
+        code, msg, _ = self.press(srv)
+        self.assertEqual(code, 429)
+        self.assertEqual(msg, 'refused: 2 of 2 background sessions are live (J90-build, J91-review); wait or run wsc jobs sessions --stop-finished')
+        self.assertEqual(self.launched, [])
+
+    def test_over_the_cap_names_at_most_five(self):
+        self.cap(2)
+        code, msg, _ = self.press(self.button([bg(f'J9{i}-build') for i in range(7)]))
+        self.assertEqual(code, 429)
+        self.assertIn('7 of 2', msg)
+        self.assertIn('J94-build', msg)
+        self.assertNotIn('J95-build', msg)
+
+    def test_only_a_background_row_with_a_pid_counts(self):
+        self.cap(1)
+        for free in (bg('J90-build', 'done', None), bg('J90-build', 'blocked', None), bg('J90-build', 'stopped', None),
+                     bg('J90-build', 'failed', None), INTERACTIVE, {'name': 'J90-build', 'state': 'working', 'pid': 5}):
+            self.assertEqual(self.press(self.button([free]))[0], 200, free)
+        for held in (bg('J90-build'), bg('J90-build', 'blocked'), bg('J90-build', 'done'), bg('J90-build', 'stopped')):
+            self.assertEqual(self.press(self.button([held]))[0], 429, held)
+
+    def test_a_dry_run_is_refused_too(self):
+        self.cap(1)
+        srv = self.button([bg('J90-build')])
+        srv.dry_run = True
+        self.assertEqual(self.press(srv)[0], 429)
+
+    def test_the_cap_comes_before_the_claim(self):
+        self.cap(1)
+        srv = self.button([bg('J90-build')])
+        claims = []
+        srv.claim = lambda *a: claims.append(a) or (True, None)
+        self.assertEqual(self.press(srv)[0], 429)
+        self.assertEqual(claims, [])
+
+    def test_an_unreadable_list_is_503(self):
+        self.cap(2)
+        def bad():
+            raise ValueError('no claude')
+        srv = self.make({'J4': jv.Branch(row('J4', status='review', model='sonnet'), 0, 'j4head')}, agents=bad)
+        self.assertEqual(self.press(srv)[0], 503)
+        self.assertEqual(self.launched, [])
+
+    def test_two_starts_in_one_tick_at_cap_2_with_1_live_start_one_and_defer_one(self):
+        self.cap(2)
+        on = self.many('J4', 'J6')
+        srv = self.make({}, snapshot=self.snap(on), agents=lambda: [bg('J90-build')])
+        self.assertEqual([(j, c) for j, _, c, _ in srv.auto_tick()], [('J4', 200)])
+        self.assertEqual(self.launched, ['J4-review'])
+        self.assertNotIn(('J6', 'review'), srv.started)
+
+    def test_one_deferral_line_per_tick_not_one_per_job(self):
+        self.cap(1)
+        srv = self.make({}, snapshot=self.snap(self.many('J4', 'J6', 'J7')), agents=lambda: [bg('J90-build')])
+        self.assertEqual(srv.auto_tick(), [])
+        self.assertEqual(self.launched, [])
+        self.assertEqual(len([l for l in self.lines if 'of 1 background sessions' in l]), 1, self.lines)
+        srv.auto_tick()
+        self.assertEqual(len([l for l in self.lines if 'of 1 background sessions' in l]), 2, self.lines)
+        self.assertFalse([l for l in self.lines if 'nothing ready' in l], self.lines)
+
+    def test_the_tick_does_not_change_the_list_the_seam_returned(self):
+        self.cap(3)
+        rows = [bg('J90-build')]
+        srv = self.make({}, snapshot=self.snap(self.many('J4')), agents=lambda: rows)
+        srv.auto_tick()
+        self.assertEqual(len(rows), 1)
+
+    def test_a_dry_run_tick_counts_what_it_would_start(self):
+        self.cap(1)
+        srv = self.make({}, snapshot=self.snap(self.many('J4', 'J6')), dry_run=True)
+        self.assertEqual([j for j, _, _, _ in srv.auto_tick()], ['J4'])
+
+
+class AgentList(unittest.TestCase):
+    """`claude agents --json` stopped listing `done` (Claude Code 2.1.318, W41): the one reader asks for every session."""
+
+    def test_list_agents_reads_all(self):
+        from unittest import mock
+        with mock.patch.object(jv, '_claude', return_value=(0, json.dumps([bg('J1-build', 'done')]), '')) as c:
+            self.assertEqual(jv.list_agents()[0]['state'], 'done')
+        self.assertEqual(c.call_args.args, ('agents', '--json', '--all'))
+
+    def test_stop_session_is_claude_stop_and_a_failure_raises(self):
+        from unittest import mock
+        with mock.patch.object(jv, '_claude', return_value=(0, '', '')) as c:
+            jv.stop_session('abcd1234')
+        self.assertEqual(c.call_args.args, ('stop', 'abcd1234'))
+        with mock.patch.object(jv, '_claude', return_value=(1, '', 'no such session')):
+            with self.assertRaisesRegex(ValueError, 'no such session'):
+                jv.stop_session('abcd1234')
+
+
+class VerbCase(Capped):
+    def verb(self, action, agents=(), stop=None, **flags):
+        """Run `jobs <action>` with stubs: (rc, stdout, stderr, the calls that claimed a job)."""
+        import contextlib
+        import io
+        import types
+        from unittest import mock
+        from warscape.repo import DEFAULTS
+        from warscape.verbs import jobs as jverb
+        claims = []
+        cfg = dict(DEFAULTS['jobs'], max_sessions=jv.S.max_sessions)
+        ctx = types.SimpleNamespace(root=ROOT, config={'registries_dir': 'registries', 'jobs': cfg, 'ci': {}})
+        kw = dict(action=action, id=None, offline=False, auto=False, serve=False, all=False, peek=False, stop_finished=False, json=False)
+        args = types.SimpleNamespace(**dict(kw, **flags))
+        def read():
+            if isinstance(agents, Exception):
+                raise agents
+            return list(agents)
+        with mock.patch.multiple(jv, main_rows=lambda ctx: [row('J60', status='queued', title='T')], print_red_prs=lambda *a: None,
+                                 print_main_health=lambda *a: None, remote_branches=lambda *a: set(), print_claims=lambda *a, **k: None,
+                                 list_agents=read, stop_session=stop or (lambda sid: None),
+                                 next_claim=lambda *a, **k: (claims.append(k), (0, 'the steps'))[1]):
+            with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                rc = jverb.run(args, ctx)
+        return rc, out.getvalue(), err.getvalue(), claims
+
+
+class NextAtTheCap(VerbCase):
+    """Decision 3: the count, and at the cap a wait instead of a job. A list that cannot be read never blocks `next`."""
+
+    def test_no_cap_reads_nothing_and_prints_nothing(self):
+        self.cap(0)
+        rc, out, _, claims = self.verb('next', agents=ValueError('would have read'))
+        self.assertEqual((rc, out.strip(), len(claims)), (0, 'the steps', 1))
+
+    def test_under_the_cap_prints_the_count_and_the_job(self):
+        self.cap(2)
+        rc, out, _, claims = self.verb('next', agents=[bg('J90-build'), bg('J91-build', 'done', None), INTERACTIVE])
+        self.assertEqual((rc, len(claims)), (0, 1))
+        self.assertEqual(out.splitlines(), ['sessions: 1 live of 2', 'the steps'])
+
+    def test_at_the_cap_says_wait_and_claims_nothing(self):
+        self.cap(1)
+        rc, out, _, claims = self.verb('next', agents=[bg('J90-build')])
+        self.assertEqual((rc, claims), (0, []))
+        self.assertIn('sessions: 1 live of 1', out)
+        self.assertIn('wait', out)
+        self.assertNotIn('the steps', out)
+
+    def test_a_named_job_goes_on_at_the_cap(self):
+        """A session the view launched runs `next --id` and is itself one of the live rows: the launch already passed the cap."""
+        self.cap(1)
+        rc, out, _, claims = self.verb('next', agents=[bg('J60-build')], id='J60')
+        self.assertEqual((rc, len(claims)), (0, 1))
+        self.assertEqual(out.splitlines(), ['sessions: 1 live of 1', 'the steps'])
+
+    def test_an_unreadable_list_is_printed_and_does_not_block(self):
+        self.cap(1)
+        rc, out, _, claims = self.verb('next', agents=ValueError('claude is not on PATH'))
+        self.assertEqual((rc, len(claims)), (0, 1))
+        self.assertIn('claude is not on PATH', out)
+        self.assertIn('the steps', out)
+
+
+class Sessions(VerbCase):
+    """Decision 4 as Liam answered it: every state shown; only `done` rows with a pid are stopped; the rest are already exited; never rm."""
+    ROWS = [bg('J60-build', 'done', 11, 'aaaa1111'), bg('J61-review', 'done', None, 'bbbb2222'), bg('J62-build', 'working', 12, 'cccc3333'),
+            bg('J63-build', 'blocked', 13, 'dddd4444'), bg('J64-build', 'blocked', None, 'eeee5555'), bg('zz', 'stopped', None, 'ffff6666'),
+            bg('J65-fix', 'failed', None, 'abab7777'), INTERACTIVE]
+
+    def test_lists_every_state_of_the_background_sessions_with_the_job(self):
+        self.cap(4)
+        rc, out, _, _ = self.verb('sessions', agents=self.ROWS)
+        self.assertEqual(rc, 0)
+        for word in ('J60-build', 'aaaa1111', 'done', 'working', 'blocked', 'stopped', 'failed'):
+            self.assertIn(word, out)
+        self.assertNotIn('by-hand', out)
+        self.assertRegex(out, r'(?m)^J60-build\s+aaaa1111\s+done\s+11\s+J60\s*$')
+        self.assertIn('3 of 4', out.splitlines()[-1])
+
+    def test_json(self):
+        self.cap(0)
+        rc, out, _, _ = self.verb('sessions', agents=self.ROWS, json=True)
+        d = json.loads(out)
+        self.assertEqual(rc, 0)
+        self.assertEqual((d['cap'], d['counted'], len(d['sessions'])), (0, 3, 7))
+        self.assertEqual(d['sessions'][0], {'name': 'J60-build', 'id': 'aaaa1111', 'state': 'done', 'pid': 11, 'job': 'J60', 'counts': True})
+
+    def test_stop_finished_stops_only_done_rows_with_a_pid(self):
+        stopped = []
+        rc, out, err, _ = self.verb('sessions', agents=self.ROWS, stop=stopped.append, stop_finished=True)
+        self.assertEqual((rc, stopped), (0, ['aaaa1111']))
+        self.assertIn('stopped J60-build (aaaa1111)', out)
+        self.assertIn('1 done session already exited', out)
+        self.assertNotIn('failed to stop', out + err)
+
+    def test_a_failed_stop_exits_1_and_the_others_still_run(self):
+        rows = [bg('J60-build', 'done', 11, 'aaaa1111'), bg('J61-build', 'done', 12, 'bbbb2222')]
+        seen = []
+        def stop(sid):
+            seen.append(sid)
+            if sid == 'aaaa1111':
+                raise ValueError('exited 1: nope')
+        rc, out, err, _ = self.verb('sessions', agents=rows, stop=stop, stop_finished=True)
+        self.assertEqual((rc, seen), (1, ['aaaa1111', 'bbbb2222']))
+        self.assertIn('nope', out + err)
+
+    def test_already_exited_rows_are_not_failures(self):
+        rows = [bg(f'J6{i}-build', 'done', None) for i in range(3)]
+        stopped = []
+        rc, out, _, _ = self.verb('sessions', agents=rows, stop=stopped.append, stop_finished=True)
+        self.assertEqual((rc, stopped), (0, []))
+        self.assertIn('3 done sessions already exited', out)
+
+    def test_a_done_row_with_a_pid_and_no_id_is_a_failure_not_a_guess(self):
+        a = bg('J60-build', 'done', 11)
+        del a['id']
+        rc, out, err, _ = self.verb('sessions', agents=[a], stop_finished=True)
+        self.assertEqual(rc, 1)
+        self.assertIn('J60-build', out + err)
+
+    def test_an_unreadable_list_exits_1(self):
+        rc, _, err, _ = self.verb('sessions', agents=ValueError('claude is not on PATH'))
+        self.assertEqual(rc, 1)
+        self.assertIn('claude is not on PATH', err)
+
+    def test_stop_finished_with_json(self):
+        rc, out, _, _ = self.verb('sessions', agents=self.ROWS, stop_finished=True, json=True)
+        d = json.loads(out)
+        self.assertEqual(rc, 0)
+        self.assertEqual(d['stops'], [{'name': 'J60-build', 'id': 'aaaa1111', 'stopped': True, 'error': None}])
+        self.assertEqual(d['already_exited'], 1)
+
+    def test_the_parser_takes_the_sub_verb_and_its_flags(self):
+        import argparse
+        from warscape.verbs import jobs as jverb
+        p = argparse.ArgumentParser()
+        jverb.add_arguments(p)
+        a = p.parse_args(['sessions', '--stop-finished', '--json'])
+        self.assertEqual((a.action, a.stop_finished, a.json), ('sessions', True, True))
+
+
+class AcceptanceLock(Capped):
+    """Decision 5: while acceptance holds the PC lock --auto starts no needs_pc session; a button still can."""
+    HELD = {'owner': 'J64-build', 'session': 's1', 'purpose': 'acceptance pass', 'age_s': 12, 'stale': False}
+
+    def server(self, lock):
+        on = self.many('J4', 'J6')
+        srv = self.make({}, snapshot=self.snap(on, needs_pc=('J4',)))
+        srv.pc_lock = lock if callable(lock) else (lambda: lock)
+        return srv
+
+    def test_defers_a_needs_pc_start_and_not_another(self):
+        srv = self.server(self.HELD)
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J6-review'])
+        self.assertEqual([l for l in self.lines if 'deferred' in l], ['J4-review: deferred, an acceptance run holds the PC lock (J64-build)'])
+
+    def test_logged_once_per_head_and_reason(self):
+        srv = self.server(self.HELD)
+        srv.auto_tick()
+        srv.auto_tick()
+        self.assertEqual(len([l for l in self.lines if 'deferred' in l]), 1, self.lines)
+
+    def test_a_button_is_not_blocked(self):
+        srv = self.server(self.HELD)
+        rows, _, branches, on = srv.snapshot()
+        self.assertEqual(srv.start('J4', 'review', {r['id']: r for r in rows}, branches, on)[0], 200)
+        self.assertEqual(self.launched, ['J4-review'])
+
+    def test_no_lock_another_purpose_and_a_stale_lock_defer_nothing(self):
+        for lock in (None, dict(self.HELD, purpose='J12 sitting'), dict(self.HELD, stale=True)):
+            srv = self.server(lock)
+            srv.auto_tick()
+            self.assertEqual(self.launched, ['J4-review', 'J6-review'], lock)
+
+    def test_an_unreadable_lock_defers_a_needs_pc_start(self):
+        def bad():
+            raise ValueError('watcher heartbeat is 90s old')
+        srv = self.server(bad)
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J6-review'])
+        self.assertTrue(any('cannot read the PC lock' in l for l in self.lines), self.lines)
+
+    def test_a_server_with_no_seam_reads_no_lock(self):
+        srv = self.make({}, snapshot=self.snap(self.many('J4'), needs_pc=('J4',)))
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J4-review'])
+
+    def test_the_purpose_is_the_one_the_acceptance_harness_takes(self):
+        text = (ROOT / 'harness' / 'acceptance.py').read_text(encoding='utf-8')
+        m = re.search(r"self\.sh\('lock', self\.owner, self\.session, '([^']+)'\)", text)
+        self.assertTrue(m and m.group(1).startswith(jv.ACCEPTANCE_PURPOSE), m)
+
+    def test_read_pc_lock_is_job_sh_status(self):
+        seen = []
+        def sh(argv):
+            seen.append(argv)
+            return 0, 'noise\n' + json.dumps({'lock': self.HELD, 'processes': []}) + '\n'
+        self.assertEqual(jv.read_pc_lock(sh=sh), self.HELD)
+        self.assertEqual(seen[0][-1], 'status')
+        self.assertTrue(seen[0][-2].replace('\\', '/').endswith('harness/job.sh'), seen)
+
+    def test_read_pc_lock_free_and_no_harness(self):
+        self.assertIsNone(jv.read_pc_lock(sh=lambda a: (0, '{"lock": null}')))
+        self.assertIsNone(jv.read_pc_lock(sh=lambda a: (64, 'job.sh: no adapter.json found')))
+
+    def test_read_pc_lock_unreadable_raises(self):
+        for rc, out in ((1, 'no watcher.alive'), (1, '{"lock": null}\nwatcher heartbeat is 90s old'), (0, 'not json')):
+            with self.assertRaises(ValueError, msg=out):
+                jv.read_pc_lock(sh=lambda a: (rc, out))
+
+
+class MaxSessionsKey(unittest.TestCase):
+    def load(self, text):
+        from warscape import repo
+        with tempfile.TemporaryDirectory() as t:
+            Path(t, 'wsc.toml').write_text(text, encoding='utf-8')
+            return repo.load_config(Path(t))
+
+    def test_default_0_set_and_refused(self):
+        from warscape.repo import ConfigError, DEFAULTS
+        self.assertEqual(DEFAULTS['jobs']['max_sessions'], 0)
+        self.assertEqual(self.load('[jobs]\nmax_sessions = 4\n')['jobs']['max_sessions'], 4)
+        for bad in ('-1', '2.5', 'true', '"4"'):
+            with self.assertRaises(ConfigError, msg=bad):
+                self.load(f'[jobs]\nmax_sessions = {bad}\n')
+
+    def test_configure_from_reads_it(self):
+        from warscape.repo import DEFAULTS
+        old = jv.S.max_sessions
+        self.addCleanup(setattr, jv.S, 'max_sessions', old)
+        jv.configure_from(dict(DEFAULTS['jobs'], max_sessions=3))
+        self.assertEqual(jv.S.max_sessions, 3)
+
+
 class ThisRepo(unittest.TestCase):
     def test_the_queue_passes_jobs_check(self):
         p = subprocess.run([sys.executable, str(ROOT / 'wsc.py'), '--root', str(ROOT), 'jobs', 'check'],

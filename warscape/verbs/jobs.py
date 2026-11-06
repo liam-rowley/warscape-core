@@ -1,8 +1,8 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
-purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
-usage: wsc jobs check | jobs later --from-md <file> [--area <name>] [--check] | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE]
-when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo; `usage` to fill a report's `Usage:` line before status=review.
+purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix; `sessions` lists the background sessions and stops the finished ones that still hold a process.
+usage: wsc jobs check | jobs later --from-md <file> [--area <name>] [--check] | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE] | jobs sessions [--stop-finished] [--json]
+when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo; `usage` to fill a report's `Usage:` line before status=review; `sessions` when the session cap is full or the PC is short of memory.
 verb: jobs
 
 The rules are code in warscape/jobq.py (moved from napoleon-remastered `tools/verbs/jobs.py` in napoleon J62; the story of each rule is in that
@@ -26,8 +26,13 @@ or `WSC_PC_STATE`, skips a needs_pc build where that folder is absent. `--auto` 
 one needs_pc row at a time, and prunes dead worktree registrations each tick. `worktrees` prints the stale-worktree warnings (warscape/worktrees.py).
 W31: `usage` prints a report's `Usage:` line from the game's `[jobs] usage_cmd` (no shell, 60 s, repo root as cwd; the core reads no transcript) or from
 `--from-json FILE`, the same JSON by hand; `--write` puts it in `jobs/<id>/report.md`, changing nothing else there.
+W41: `[jobs] max_sessions` caps the background sessions with a process (any state; `claude agents --json --all`): a launch at the cap is refused, `--auto`
+defers, `next` says wait (`next --id` goes on: a launched session runs it and is already counted). `sessions` lists every background session;
+`--stop-finished` runs `claude stop` on the `done` rows that still have a pid, reports the rest as already exited, and never runs `claude rm`. While an
+acceptance run holds the game lock (`job.sh status`) `--auto` starts no needs_pc session; a button still can.
 The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
 """
+import json
 import sys
 import threading
 import webbrowser
@@ -38,11 +43,11 @@ from .. import worktrees as W
 from ..registry import load_all, md_table_rows
 
 NAME = 'jobs'
-HELP = 'the job queue: check it, claim the next job to build (next), to review (review) or to fix (fix), view it, its stale worktrees (worktrees), a report\'s usage line (usage)'
+HELP = 'the job queue: check it, claim the next job to build (next), to review (review) or to fix (fix), view it, its stale worktrees (worktrees), a report\'s usage line (usage), the background sessions (sessions)'
 
 
 def add_arguments(p):
-    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees', 'usage', 'later'])
+    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees', 'usage', 'later', 'sessions'])
     p.add_argument('job', nargs='?', help='usage: the job id (every other action takes --id)')
     p.add_argument('--offline', action='store_true', help='use local remote-tracking refs instead of asking origin (a single-branch or shallow clone sees only the branches it fetched)')
     p.add_argument('--id', help='next, review, fix: this job only (J<n>): its steps when it is ready, else exit 1 with the reason')
@@ -61,6 +66,8 @@ def add_arguments(p):
     p.add_argument('--from-md', metavar='FILE', help='later: a `| # | Change | Why | Raised |` table; each row becomes a `later` row with the next job id (W43); rows already moved are left alone')
     p.add_argument('--area', help='later: the area the rows go under (they are picked up batched by area)')
     p.add_argument('--check', action='store_true', help='later: write nothing; exit 1 naming each table row lost or changed')
+    p.add_argument('--stop-finished', action='store_true', help='sessions: claude stop each done session that still has a process (never a working or blocked one, never claude rm); exit 1 if a stop failed')
+    p.add_argument('--json', action='store_true', help='sessions: print JSON instead of the table')
     p.add_argument('--session', help='review: the name the round is claimed for (default $WSC_SESSION_ID, $CLAUDE_CODE_SESSION_ID, then user@host)')
 
 
@@ -115,6 +122,32 @@ def usage(args, ctx, by):
     return 0
 
 
+def sessions(args, ctx, by):
+    """`jobs sessions [--stop-finished] [--json]`: the table, or the stops; exit 1 only when a stop failed or the list cannot be read."""
+    try:
+        rows = J.session_rows(J.list_agents(), by)
+    except ValueError as x:
+        return refuse(str(x))
+    stops, exited = J.stop_finished(rows, J.stop_session) if args.stop_finished else ([], 0)
+    failed = [s for s in stops if not s['stopped']]
+    cap, counted = J.S.max_sessions, sum(r['counts'] for r in rows)
+    if args.json:
+        print(json.dumps({'sessions': rows, 'cap': cap, 'counted': counted, 'stops': stops, 'already_exited': exited}, indent=1))
+    elif args.stop_finished:
+        for s in stops:
+            print(f'stopped {s["name"]} ({s["id"]})' if s['stopped'] else f'failed to stop {s["name"]} ({s["id"]}): {s["error"]}')
+        print(f'sessions: {len(stops) - len(failed)} stopped, {len(failed)} failed, {exited} done session{"" if exited == 1 else "s"} already exited')
+    else:
+        w = max([len(r['name']) for r in rows] + [4])
+        print(f'{"name":<{w}}  {"id":<8}  {"state":<7}  {"pid":<6}  job')
+        for r in rows:
+            print(f'{r["name"]:<{w}}  {r["id"] or "-":<8}  {r["state"] or "-":<7}  {r["pid"] or "-":<6}  {r["job"] or "-"}')
+        states = {s: sum(1 for r in rows if r['state'] == s) for s in sorted({str(r['state']) for r in rows})}
+        print(f'sessions: {len(rows)} background ({", ".join(f"{k} {v}" for k, v in states.items())}); '
+              + (f'{counted} of {cap} against the cap' if cap else f'{counted} with a process, no cap set'))
+    return 1 if failed else 0
+
+
 def run(args, ctx):
     if getattr(args, 'job', None) and args.action != 'usage':   # `jobs next W31` must not pick some other job
         return refuse(f'{args.action} takes its job as --id {args.job}')
@@ -148,6 +181,8 @@ def run(args, ctx):
         return usage(args, ctx, by)
     if args.action == 'later':
         return later(args, ctx)
+    if args.action == 'sessions':
+        return sessions(args, ctx, by)
 
     if args.action == 'worktrees':   # W26: what a game's setup verb prints (warscape.worktrees.report); --prune removes dead registrations only
         if getattr(args, 'prune', False):
@@ -178,7 +213,8 @@ def run(args, ctx):
                           root=ctx.root, log_path=ctx.root / '_scratch' / 'jobs_auto.log', ctx=ctx,
                           main_line=lambda: J.main_html(J.main_state(ctx.config['ci'], ctx.root, args.offline)),
                           ci=lambda sha: J.branch_ci(ctx.root, sha, args.offline), prune=lambda: W.prune(ctx.root),
-                          claim=None if args.offline else lambda jid, n, head, who: J.take_claim(ctx.root, jid, n, head, who, hours))
+                          claim=None if args.offline else lambda jid, n, head, who: J.take_claim(ctx.root, jid, n, head, who, hours),
+                          pc_lock=J.read_pc_lock)
         print(f'jobs view: serving {srv.url}{" (dry run: nothing is started)" if args.dry_run else ""}; Ctrl+C stops it', flush=True)
         stop = threading.Event()
         if args.auto:
@@ -200,6 +236,11 @@ def run(args, ctx):
     if args.action == 'next':   # W27: live review claims, releasing those whose job branch is gone (never on --peek); W26: claim, then print
         peek = getattr(args, 'peek', False)
         J.print_claims(ctx.root, args.offline, branches, release=not peek)
+        lines, wait = J.next_sessions(args.id)
+        for line in lines:
+            print(line)
+        if wait:
+            return 0
         rc, text = J.next_claim(ctx.root, rows, lambda: J.remote_heads(ctx.root, args.offline), jid=args.id, peek=peek, offline=args.offline)
         if rc:
             return refuse(text)

@@ -1,0 +1,12 @@
+{
+  "id": "W122",
+  "description": "**The cap fails open if `claude agents` drops `pid` or `kind`**: add a check that warns when no background row has a pid while some are `working`. A per-row \"a `working` row with no pid warns\" would fire on every launch (see the row above). Why: `state` has already changed shape once; with no pid nothing counts, so nothing is refused and no one is told. Raised: W41 report open question 2; W41 review round 1, Later 2, 2026-11-06",
+  "title": "The cap fails open if `claude agents` drops `pid` or `kind`",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B110",
+  "area": "core"
+}

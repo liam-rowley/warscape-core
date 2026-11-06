@@ -71,6 +71,7 @@ DEFAULTS = {
         'usage_from': 0,                   # W31: job numbers from this one on need a `Usage:` line in report.md, within 1.25 x the budget, with the row's model; 0 = off
         'usage_cmd': '',                   # W31: argv template ({id}; no shell) of the game's usage reader for `wsc jobs usage`: prints {"calls", "models", "sessions", "note"}
         'claim_hours': 4,                  # a review claim (refs/claims/<id>/round-<n>, core W27) older than this may be taken over
+        'max_sessions': 0,                 # W41: no launch at this many background sessions with a process (`claude agents --json --all`); 0 = no cap
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
             'policy': '{wsc} policy',      # the policy command, before ` --branch B --base REF`
@@ -264,6 +265,9 @@ def load_config(root):
     for t, k in (('policy', 'thin_merge_lines'), ('policy', 'thin_merge_files'), ('jobs', 'claim_hours')):
         if isinstance(cfg[t][k], bool) or not isinstance(cfg[t][k], (int, float)) or cfg[t][k] < 0:
             raise ConfigError(f'{CONFIG_NAME}: {t}.{k} must be a number of at least 0')
+    ms = cfg['jobs']['max_sessions']
+    if isinstance(ms, bool) or not isinstance(ms, int) or ms < 0:
+        raise ConfigError(f'{CONFIG_NAME}: jobs.max_sessions must be a whole number of at least 0')
     if not isinstance(cfg['views']['commit'], bool) or not isinstance(cfg['views']['dir'], str) or not cfg['views']['dir']:
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     audit_problem(cfg['audit'])

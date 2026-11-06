@@ -8,6 +8,12 @@ under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading
 A new core verb, a shipped schema and a branch kind; nothing is required at the bump, and without the registry nothing runs. A game verb named `proposals` in `[cli] verb_dirs` now refuses
 to load: rename it. To adopt it: [PROPOSALS.md](PROPOSALS.md) "What a game declares". `doc_caps` no longer reads the job folders, so its findings on job briefs go.
 
+## Session cap (W41)
+
+`[jobs] max_sessions` is off by default; a game on a shared PC sets it (napoleon: 4, its D59). It counts background sessions with a pid in any state, across every repo on the PC, so a
+core or game queue with no cap can still fill it. `jobs next` then prints the count, says wait at the cap and claims nothing; `jobs next --id` goes on. `--auto` reads `job.sh status`
+each tick and starts no `needs_pc` session during an acceptance run, or while a harness cannot answer. `wsc jobs sessions` is new.
+
 ## `wsc audit` (W44, C41)
 
 A new core verb and an `[audit]` table; nothing is required at the bump. A game verb named `audit` in `[cli] verb_dirs` now refuses to load: rename it. The keys a game sets:
