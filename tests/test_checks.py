@@ -79,7 +79,7 @@ class Docs(unittest.TestCase):
         self.assertEqual(checks.oversize({'a.md': 600}, 0.5), [('a.md', 600)])
 
     def test_core_docs_are_within_the_cap_and_dated(self):
-        for p in ('README.md', 'CLAUDE.md', 'docs/DECISIONS.md'):
+        for p in ('README.md', 'CLAUDE.md', 'docs/REVIEW.md'):
             text = (CORE / p).read_text(encoding='utf-8')
             self.assertLess(len(text.encode('utf-8')), 30 * 1024, p)
             self.assertEqual(checks.undated_verified(text.split('\n')), [], p)

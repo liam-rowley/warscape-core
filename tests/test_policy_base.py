@@ -420,32 +420,36 @@ class CoreMode(Branches, unittest.TestCase):
             res = self.local(name)
             self.assertEqual(res[0], 0, res[1])
 
+    # The core's own frozen file went with W43's follow-up 2; a game opting in has the same window, so these build it in the clone.
+    FROZEN = '# Decisions\n\n| ID | Date | Who | Decision | Reversible |\n| --- | --- | --- | --- | --- |\n| C1 | 2026-10-28 | t | A. | yes |\n'
+
     def w43_stale(self):
         """(the base after the frozen key, the commit before it): the merge base a branch cut before W43 has, whose head's wsc.toml lacks the key."""
         git(self.d, 'checkout', '-q', '-f', '-B', 'w43-before', 'main')
-        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(), flags=re.M)})
+        self.commit({'docs/DECISIONS.md': self.FROZEN})
         git(self.d, 'checkout', '-q', '-f', '-B', 'w43-after', 'w43-before')
-        self.commit({'wsc.toml': self.toml()})
+        self.commit({'wsc.toml': self.toml().replace('decisions = "registry:decisions"', 'decisions_retired = "docs/DECISIONS.md"\ndecisions = "registry:decisions"', 1)})
         self.back()
         self.assertNotIn('decisions_retired', self.toml('w43-before'))
+        self.assertIn('decisions_retired', self.toml('w43-after'))
         return 'w43-after', 'w43-before'
 
     def test_w43_a_stale_markdown_row_is_refused_by_the_bases_rules(self):
         """Review round 1: the head's own `registries` gate has no key and passes, and `docs/*` is in the plan globs: only the base's rule stops it."""
         base, start = self.w43_stale()
-        table = self.text('docs/DECISIONS.md')
-        self.branch('plan/stale-md-row', {'docs/DECISIONS.md': table + '| C999 | 2026-11-06 | t | Stale. | yes |\n'}, start=start)
+        self.branch('plan/stale-md-row', {'docs/DECISIONS.md': self.FROZEN + '| C999 | 2026-11-06 | t | Stale. | yes |\n'}, start=start)
         self.assertRefused(self.policy('plan/stale-md-row', base), 'docs/DECISIONS.md is frozen: its table differs from w43-after')
-        self.branch('plan/stale-md-prose', {'docs/DECISIONS.md': 'Prose first.\n\n' + table}, start=start)
+        self.branch('plan/stale-md-prose', {'docs/DECISIONS.md': 'Prose first.\n\n' + self.FROZEN}, start=start)
         res = self.policy('plan/stale-md-prose', base)
         self.assertEqual(res[0], 0, res[1] + res[2])
 
     def test_w43_the_follow_up_that_deletes_the_frozen_file_passes(self):
-        git(self.d, 'checkout', '-q', '-f', '-B', 'meta/retire-decisions-md', 'main')
+        base, _ = self.w43_stale()
+        git(self.d, 'checkout', '-q', '-f', '-B', 'meta/retire-decisions-md', base)
         git(self.d, 'rm', '-q', 'docs/DECISIONS.md')
-        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(), flags=re.M)})
+        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(base), flags=re.M)})
         self.back()
-        res = self.local('meta/retire-decisions-md')
+        res = self.policy('meta/retire-decisions-md', base)
         self.assertEqual(res[0], 0, res[1] + res[2])
 
     def test_a_release_branch_is_judged_by_the_bases_rules(self):
