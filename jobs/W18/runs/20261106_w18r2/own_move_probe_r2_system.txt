@@ -1,0 +1,23 @@
+window context -2
+monitor \\.\DISPLAY10: physical (3839, 2160, 7679, 4320); as the window's context sees it (5759, 3240, 11519, 6480)
+monitor \\.\DISPLAY2: physical (-2560, 327, 0, 1767); as the window's context sees it (-3840, 491, -768, 2219)
+monitor \\.\DISPLAY1: physical (0, 0, 3840, 2160); as the window's context sees it (0, 0, 3840, 2160)
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(5759, 3240, 11519, 6480)]; mapped (5759, 3240, 11519, 6480); largest edge difference 0; CHANGED [(5759, 3240, 11519, 6480, '0x421c')]
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(5911, 3326, 8793, 4948)]; mapped (5911, 3326, 8792, 4947); largest edge difference 1; CHANGED [(5911, 3326, 8793, 4948, '0x421c')]
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(6259, 3557, 7264, 4406)]; mapped (6259, 3556, 7263, 4406); largest edge difference 1; CHANGED [(6259, 3557, 7264, 4406, '0x421c')]
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-3840, 491, -768, 2219)]; mapped (-3840, 491, -768, 2219); largest edge difference 0; CHANGED [(-3840, 491, -768, 2219, '0x421c')]
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 384, -1178, 1105); messages [(-3719, 559, -2182, 1424)]; mapped (-3719, 559, -2182, 1425); largest edge difference 1; CHANGED [(-3719, 559, -2182, 1424, '0x421c')]
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-3440, 744, -2636, 1423)]; mapped (-3440, 744, -2636, 1423); largest edge difference 0; CHANGED [(-3440, 744, -2636, 1423, '0x421c')]
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 3840, 2160)]; mapped (0, 0, 3840, 2160); largest edge difference 0; CHANGED [(0, 0, 3840, 2160, '0x421c')]
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2022, 1138); messages [(101, 57, 2022, 1138)]; mapped (101, 57, 2022, 1138); largest edge difference 0; CHANGED [(101, 57, 2022, 1138, '0x421c')]
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 211, 1003, 777); messages [(333, 211, 1003, 777)]; mapped (333, 211, 1003, 777); largest edge difference 0; CHANGED [(333, 211, 1003, 777, '0x421c')]
+-> \\.\DISPLAY1 (0, 0, 3840, 2160): now (0, 0, 3840, 2160); messages [(0, 0, 3840, 2160)]; mapped (0, 0, 3840, 2160); largest edge difference 0; CHANGED [(0, 0, 3840, 2160, '0x421c')]
+-> \\.\DISPLAY1 (101, 57, 2022, 1138): now (101, 57, 2022, 1138); messages [(101, 57, 2022, 1138)]; mapped (101, 57, 2022, 1138); largest edge difference 0; CHANGED [(101, 57, 2022, 1138, '0x421c')]
+-> \\.\DISPLAY1 (333, 211, 1003, 777): now (333, 211, 1003, 777); messages [(333, 211, 1003, 777)]; mapped (333, 211, 1003, 777); largest edge difference 0; CHANGED [(333, 211, 1003, 777, '0x421c')]
+-> \\.\DISPLAY2 (-2560, 327, 0, 1767): now (-2560, 327, 0, 1767); messages [(-3840, 491, -768, 2219)]; mapped (-3840, 491, -768, 2219); largest edge difference 0; CHANGED [(-3840, 491, -768, 2219, '0x421c')]
+-> \\.\DISPLAY2 (-2459, 384, -1178, 1105): now (-2459, 384, -1178, 1105); messages [(-3719, 559, -2182, 1424)]; mapped (-3719, 559, -2182, 1425); largest edge difference 1; CHANGED [(-3719, 559, -2182, 1424, '0x421c')]
+-> \\.\DISPLAY2 (-2227, 538, -1557, 1104): now (-2227, 538, -1557, 1104); messages [(-3440, 744, -2636, 1423)]; mapped (-3440, 744, -2636, 1423); largest edge difference 0; CHANGED [(-3440, 744, -2636, 1423, '0x421c')]
+-> \\.\DISPLAY10 (3839, 2160, 7679, 4320): now (3839, 2160, 7679, 4320); messages [(5759, 3240, 11519, 6480)]; mapped (5759, 3240, 11519, 6480); largest edge difference 0; CHANGED [(5759, 3240, 11519, 6480, '0x421c')]
+-> \\.\DISPLAY10 (3940, 2217, 5861, 3298): now (3940, 2217, 5861, 3298); messages [(5911, 3326, 8793, 4948)]; mapped (5911, 3326, 8792, 4947); largest edge difference 1; CHANGED [(5911, 3326, 8793, 4948, '0x421c')]
+-> \\.\DISPLAY10 (4172, 2371, 4842, 2937): now (4172, 2371, 4842, 2937); messages [(6259, 3557, 7264, 4406)]; mapped (6259, 3556, 7263, 4406); largest edge difference 1; CHANGED [(6259, 3557, 7264, 4406, '0x421c')]
+largest edge difference over all moves: 1

@@ -1,0 +1,4 @@
+﻿pc_deploy status: not installed by this tool
+  exe: ok Napoleon.exe sha1 9aebcd2172f2878d781b079f7feb45b0e12e0250 is the vanilla build in the identity
+  git: ok, no .git in the game folder or its parents
+  foreign: not checked, nothing installed by this tool (no pre-install snapshot)
