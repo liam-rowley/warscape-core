@@ -3,7 +3,7 @@
   "description": "Liam decided 2026-11-04 (napoleon D59, replacing D34's no fixed cap) that at most 4 background Claude sessions or subagents run at once on his PC, not counting the orchestrating session and his own interactive sessions; a PC job counts as one; finished sessions are stopped. About 20 sessions (350-850 MB each) plus WSL/Docker had left 4.6 GB of 31 GB free and Claude Code killed napoleon J64's gate run for low memory. Add a [jobs] max_sessions key (default unset = no cap, so a game opts in; napoleon sets 4 at its next pin bump): `wsc jobs view --serve` buttons and `--auto` refuse a launch while the live count (claude agents --json, states working or blocked, the same read the one-session-per-name check already makes) is at the cap, naming the live sessions; `jobs next` prints the count and the cap and says to wait when it is full; a new `wsc jobs sessions [--stop-finished]` lists live and finished background sessions and, with the flag, stops the finished ones (state done) by id, never a working or blocked one and never an interactive one. Also: while a game's acceptance run holds the PC lock (its lock purpose), --auto starts nothing that needs a new window (B-line: J64 run 20261104_j64pc4 lost a pass to a window on the virtual display). Host tests with a stubbed `claude agents --json`; CONSUMING.md one line.",
   "title": "Session cap: [jobs] max_sessions, jobs sessions --stop-finished",
   "phase": 1,
-  "status": "review",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",
@@ -11,5 +11,6 @@
     "W26"
   ],
   "brief": "jobs/W41/brief.md",
-  "report": "jobs/W41/report.md"
+  "report": "jobs/W41/report.md",
+  "review": "jobs/W41/review.md"
 }
