@@ -62,7 +62,7 @@ class Audit:
     heads: dict = None                           # {branch: sha} of job/* and brief/*, or None when they could not be read
     heads_error: str = ''
     _rows: dict = None
-    _sizes: dict = None
+    _tree: dict = None
 
     @property
     def cfg(self):
@@ -84,16 +84,21 @@ class Audit:
         return self._rows
 
     @property
-    def sizes(self):
-        """{path: bytes} of every file at main (one `ls-tree`; a gitlink has no size and is left out)."""
-        if self._sizes is None:
-            self._sizes = {}
+    def tree(self):
+        """{path: bytes, or None for a gitlink, which has no size} of everything at main (one `ls-tree`)."""
+        if self._tree is None:
+            self._tree = {}
             for entry in self.git('ls-tree', '-r', '-l', '-z', self.main).split('\0'):
                 meta, _, path = entry.partition('\t')
-                size = meta.split()[-1] if meta else '-'
-                if path and size != '-':
-                    self._sizes[path] = int(size)
-        return self._sizes
+                if path:
+                    size = meta.split()[-1]
+                    self._tree[path] = None if size == '-' else int(size)
+        return self._tree
+
+    @property
+    def sizes(self):
+        """{path: bytes} of every file at main."""
+        return {p: n for p, n in self.tree.items() if n is not None}
 
     def jobs(self):
         """The job merges in the window, newest first."""
@@ -220,14 +225,17 @@ def hot_files(a):
         for p in m.files:
             if not matches(p, skip):
                 counts[p] = counts.get(p, 0) + 1
-    out = []
+    out, gone = [], []
     for p, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
         s = share(n, len(jobs))
         if s >= c['hot_file_share'] and n >= c['hot_file_min']:
+            if p not in a.tree:                                 # already moved or deleted: a proposal about it would fix nothing
+                gone.append(p)
+                continue
             out.append(finding('hot_file', 'hot_files', p, 'high' if s >= c['hot_file_high'] else 'medium', s, c['hot_file_share'], 'above',
                                f'{p} was touched by {n} of {len(jobs)} job merges in the window ({s:.0%}).'))
     top = dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:20])
-    return top, {'job_merges': len(jobs), 'files': len(counts)}, out
+    return top, {'job_merges': len(jobs), 'files': len(counts), 'gone': gone}, out
 
 
 def conflict_files(a):
@@ -249,9 +257,10 @@ def conflict_files(a):
             for p in one & two:
                 counts[p] = counts.get(p, 0) + 1
     n = a.cfg['both_sides_min']
+    hit = [(p, v) for p, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])) if v >= n]
     out = [finding('conflict_file', 'conflict_files', p, 'medium', v, n, 'above', f'{p} changed on both sides of {v} of the {merges} branch merges read.')
-           for p, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])) if v >= n]
-    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))), {'merges': merges, 'branches': len(refs)}, out
+           for p, v in hit if p in a.tree]
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))), {'merges': merges, 'branches': len(refs), 'gone': [p for p, _ in hit if p not in a.tree]}, out
 
 
 def job_lifetime(a):

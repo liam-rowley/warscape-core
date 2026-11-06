@@ -169,6 +169,26 @@ class HotFiles(Case):
             f.merge_job(n, 3, {f'jobs/T{n}/report.md': 'r\n', 'jobs/shared.md': f'{n}\n', 'VERSION': f'{n}\n'})
         self.assertEqual([i for i in f.ids() if i.startswith('hot_file')], [])
 
+    def test_a_path_gone_from_main_keeps_its_count_and_raises_no_finding(self):
+        f = self.fixture('[audit]\nhot_file_min = 2\n')
+        for n in (1, 2):
+            f.merge_job(n, 3, {'docs/OLD.md': f'{n}\n'})
+        f.git('rm', '-q', 'docs/OLD.md')
+        f.git('commit', '-q', '-m', 'plan: moved (#3)', days=2)
+        rec = f.audit()
+        self.assertEqual(rec['findings'], [])
+        self.assertEqual(rec['metrics']['hot_files']['details']['gone'], ['docs/OLD.md'])
+        self.assertEqual(rec['metrics']['hot_files']['value']['docs/OLD.md'], 2)
+
+    def test_a_gitlink_at_main_is_still_there(self):
+        f = self.fixture('[audit]\nhot_file_min = 2\n')
+        for n in (1, 2):                                       # a game's core/ pin: in the tree, with no size
+            f.git('update-index', '--add', '--cacheinfo', f'160000,{str(n) * 40},core')
+            f.git('commit', '-q', '-m', f'T{n}: pin (#{n})', days=3)
+        rec = f.audit()
+        self.assertIn('hot_file:core', [x['id'] for x in rec['findings']])
+        self.assertEqual(rec['metrics']['hot_files']['details']['gone'], [])
+
     def test_only_job_merges_count(self):
         f = self.fixture('[audit]\nhot_file_min = 2\n')
         for n in range(1, 3):
@@ -217,6 +237,17 @@ class ConflictFiles(Case):
         rec = g.audit()
         self.assertEqual(rec['metrics']['conflict_files']['details']['merges'], 3)
         self.assertEqual([x['id'] for x in rec['findings'] if x['id'].startswith('conflict_file')], [])
+
+    def test_a_path_gone_from_main_keeps_its_count_and_raises_no_finding(self):
+        f = self.fixture()
+        for n in (1, 2, 3):
+            self.both_sides(f, n)
+        f.git('rm', '-q', 'docs/X.md')
+        f.git('commit', '-q', '-m', 'plan: moved (#9)', days=2)
+        rec = f.audit()
+        self.assertEqual(rec['findings'], [])
+        self.assertEqual(rec['metrics']['conflict_files']['value'], {'docs/X.md': 3})
+        self.assertEqual(rec['metrics']['conflict_files']['details']['gone'], ['docs/X.md'])
 
     def test_a_merge_outside_the_window_does_not_count(self):
         f = self.fixture()

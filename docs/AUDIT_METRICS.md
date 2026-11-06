@@ -33,6 +33,8 @@ rename detection: a move touches both names.
 | `throughput` | job and brief merges a day against the window before | `slowdown`: under `slowdown_ratio`; no finding with nothing before |
 | `ci_durations` | online: median minutes per required check over the last `ci_runs` runs per workflow on main, a skipped job not counted | `slow_check:<name>`: over `ci_check_minutes[<name>]`, else `ci_check_default` |
 
+`hot_files` and `conflict_files` raise nothing for a path no longer at main: it keeps its count, and the paths that would have fired are in `details.gone`.
+
 The lanes ignore this machine's PC on purpose: `jobs view` shows a `needs_pc` row as waiting where the PC is absent, and a finding must not depend on where the audit ran.
 
 ## What a game sets
