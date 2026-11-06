@@ -210,8 +210,9 @@ inline PosVerdict GatePos(const Pos& in, bool own, bool targetKnown, bool inside
 // WM_WINDOWPOSCHANGING later, so the calling thread's id cannot tell the guard's move from the engine's: the move was dropped and the
 // window stayed cloaked for good. The guard arms this record before each placement; a position message that moves and sizes to
 // exactly that rect within kOwnMoveMs is the guard's (an engine move to the very same rect is harmless). At a scaled target DPI a
-// DPI-unaware window thread sees the same rect in logical pixels (W18, B22): the arming also carries that rect (logical, when it
-// differs from want), accepted with each edge within kLogicalSlack pixels (the conversion rounds). Anything else stays the engine's.
+// window thread that is not per-monitor aware sees the same rect in its own pixels (W18, B22): the arming also carries that rect
+// (logical, from LogicalOnMonitor, when it differs from want), accepted with each edge within kLogicalSlack pixels (the map rounds;
+// 1 px is what was measured, run 20261106_w18fix). Anything else stays the engine's.
 constexpr unsigned kOwnMoveMs = 2000;
 constexpr long kLogicalSlack = 1;
 struct OwnMove { bool armed = false; Rect want; Rect logical; bool haveLogical = false; double at = 0; };   // at: monotonic seconds of the arming
@@ -226,6 +227,20 @@ inline bool IsOwnMove(const OwnMove& m, const Pos& in, double now) {
     if (!OwnMoveArmed(m, in, now)) return false;
     if (in.x == m.want.l && in.y == m.want.t && in.cx == Width(m.want) && in.cy == Height(m.want)) return true;
     return m.haveLogical && NearRect(in, m.logical, kLogicalSlack);
+}
+// A physical rect on a monitor, as a DPI context that sees that monitor at logMon sees it. Both monitor rects are read from Windows
+// and no scale is derived from a DPI: an unaware context keeps a monitor's origin and scales its size, a system-aware one scales the
+// origin too (measured, run 20261106_w18fix). The window's own position plays no part, so a target it has not reached yet maps like
+// any other. false = nothing to arm: no monitor rect, or the rect is the same in both.
+inline long MapEdge(long v, long p0, long p1, long l0, long l1) {   // nearest pixel; p1 > p0
+    const long long n = (long long)(v - p0) * (l1 - l0) * 2, d = (long long)(p1 - p0) * 2;
+    return l0 + (long)((n >= 0 ? n + (p1 - p0) : n - (p1 - p0)) / d);
+}
+inline bool LogicalOnMonitor(const Rect& phys, const Rect& physMon, const Rect& logMon, Rect& out) {
+    if (Width(physMon) <= 0 || Height(physMon) <= 0 || Width(logMon) <= 0 || Height(logMon) <= 0) return false;
+    out = Rect{ MapEdge(phys.l, physMon.l, physMon.r, logMon.l, logMon.r), MapEdge(phys.t, physMon.t, physMon.b, logMon.t, logMon.b),
+                MapEdge(phys.r, physMon.l, physMon.r, logMon.l, logMon.r), MapEdge(phys.b, physMon.t, physMon.b, logMon.t, logMon.b) };
+    return !Same(out, phys);
 }
 
 // ---- the window sweep ---------------------------------------------------------------------------------------------------------

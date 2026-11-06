@@ -16,8 +16,8 @@
 //                             re-resolve, move, verify, uncloak after a quiet settle; no target for refuse_grace_ms -> refusal.
 //                             A window sweep every ~250 ms (the backstop) and a WinEvent hook on EVENT_OBJECT_SHOW (W18, B19),
 //                             pumped on this thread outside the lock, hide an unguarded window the moment it is shown.
-//   after a verified relocation  the guard's own async move is recognised by its rect, in physical pixels or, for a DPI-unaware window
-//                             thread at a scaled target, in logical ones (W18, B22); headless_status.json is rewritten with
+//   after a verified relocation  the guard's own async move is recognised by its rect, in physical pixels or, for a window thread
+//                             that is not per-monitor aware, as the target monitor looks in its DPI context (W18, B22); headless_status.json is rewritten with
 //                             the new target rect and "relocations" (state unchanged; W18, B23).
 // Refusal: every window of the process cloaked and hidden, headless_status.json state refused, exit code dg::kRefuseExitCode.
 #include "runtime.h"
@@ -103,26 +103,9 @@ PFN_SetThreadDpiCtx DpiFn() {
 struct DpiScope {
     HANDLE prev = nullptr;
     DpiScope() { if (auto f = DpiFn()) { prev = f(kDpiPerMonitorV2); if (!prev) prev = f(kDpiPerMonitor); } }
+    explicit DpiScope(HANDLE ctx) { if (auto f = DpiFn()) prev = f(ctx); }
     ~DpiScope() { if (prev) DpiFn()(prev); }
 };
-// The rect the window's own thread will see for a physical one: unchanged unless that thread is not per-monitor aware (a DPI-unaware
-// game at a scaled target; W18, B22). false = no distinct logical rect (aware, or the functions are absent: Windows before 10 1607).
-bool LogicalRect(HWND h, const Rect& phys, Rect& out) {
-    using PFN_GetCtx = HANDLE(WINAPI*)(HWND);
-    using PFN_Equal = BOOL(WINAPI*)(HANDLE, HANDLE);
-    using PFN_ToLogical = BOOL(WINAPI*)(HWND, LPPOINT);
-    HMODULE u = GetModuleHandleW(L"user32.dll");
-    static PFN_GetCtx getCtx = (PFN_GetCtx)(void*)GetProcAddress(u, "GetWindowDpiAwarenessContext");
-    static PFN_Equal equal = (PFN_Equal)(void*)GetProcAddress(u, "AreDpiAwarenessContextsEqual");
-    static PFN_ToLogical toLogical = (PFN_ToLogical)(void*)GetProcAddress(u, "PhysicalToLogicalPointForPerMonitorDPI");
-    if (!getCtx || !equal || !toLogical) return false;
-    const HANDLE ctx = getCtx(h);
-    if (!ctx || equal(ctx, kDpiPerMonitorV2) || equal(ctx, kDpiPerMonitor)) return false;
-    POINT a{ phys.l, phys.t }, c{ phys.r, phys.b };
-    if (!toLogical(h, &a) || !toLogical(h, &c)) return false;
-    out = Rect{ a.x, a.y, c.x, c.y };
-    return !Same(out, phys);
-}
 Rect FromRECT(const RECT& r) { return Rect{ r.left, r.top, r.right, r.bottom }; }
 Rect WinRect(HWND h) { DpiScope d; RECT r{}; GetWindowRect(h, &r); return FromRECT(r); }
 bool Guarded(HWND h) { Lock l; return s_wins.count(h) != 0; }
@@ -201,6 +184,24 @@ bool LiveRect(Rect& out) {   // the target monitor's rect now
     DpiScope d; MONITORINFO mi{}; mi.cbSize = sizeof mi;
     if (!GetMonitorInfoW(s_t.hmon, &mi)) return false;
     out = FromRECT(mi.rcMonitor); return true;
+}
+// The rect the window's own thread will see for a physical one on the target: unchanged unless that thread is not per-monitor aware
+// (a game at a scaled target; W18, B22). Asks the target monitor, in the window's DPI context, how that context sees it, and maps
+// through dg::LogicalOnMonitor: the window has not reached the target yet, so nothing that needs the point inside the window can
+// answer (run 20261106_w18review). false = no distinct logical rect (aware, the functions absent: Windows before 10 1607, no monitor).
+bool LogicalRect(HWND h, const Rect& phys, Rect& out) {
+    using PFN_GetCtx = HANDLE(WINAPI*)(HWND);
+    using PFN_Equal = BOOL(WINAPI*)(HANDLE, HANDLE);
+    HMODULE u = GetModuleHandleW(L"user32.dll");
+    static PFN_GetCtx getCtx = (PFN_GetCtx)(void*)GetProcAddress(u, "GetWindowDpiAwarenessContext");
+    static PFN_Equal equal = (PFN_Equal)(void*)GetProcAddress(u, "AreDpiAwarenessContextsEqual");
+    if (!getCtx || !equal) return false;
+    const HANDLE ctx = getCtx(h);
+    if (!ctx || equal(ctx, kDpiPerMonitorV2) || equal(ctx, kDpiPerMonitor)) return false;
+    Rect physMon; if (!LiveRect(physMon)) return false;
+    MONITORINFO mi{}; mi.cbSize = sizeof mi;
+    { DpiScope d(ctx); if (!d.prev || !GetMonitorInfoW(s_t.hmon, &mi)) return false; }
+    return LogicalOnMonitor(phys, physMon, FromRECT(mi.rcMonitor), out);
 }
 uint64_t s_loggedLayout = 0;
 // Resolve the target by name and exact size. s_cs held. false + why when there is none.

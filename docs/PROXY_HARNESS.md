@@ -78,8 +78,9 @@ Two permissions sessions kept asking for are verbs whose guard holds the judgeme
 Three changes to `proxy/src/headless.cpp` / `display_guard.h`, no new key. (1) A WinEvent hook on `EVENT_OBJECT_SHOW` (out of context, pumped on the guard
 thread outside its lock) hides an unguarded top-level window of the process the moment it is shown (`ShowEventHides`, the sweep's rule); log line `headless:
 unguarded window <h> shown at <rect>: hidden at show (winevent)`. The 250 ms sweep stays as the backstop; a failed hook logs `SetWinEventHook ... failed` and
-leaves the sweep alone. (2) The guard's own asynchronous move of the main window is recognised by its physical rect or, when the window's thread is DPI-unaware
-(a scaled target), by the logical rect (each edge within 1 px); log lines `own move armed at <physical>, and as the window's thread sees it ... <logical>` and,
+leaves the sweep alone. (2) The guard's own asynchronous move of the main window is recognised by its physical rect or, when the window's thread is not per-monitor
+aware (a scaled target), by the logical rect (each edge within 1 px): the target monitor's rect as the window's DPI context sees it, mapped by `LogicalOnMonitor`. The map is
+measured with a probe window (`jobs/W18/runs/20261106_w18fix/`), not yet with a game on a scaled target; log lines `own move armed at <physical>, and as the window's thread sees it ... <logical>` and,
 once per arming for a position message that matches neither, `a position message ... matches neither armed own-move rect`. (3) `headless_status.json` is
 rewritten after each verified relocation: `target.rect`, `window`, `client`, `detail` (`relocated to <device> <rect> at <s> s`) and a new `"relocations": <n>`
 (0 until the first); `state` is not changed and nothing is written at the cloak. Readers parse JSON, so the added field is compatible.
