@@ -1,7 +1,7 @@
 # Decisions
 
 **Frozen (W43).** The decisions are one file per row in `registries/decisions/`; add one with `python3 wsc.py reg add decisions --mint`, read them with
-`python3 wsc.py reg render decisions` (`_scratch/registries/decisions.md`) or `python3 wsc.py find <words>`. A row added here fails the `registries` gate. This file goes
+`python3 wsc.py reg render decisions` (`_scratch/registries/decisions.md`) or `python3 wsc.py find <words>`. `policy` refuses a row added here, on every branch, and the `registries` gate fails on one. This file goes
 in the follow-up to W43 (its report, Open questions).
 
 | # | Date | Who | Decision | Reversible |

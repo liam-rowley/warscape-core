@@ -41,7 +41,9 @@ Anything else is refused. Globs match by path segment (`*` and `?` inside one se
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
 YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. With `decisions = "registry:<name>"` (core W43)
 the same rule holds per file: a row file on the base never changes, moves or goes, and an added one is a minted id (`wsc reg add <name> --mint`) with
-those fields and `replaces` naming rows that exist. `changed` runs from the merge base, so a branch behind the base has nothing to merge first. A repo's own rules (napoleon's rule 79,
+those fields and `replaces` naming rows that exist. `changed` runs from the merge base, so a branch behind the base has nothing to merge first. While
+`[policy] decisions_retired` names the Markdown file that registry replaced, a head that changes the file's table is refused on every branch kind, as the
+`registries` gate cannot reach a head cut before the key (prose may change and the file may go). A repo's own rules (napoleon's rule 79,
 the acceptance ledger) come from its `policy`-stage gate modules (warscape/gatemods.py), run after the decisions check: an `error`
 Result's details are policy errors. Their facts carry `added_decision_rows` ([{id, text}], W27). Warnings print as `policy: warning: ...` lines
 before the verdict line and never change the exit code.
@@ -87,7 +89,7 @@ class Refusal(Exception):
 def settings(config):
     """The policy settings from a loaded wsc.toml: `[policy]` plus the pieces of `[jobs]` and `registries_dir` the rules need."""
     p, j, dreg = config['policy'], config['jobs'], decisions_registry(config)
-    return {'decisions': p['decisions'], 'decisions_dir': f"{config['registries_dir']}/{dreg}" if dreg else '', 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
+    return {'decisions': p['decisions'], 'decisions_dir': f"{config['registries_dir']}/{dreg}" if dreg else '', 'decisions_retired': p['decisions_retired'] if dreg else '', 'prefix': p['decision_prefix'], 'trailer': p['session_trailer'], 'plan': list(p['plan']),
             'meta': list(p['meta']), 'bootstrap': list(p['bootstrap']), 'job_prefix': j['id_prefix'], 'semver_from': j.get('semver_from', 0), 'jobs_dir': j['dir'], 'reg_jobs': f"{config['registries_dir']}/jobs",
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text']),
@@ -228,6 +230,19 @@ def decision_row_errors(r, name, pre, d, head_file):
     return errs
 
 
+def retired_file_problems(changed, base_file, head_file, cfg, base_ref='the base branch'):
+    """The frozen Markdown file (W43): an error when the head changes `decisions_retired` and its table lines differ from the base's. The `registries`
+    gate reads the head's wsc.toml, so a head cut before the key passes it; this rule is the base's. Prose may change and the file may go."""
+    path = cfg.get('decisions_retired')
+    if not path or path not in changed or (new := head_file(path)) is None:
+        return []
+    table = lambda t: [l.strip() for l in (t or '').splitlines() if l.lstrip().startswith('|')]
+    if table(new) == table(base_file(path)):
+        return []
+    return [f'{path} is frozen: its table differs from {base_ref}\'s. A new decision is a row file (wsc reg add {cfg["decisions_dir"].rsplit("/", 1)[-1]} --mint); '
+            f'a branch behind {base_ref} merges it and takes the file as it is there']
+
+
 def added_decision_files(changed, base_file, head_file, cfg):
     """[{id, text}] of the row files the head adds: `added_decision_rows` for a decisions folder, `text` the row as its table line."""
     d, out = cfg['decisions_dir'], []
@@ -251,7 +266,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
     cfg = cfg or settings(_default_config())
     T, jd, trailer = cfg['text'], cfg['jobs_dir'], cfg['trailer']
     if cfg.get('decisions_dir'):
-        errs = decision_row_problems(changed, base_file, head_file, cfg)
+        errs = decision_row_problems(changed, base_file, head_file, cfg) + retired_file_problems(changed, base_file, head_file, cfg, base_ref or 'the base branch')
     else:
         errs = (decisions_problems(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg, base_ref or 'the base branch')
                 if cfg['decisions'] and cfg['decisions'] in changed else [])

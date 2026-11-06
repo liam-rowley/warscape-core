@@ -216,6 +216,43 @@ class Verbs(unittest.TestCase):
         self.assertEqual(G.gate_doc_size(Ctx.load(self.repo.root)).level, 'ok')
 
 
+class RetiredFile(unittest.TestCase):
+    """[policy] decisions_retired as a policy rule: the base's rules reach a head the `registries` gate cannot."""
+    P = 'docs/DECISIONS.md'
+    ROW = '| C3 | 2026-11-05 | Liam | Stale branch. | yes |\n'
+    CFG = {**CFG, 'decisions_retired': P}
+
+    def errs(self, new, old=TABLE, branch='plan/x', changed=None, cfg=None):
+        return pp.check(branch, [self.P] if changed is None else changed, {}, {}, lambda p: old if p == self.P else None, lambda p: new if p == self.P else None,
+                        cfg=cfg or self.CFG)
+
+    def frozen(self, errs):
+        return [e for e in errs if 'is frozen' in e]
+
+    def test_a_changed_table_is_refused_on_every_branch_kind(self):
+        for branch in ('plan/x', 'meta/x', 'brief/W9', 'job/W9', 'release/v9.0.0', 'decide/x', 'other'):
+            self.assertTrue(self.frozen(self.errs(TABLE + self.ROW, branch=branch)), branch)
+        self.assertTrue(self.frozen(self.errs(TABLE + self.ROW, branch='boot', cfg={**self.CFG, 'bootstrap': ['boot']})))
+
+    def test_any_table_line_counts_not_only_a_well_formed_row(self):
+        self.assertTrue(self.frozen(self.errs(TABLE.replace('| C2 ', '|  C2 '))))        # an edit
+        self.assertTrue(self.frozen(self.errs(TABLE + '| not an id | x |\n')))           # a row no id pattern matches
+        self.assertTrue(self.frozen(self.errs(TABLE + '  ' + self.ROW)))                 # an indented one
+        self.assertTrue(self.frozen(self.errs(TABLE + self.ROW, old=None)))              # a file the base has dropped, put back
+
+    def test_prose_and_deleting_the_file_pass(self):
+        self.assertEqual(self.frozen(self.errs('# Moved\n\nProse.\n\n' + TABLE + '\nMore.\n')), [])
+        self.assertEqual(self.frozen(self.errs(None)), [])
+
+    def test_a_branch_that_leaves_the_file_alone_is_not_judged_for_being_behind(self):
+        self.assertEqual(self.frozen(self.errs(TABLE, old=TABLE + self.ROW, changed=['docs/X.md'])), [])
+
+    def test_no_key_no_rule_and_markdown_mode_has_no_key(self):
+        self.assertEqual(self.frozen(self.errs(TABLE + self.ROW, cfg=CFG)), [])
+        md = pp.settings({**DEFAULTS, 'policy': {**DEFAULTS['policy'], 'decisions': self.P, 'decisions_retired': self.P}})
+        self.assertEqual(md['decisions_retired'], '')
+
+
 class Gates(unittest.TestCase):
     RETIRED = TOML + 'decisions_retired = "docs/DECISIONS.md"\n'
 

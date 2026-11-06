@@ -83,7 +83,7 @@ DEFAULTS = {
     # the pull-request policy (`wsc policy`; warscape/policy.py)
     'policy': {
         'decisions': '',                   # repo-relative append-only decisions file, or "registry:<name>", one file per row (core W43); '' = not checked
-        'decisions_retired': '',           # the Markdown file a repo moved off: while it exists, the `registries` gate holds its rows to the row files (core W43)
+        'decisions_retired': '',           # the Markdown file a repo moved off: while it exists, the `registries` gate holds its rows to the row files and `policy` refuses a change to its table (core W43)
         'decision_prefix': 'D',            # its row ids: | D<n> | date | who | decision | yes/no |
         'session_trailer': 'Claude-Session',   # the commit trailer that names a session; '' switches the own-review rule off
         'commit_msg_hook': False,          # .githooks/commit-msg refuses a commit with no non-empty `session_trailer` trailer (C23); opt-in per repo

@@ -420,6 +420,34 @@ class CoreMode(Branches, unittest.TestCase):
             res = self.local(name)
             self.assertEqual(res[0], 0, res[1])
 
+    def w43_stale(self):
+        """(the base after the frozen key, the commit before it): the merge base a branch cut before W43 has, whose head's wsc.toml lacks the key."""
+        git(self.d, 'checkout', '-q', '-f', '-B', 'w43-before', 'main')
+        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(), flags=re.M)})
+        git(self.d, 'checkout', '-q', '-f', '-B', 'w43-after', 'w43-before')
+        self.commit({'wsc.toml': self.toml()})
+        self.back()
+        self.assertNotIn('decisions_retired', self.toml('w43-before'))
+        return 'w43-after', 'w43-before'
+
+    def test_w43_a_stale_markdown_row_is_refused_by_the_bases_rules(self):
+        """Review round 1: the head's own `registries` gate has no key and passes, and `docs/*` is in the plan globs: only the base's rule stops it."""
+        base, start = self.w43_stale()
+        table = self.text('docs/DECISIONS.md')
+        self.branch('plan/stale-md-row', {'docs/DECISIONS.md': table + '| C999 | 2026-11-06 | t | Stale. | yes |\n'}, start=start)
+        self.assertRefused(self.policy('plan/stale-md-row', base), 'docs/DECISIONS.md is frozen: its table differs from w43-after')
+        self.branch('plan/stale-md-prose', {'docs/DECISIONS.md': 'Prose first.\n\n' + table}, start=start)
+        res = self.policy('plan/stale-md-prose', base)
+        self.assertEqual(res[0], 0, res[1] + res[2])
+
+    def test_w43_the_follow_up_that_deletes_the_frozen_file_passes(self):
+        git(self.d, 'checkout', '-q', '-f', '-B', 'meta/retire-decisions-md', 'main')
+        git(self.d, 'rm', '-q', 'docs/DECISIONS.md')
+        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(), flags=re.M)})
+        self.back()
+        res = self.local('meta/retire-decisions-md')
+        self.assertEqual(res[0], 0, res[1] + res[2])
+
     def test_a_release_branch_is_judged_by_the_bases_rules(self):
         """W29 (C27): release/vX.Y.Z may change only VERSION, one step above the base's; a head that widens its own kind changes nothing."""
         base = self.text('VERSION').strip()
