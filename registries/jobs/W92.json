@@ -1,0 +1,12 @@
+{
+  "id": "W92",
+  "description": "**The usage chip on a job in review**: `warscape/jobq.py` `render_view`'s `usage_chip` call reads the report and the row's `budget_lifts` from the working tree, where a job in review has neither; read them from `job/<id>` with the `cat-file --batch` that `branch_rows` already runs Why: the lane where budget matters most shows no chip until the job merges (W31 report, open question 1); needs W31 merged first Raised: W31 review round 1 Later 1, 2026-11-05",
+  "title": "The usage chip on a job in review",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B102",
+  "area": "core"
+}

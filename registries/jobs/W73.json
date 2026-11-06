@@ -1,0 +1,12 @@
+{
+  "id": "W73",
+  "description": "**A missing optional pack is recorded in the kit and refused at launch**: `proxy/tools/pc_deploy.py` (kit build): when `build_fixed_sky_pack` fails the kit is built without the pack and only a warning prints; record `<pack>: absent` in the kit manifest and make `harness/ctl.py` `Pc.launch` refuse when an `add` rule's source is not installed Why: the first sign is otherwise a `shot_match` failure that looks like a lighting regression (napoleon J44: diff 9.6 to 11 against threshold 4); in the next job that changes `pc_deploy.py` anyway Raised: napoleon J44 review Later 3, 2026-11-04",
+  "title": "A missing optional pack is recorded in the kit and refused at launch",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B77",
+  "area": "core"
+}

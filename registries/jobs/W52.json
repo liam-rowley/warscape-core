@@ -1,0 +1,12 @@
+{
+  "id": "W52",
+  "description": "**Own-move recognition at a scaled target DPI**: `proxy/src/display_guard.h` `IsOwnMove` compares physical pixels, so a DPI-unaware window thread at a scaled target still drops the guard's off-thread move (the window stays cloaked), as the comment says; recognise the logical rect too, or log and re-place once Why: the J13 should-fix 1 bug is fixed only at 100 % scale; not in the J12 report or a test Raised: napoleon J12 review, 2026-10-31",
+  "title": "Own-move recognition at a scaled target DPI",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B22",
+  "area": "core"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "W102",
+  "description": "**`ctl.py` `bash()` says when its finder fails**: `harness/ctl.py:48-60`: `bash()` catches every exception from the Git Bash finder and falls back to plain `bash` without a word, which on Windows is the WSL launcher the finder exists to avoid; keep the fallback but print one stderr line when the finder fails to load Why: the failure is invisible today; in the next job that changes `ctl.py` anyway Raised: napoleon J22 review Later 4, 2026-11-04",
+  "title": "`ctl.py` `bash()` says when its finder fails",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B70",
+  "area": "harness"
+}

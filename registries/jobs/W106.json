@@ -1,0 +1,12 @@
+{
+  "id": "W106",
+  "description": "**`job.sh`: a failed script's exit code is told apart from `refused`**: `harness/job.sh` final `case`: a script that exits 2 returns the same code as `refused` (2), so callers cannot tell them apart without reading the `[job ...]` line; map a failed script's exit code into a reserved range Why: callers branch on 2 as refused; in the next job that changes `job.sh` anyway Raised: napoleon J2 review Later 2, 2026-11-04",
+  "title": "`job.sh`: a failed script's exit code is told apart from `refused`",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B76",
+  "area": "harness"
+}

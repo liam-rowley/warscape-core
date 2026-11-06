@@ -1,0 +1,11 @@
+{
+  "id": "W113",
+  "description": "**A `replaces` that is not a list names its row**: `warscape/policy.py` decision rule: `\"replaces\": 5` gives a `TypeError` and `the base's rules gave no verdict`. It fails closed, but the message does not name the row. Check for a list of strings in `decision_row_errors`. Raised: W43 review round 1, item 5, 2026-11-06",
+  "title": "A `replaces` that is not a list names its row",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}

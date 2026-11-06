@@ -1,0 +1,12 @@
+{
+  "id": "W103",
+  "description": "**`ctl.py` small guard: the `lua` verb's path**: `harness/ctl.py` `lua` verb: refuse a file outside `<mod>/lua` and the scratch folder (the (a) half, the `pc_deploy.py sync-lua` docstring, was fixed by W25) Why: harmless today (the whole mod folder is owned and removed by uninstall) but the claim is wrong, and the builder of napoleon J4 made the slip once; in the next job that changes `pc_deploy.py` or `ctl.py` anyway Raised: napoleon J4 review Later 1, 3 and 6, 2026-11-04",
+  "title": "`ctl.py` small guard: the `lua` verb's path",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B72",
+  "area": "harness"
+}

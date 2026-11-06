@@ -1,0 +1,12 @@
+{
+  "id": "W101",
+  "description": "**`Test-Lib.ps1` `Invoke-Selected`: runner parameters leak into case bodies**: `harness/tests/Test-Lib.ps1` `Invoke-Selected`: the comment says every local a case body can see carries a `tc` prefix, but `$name`, `$body`, `$only`, `$repeat` and `$onStart` do not and case bodies run in that dynamic scope; rename to `$tcName` and the like, or run `$body` through `.GetNewClosure()` Why: nothing reads them today (grep), a future body reading an uninitialised `$repeat` would silently get the runner's value; in the next job that changes `Test-Lib.ps1` anyway Raised: napoleon J19 review Later 2, 2026-11-04",
+  "title": "`Test-Lib.ps1` `Invoke-Selected`: runner parameters leak into case bodies",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B67",
+  "area": "harness"
+}

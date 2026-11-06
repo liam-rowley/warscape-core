@@ -1,0 +1,12 @@
+{
+  "id": "W90",
+  "description": "**A display change the headless guard refuses on stops a run as a flake**: with W9's `result: flake`, exit code 2160 after a display change should not restart a 20-pass streak as a failure Why: napoleon J64's run 20261105_j64pc6 lost 5 counting passes when a USB hub dropped and a monitor joined; the guard was right, the DLL was not at fault Raised: napoleon J64 report open question 1, 2026-11-05",
+  "title": "A display change the headless guard refuses on stops a run as a flake",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B101",
+  "area": "core"
+}

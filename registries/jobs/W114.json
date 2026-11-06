@@ -1,0 +1,11 @@
+{
+  "id": "W114",
+  "description": "**A frozen-file row with an extra pipe is a problem, not a crash**: `warscape/registry.py` through `md_problems`: such a row shows as `gate crashed: RegistryError`. It fails closed and the text is right; `md_problems` could return it as a problem. Raised: W43 review round 1, item 6, 2026-11-06",
+  "title": "A frozen-file row with an extra pipe is a problem, not a crash",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}

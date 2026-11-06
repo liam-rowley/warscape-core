@@ -1,0 +1,12 @@
+{
+  "id": "W66",
+  "description": "**Context families in the hotkeys clash check**: an `x-wildcard`-like `x-family` rule (a context clashes with every context that extends it by an `_` suffix, `battle` with `battle_land` and `battle_naval`), and a way to mark a second wildcard context for one row (napoleon's `all_modes`), read by `Registry._check_unique` Why: the core gate compares contexts exactly (plus `global`), so napoleon's own `hotkeys check` verb still carries `ctx_clash` and a test-only wildcard; with W14's `fires_with` it is the last rule the core gate lacks before the verb's clash check can go Raised: W14 report, open question 3, 2026-11-03",
+  "title": "Context families in the hotkeys clash check",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B61",
+  "area": "core"
+}

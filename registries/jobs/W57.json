@@ -1,0 +1,12 @@
+{
+  "id": "W57",
+  "description": "**ESF ABCF** in `saves/esf_*.py` (optimised arrays and the compressed node kinds) Why: the tools read ABCA and ABCE only; Shogun 2 saves are ABCF Raised: planning chat, 2026-11-01",
+  "title": "ESF ABCF",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "backlog_id": "B38",
+  "area": "core"
+}
