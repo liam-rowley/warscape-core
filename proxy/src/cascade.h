@@ -71,6 +71,35 @@ inline bool CtabGate(const std::vector<CtabEntry>& stock, const std::vector<Ctab
     return true;
 }
 
+// [a, b): the CTAB comment token and its body. False when the stream has none.
+inline bool CtabSpan(const void* code, size_t bytes, size_t& a, size_t& b) {
+    const auto* p = static_cast<const uint8_t*>(code);
+    size_t o = 4;
+    while (o + 8 <= bytes) {
+        uint32_t tok; memcpy(&tok, p + o, 4);
+        if ((tok & 0xFFFF) != 0xFFFE) return false;
+        const size_t len = 4 * (size_t)((tok >> 16) & 0x7FFF);
+        if (o + 4 + len > bytes) return false;
+        if (len >= 4 && memcmp(p + o + 4, "CTAB", 4) == 0) { a = o; b = o + 4 + len; return true; }
+        o += 4 + len;
+    }
+    return false;
+}
+
+// The replacement's code under the stock shader's constant table. D3DX reads the table back from the shader it is given and treats every name in
+// it as its own parameter: left in, cascade0_* are uploaded as zero at each pass and the sampler is cleared (run 20261106_j25pc, raw/c_tint: PC 216 3
+// and PC 220 1, all zero, from the effect, c219 untouched because the compiler kept three rows). The gate reads the compiled table first; only then this.
+inline std::string SpliceCtab(const void* stock, size_t stockBytes, const void* repl, size_t replBytes) {
+    size_t sa = 0, sb = 0, ra = 0, rb = 0;
+    if (!CtabSpan(stock, stockBytes, sa, sb) || !CtabSpan(repl, replBytes, ra, rb)) return std::string();
+    const auto* s = static_cast<const char*>(stock);
+    const auto* r = static_cast<const char*>(repl);
+    std::string o(r, ra);
+    o.append(s + sa, sb - sa);
+    o.append(r + rb, replBytes - rb);
+    return o;
+}
+
 // D3DFMT_R16F 111, D3DFMT_R32F 114: the software path's map (fact napoleon.shadow.map); square, and a render target.
 inline bool IsShadowMapDesc(uint32_t fmt, uint32_t usage, uint32_t w, uint32_t h) {
     return (fmt == 111 || fmt == 114) && (usage & 1) && w == h && w >= 512;

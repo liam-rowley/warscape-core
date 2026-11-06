@@ -4,7 +4,8 @@
 //   - The engine's state is never left changed: the registers, target, depth surface, viewport and scissor are put back after each duplicate.
 //   - The bound vertex shader is read at the draw (GetVertexShader), never tracked: the pass applies 60-75 state blocks, which no Set* hook sees.
 //   - Casters are found by their own CTAB at CreateVertexShader, so an unknown shader model or register needs no table.
-//   - Receivers are swapped by hash at CreatePixelShader from <dev.cascade_dir>\<hash>.ps, each through CtabGate (fail = stock, logged).
+//   - Receivers are swapped by hash at CreatePixelShader from <dev.cascade_dir>\<hash>.ps, each through CtabGate (fail = stock, logged), then given the
+//     stock constant table (SpliceCtab): D3DX would otherwise own the cascade0_ names and clear them at every pass.
 //   - Install before the capture, so a capture sees the engine's calls and this module's own target switches stay out of the record. The cascade's
 //     constants go through the device's vtable on purpose: a capture then records them (the density metric reads them).
 #include "dev.h"
@@ -230,14 +231,18 @@ HRESULT WINAPI hk_CreatePixelShader(void* d, const DWORD* code, void** out) {
     size_t len = 0; bool ok = false;
     const uint64_t h = ShaderHash(code, 1u << 20, len, ok);
     const std::string* repl = nullptr;
+    std::string spliced;
     const auto stock = ok ? ReadCtab(code, len) : std::vector<CtabEntry>();
     const bool receiver = FindConst(stock, "shadow_map_texture_sampler") != nullptr;
     if (ok && receiver) {
         auto it = s_swap.find(h);
         if (it != s_swap.end()) {
             std::string why;
-            if (CtabGate(stock, ReadCtab(it->second.data(), it->second.size()), why)) repl = &it->second;
-            else { ++s_n.refused; LOGE("cascade: swap refused for %s: %s", Hex64(h).c_str(), why.c_str()); }
+            if (CtabGate(stock, ReadCtab(it->second.data(), it->second.size()), why)) {
+                spliced = SpliceCtab(code, len, it->second.data(), it->second.size());
+                if (!spliced.empty()) repl = &spliced;
+                else { ++s_n.refused; LOGE("cascade: no CTAB to splice for %s", Hex64(h).c_str()); }
+            } else { ++s_n.refused; LOGE("cascade: swap refused for %s: %s", Hex64(h).c_str(), why.c_str()); }
         } else LOGW("cascade: receiver %s has no replacement: stock", Hex64(h).c_str());
     }
     const HRESULT hr = o_CreatePixelShader(d, repl ? reinterpret_cast<const DWORD*>(repl->data()) : code, out);

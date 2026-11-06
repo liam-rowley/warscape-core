@@ -53,6 +53,20 @@ int main(int argc, char** argv) {
     twoNew[0].index = 30; twoNew.erase(twoNew.begin() + 1);
     CHECK(!CtabGate(Read(Shader(two)), Read(Shader(twoNew)), why) && why == "flat_shading is gone");
 
+    {   // the splice: the replacement's instructions under the stock table, so the effect never sees a cascade0_ name
+        auto st = Shader(stock), rp = Shader(with);
+        rp.insert(rp.end() - 1, 0x12345678u);   // an instruction token the splice must keep
+        const std::string sp = SpliceCtab(st.data(), st.size() * 4, rp.data(), rp.size() * 4);
+        const auto t = ReadCtab(sp.data(), sp.size());
+        CHECK(sp.size() % 4 == 0 && t.size() == stock.size() && !FindConst(t, "cascade0_matrix"));
+        uint32_t tail[2]; memcpy(tail, sp.data() + sp.size() - 8, 8);
+        CHECK(tail[0] == 0x12345678u && tail[1] == 0x0000FFFFu);
+        uint32_t head; memcpy(&head, sp.data(), 4);
+        CHECK(head == 0xFFFF0300u);
+        const uint32_t none[2] = { 0xFFFF0300u, 0x0000FFFFu };
+        CHECK(SpliceCtab(none, 8, rp.data(), rp.size() * 4).empty());
+    }
+
     CHECK(IsShadowMapDesc(111, 1, 2048, 2048) && IsShadowMapDesc(114, 1, 8192, 8192));
     CHECK(!IsShadowMapDesc(21, 1, 2048, 2048) && !IsShadowMapDesc(111, 0, 2048, 2048) && !IsShadowMapDesc(111, 1, 1920, 1080));
 
