@@ -47,6 +47,9 @@ struct Lock { Lock() { EnterCriticalSection(&s_cs); } ~Lock() { LeaveCriticalSec
 struct Caster { int m, lz; };
 std::map<void*, Caster> s_casters;       // vertex shader object -> its registers (under s_cs)
 std::map<void*, int> s_receivers;        // pixel shader object -> 1 swapped, 2 stock (under s_cs; only with dev.cascade_count)
+std::map<void*, uint64_t> s_psHash;      // receiver and skip-target objects -> their stock hash (under s_cs)
+std::map<uint64_t, long long> s_stockDraws;   // draws per stock receiver (under s_cs)
+uint64_t s_skipHash = 0; std::map<void*, bool> s_skipPs; long long s_skipped = 0;   // dev.cascade_skip_ps: that shader's draws are not made
 std::map<uint64_t, std::string> s_swap;  // stock hash -> replacement bytecode
 
 PassTracker s_pass;
@@ -128,12 +131,17 @@ void BeginCascadeFrame(void* d, const Caster& c) {
 }
 
 template <class Draw> HRESULT Dup(void* d, Draw draw) {
+    if (s_skipHash) {
+        void* ps = nullptr; bool skip = false;
+        if (SUCCEEDED(Slot<HRESULT(WINAPI*)(void*, void**)>(d, 108)(d, &ps)) && ps) { { Lock l; skip = s_skipPs.count(ps) != 0; } Rel(ps); }
+        if (skip) { ++s_skipped; return 0; }
+    }
     const HRESULT hr = draw();
     if (!s_pass.in) {
         if (s_k.count) {
             void* ps = nullptr;
             if (SUCCEEDED(Slot<HRESULT(WINAPI*)(void*, void**)>(d, 108)(d, &ps)) && ps) {
-                { Lock l; auto it = s_receivers.find(ps); if (it != s_receivers.end()) ++(it->second == 1 ? s_n.swappedDraws : s_n.stockDraws); }
+                { Lock l; auto it = s_receivers.find(ps); if (it != s_receivers.end()) { ++(it->second == 1 ? s_n.swappedDraws : s_n.stockDraws); if (it->second == 2) ++s_stockDraws[s_psHash[ps]]; } }
                 Rel(ps);
             }
         }
@@ -235,8 +243,9 @@ HRESULT WINAPI hk_CreatePixelShader(void* d, const DWORD* code, void** out) {
     const HRESULT hr = o_CreatePixelShader(d, repl ? reinterpret_cast<const DWORD*>(repl->data()) : code, out);
     if (SUCCEEDED(hr) && out && *out) {
         Lock l;
-        s_receivers.erase(*out);
-        if (receiver) s_receivers[*out] = repl ? 1 : 2;
+        s_receivers.erase(*out); s_psHash.erase(*out); s_skipPs.erase(*out);
+        if (receiver) { s_receivers[*out] = repl ? 1 : 2; s_psHash[*out] = h; }
+        if (ok && s_skipHash == h) { s_skipPs[*out] = true; LOGI("cascade: draws of %s will be skipped", Hex64(h).c_str()); }
         if (repl) { ++s_n.swapped; LOGI("cascade: swapped %s (%zu -> %zu bytes)", Hex64(h).c_str(), len, repl->size()); }
     }
     return hr;
@@ -276,9 +285,10 @@ void LoadSwaps() {
 
 } // namespace
 
-void CascadeInit(bool tint, bool count, int split, int size, const std::wstring& dir) {
+void CascadeInit(bool tint, bool count, int split, int size, const std::wstring& dir, const std::string& skipPs) {
     InitializeCriticalSection(&s_cs);
     s_k.tint = tint; s_k.count = count; s_k.size = size; s_k.dir = dir;
+    s_skipHash = skipPs.empty() ? 0 : strtoull(skipPs.c_str(), nullptr, 16);
     if (split > 0) s_k.split = split;
     LOGI("cascade: prototype on: split %d m, size %d (0 = the engine map's), tint %d, count %d", s_k.split, s_k.size, s_k.tint, s_k.count);
     LoadSwaps();
@@ -312,6 +322,11 @@ void CascadePresent() {
          "receivers created swapped %lld refused %lld, draws swapped %lld stock %lld; vs casters %lld; fit r %.3f texel %.5f c (%.3f, %.3f) t %.3f",
          s_n.frames, s_n.passes, s_n.seen, s_n.dup, s_n.unknown, s_n.nofit, s_fitWhy.c_str(), s_n.lockDiscard, s_n.lockNoOver, s_n.lockOther, s_n.lockOtherThread,
          s_n.swapped, s_n.refused, s_n.swappedDraws, s_n.stockDraws, s_n.casters, s_fit.radius, s_fit.texelM, s_fit.cx, s_fit.cy, s_fit.tSlice);
+    if (s_n.frames % 3000 == 0) {
+        Lock l; std::string t;
+        for (const auto& kv : s_stockDraws) t += " " + Hex64(kv.first) + "=" + std::to_string(kv.second);
+        LOGI("cascade: stock receiver draws:%s; skipped draws %lld", t.c_str(), s_skipped);
+    }
 }
 
 } // namespace wsp

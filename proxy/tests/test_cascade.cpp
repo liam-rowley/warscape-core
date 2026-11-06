@@ -44,6 +44,15 @@ int main(int argc, char** argv) {
     auto extra = with; extra.push_back({ "something_else", 2, 100, 1 });
     CHECK(!CtabGate(Read(Shader(stock)), Read(Shader(extra)), why));
 
+    // the case the PC found (run 20261106_j25pc, raw/c_on): one name in two register sets, in the opposite order in the replacement
+    const std::vector<CtabEntry> two = { { "flat_shading", 0, 3, 1 }, { "flat_shading", 2, 30, 1 } };
+    auto twoNew = std::vector<CtabEntry>{ { "flat_shading", 2, 30, 1 }, { "flat_shading", 0, 3, 1 }, { "cascade0_matrix", 2, 216, 4 } };
+    CHECK(CtabGate(Read(Shader(two)), Read(Shader(twoNew)), why));
+    twoNew[0].index = 31;
+    CHECK(!CtabGate(Read(Shader(two)), Read(Shader(twoNew)), why) && why == "flat_shading moved");
+    twoNew[0].index = 30; twoNew.erase(twoNew.begin() + 1);
+    CHECK(!CtabGate(Read(Shader(two)), Read(Shader(twoNew)), why) && why == "flat_shading is gone");
+
     CHECK(IsShadowMapDesc(111, 1, 2048, 2048) && IsShadowMapDesc(114, 1, 8192, 8192));
     CHECK(!IsShadowMapDesc(21, 1, 2048, 2048) && !IsShadowMapDesc(111, 0, 2048, 2048) && !IsShadowMapDesc(111, 1, 1920, 1080));
 

@@ -51,17 +51,23 @@ inline const CtabEntry* FindConst(const std::vector<CtabEntry>& t, const char* n
     return nullptr;
 }
 
+// One name can hold an entry per register set (a bool used as bool and float: flat_shading, campaign_snow_enabled), so entries match on both.
+inline const CtabEntry* FindConst(const std::vector<CtabEntry>& t, const std::string& name, unsigned set) {
+    for (const CtabEntry& c : t) if (c.name == name && c.set == set) return &c;
+    return nullptr;
+}
+
 // The brief's gate: fail = no swap. The engine uploads by the registers of its own stock compile, so a moved register reads garbage.
 inline bool CtabGate(const std::vector<CtabEntry>& stock, const std::vector<CtabEntry>& repl, std::string& why) {
     if (stock.empty()) { why = "the stock shader has no CTAB"; return false; }
     for (const CtabEntry& s : stock) {
-        const CtabEntry* r = FindConst(repl, s.name.c_str());
+        const CtabEntry* r = FindConst(repl, s.name, s.set);
         if (!r) { why = s.name + " is gone"; return false; }
-        if (r->set != s.set || r->index != s.index || r->count < s.count) { why = s.name + " moved"; return false; }
+        if (r->index != s.index || r->count < s.count) { why = s.name + " moved"; return false; }
     }
     if (!FindConst(repl, "cascade0_matrix")) { why = "no cascade code in the replacement"; return false; }
     for (const CtabEntry& r : repl)
-        if (!FindConst(stock, r.name.c_str()) && r.name.rfind("cascade0_", 0) != 0) { why = "new constant " + r.name; return false; }
+        if (!FindConst(stock, r.name, r.set) && r.name.rfind("cascade0_", 0) != 0) { why = "new constant " + r.name; return false; }
     return true;
 }
 

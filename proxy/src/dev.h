@@ -65,7 +65,7 @@ std::string OrdersInfo();                             // install state, the owne
 
 // capture.cpp (J8): the frame capture behind dev.capture; decisions in its header
 // cascade.cpp (J25 spike): the two-cascade prototype behind dev.cascade_proto; decisions in its header
-void CascadeInit(bool tint, bool count, int split, int size, const std::wstring& dir);   // DevInit
+void CascadeInit(bool tint, bool count, int split, int size, const std::wstring& dir, const std::string& skipPs);   // DevInit
 void CascadeInstall(void* device);                    // every CreateDevice, before the capture
 void CascadePresent();                                // the render thread, every Present
 void CaptureInit();                                   // DevInit: the capture folder
