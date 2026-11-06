@@ -1,5 +1,88 @@
 # W132 review
 
+## Round 2 (2026-11-06, branch job/W132 at 0499174)
+
+**Verdict: merge.**
+
+Round 1's blocker is fixed: a grant for W45 now passes the real judge on a real `meta/` branch, a fourth round is then allowed, and a fifth is not. Every refusal from round 1 still refuses. No file outside this job's folder and row was changed in this round.
+
+One question stays with Liam and does not hold the merge: S1 below.
+
+### Round 1's findings
+
+| Finding | Answer in `## Fix round 1` | Checked in this round |
+| --- | --- | --- |
+| B1, the real grant refused | the rule reads the head row; the base row must be `queued` or `blocked` | fixed: `meta/grant-W45` rc 0 against a `queued` base row, using the two documented commands. The change from brief decision 2 is named in the report |
+| S1, `meta/` is a rule, not a control | wording only, control left to Liam | wording matches: the error, `GRANT_KINDS`, the schema and `docs/REVIEW.md` all say nothing enforces who merges. **Still open for Liam** |
+| S2, round 4 judge test missing | `FourthRound.test_the_grant_then_a_fourth_round` | present, and passes; repeated on real W45 below |
+| S3, wrong message before main is merged | `grant_hint`, and the doc says merge main first | fixed: the hint prints in `jobs check` |
+| S4, `reversible=yes` untrue | command says `reversible=no`, and the judge refuses `yes` | fixed: refused on `meta/` |
+| S5, report evidence | run ids and the round 4 proof added | fixed; the run is repeated below for the new head |
+| L1 | W133 | row is on main; `job/foo` still refuses by the crash |
+| L2 | `BLOCKED_BY_ROUNDS` removed | gone, no caller left |
+| L3 | left | still stale text only; carried into the later item below |
+
+### Findings
+
+No blocker and no should-fix.
+
+**Open for Liam, S1 from round 1.** The judge sees the branch kind, not who merged, so a session holding Liam's `gh` token could merge a `meta/` grant and no check would stop it. The brief set `meta/` as the boundary and a real control is outside this job, so it does not hold this merge. The report asks it under `### Open questions, fix round 1`.
+
+**A known limit, accepted.** With B1's fix, a `meta/` pull request can grant a `queued` job that never ran, as the head row is only what that pull request says. The report names this. It costs nothing unless the job reaches round 4, and the branch is the owner's.
+
+### Later
+
+- **L4.** Text still says 3 with no word of a grant: `docs/REVIEW.md:16`, `:60` and `:67`, and the `warscape/jobq.py:10` docstring. The `warscape/policy.py` docstring, which CLAUDE.md names as the owner of the branch kinds, does not mention the grant rule. `review_steps` prints the right text, so a reviewer is not misled in practice.
+- **L3 again.** `blocked_by` stays on a row after `reg set jobs <id> status=fix`, and so reaches main on a `done` row. It will happen on W45.
+
+Both are filed as one `later` row through a `plan/` pull request.
+
+### What was checked
+
+All on 2026-11-06. The judge runs used a throwaway clone with a bare local origin: real `origin/main` 6822908 with W132 squashed on it, and real `origin/job/W45` at 0fb932a. Each ran `wsc policy` with main's code as the parent and the `--judge` child with the base's rules. Nothing touched GitHub and **no real grant was written**. The script made 75 checks and none failed. Python 3.15.2 on this Windows host.
+
+- **Windows CI, run 42247312637 at 0499174, the head:** `gates (windows-latest)` ran the full `python wsc.py gates` on the head, as its `changes` job found no pass marker for that tree: 15 ok, 1 warn, 0 failed, 1401 host tests passed, 5 skipped, 839 s. Run 42242661250 at 9f8bf6a had already run it with all the fix commits. `gates (ubuntu-latest)` is green. `harness-windows` was skipped at the head because its input tree passed in run 42242661250; `proxy` skipped as no input changed. The log does not name single tests: the 18 of `tests/test_grant_round.py` are placed by the count, 1395 + 6 new, and the same 1401 here.
+- **Latest main:** `origin/main` is 6822908 (release v0.47.0), fetched again just before this verdict. It is one commit past the branch's last merge and changes only `VERSION`, which this branch does not touch. `git merge-tree` is clean. `python3 wsc.py gates` on the head merged with it: 14 ok, 2 warn (this clone's hook, the known skips), 0 failed, 1401 passed, 5 skipped, 825 s. The ruleset does not require an up-to-date branch, and the pull request reads `CLEAN`.
+- **`policy` at 0499174:** refused only for the missing merge verdict and the row, as expected before this commit.
+
+**The road to round 4, on real W45:**
+
+| Step | Result |
+| --- | --- |
+| Before | `queued` on main, `blocked` / "3 review rounds without merge" on `job/W45` |
+| No grant, row `review`, `jobs review --id W45` from main | rc 1, "already has 3 rounds" |
+| No grant, W132's code merged into W45, a round 4 on the branch | `jobs check` rc 1, "at most 3", with the hint |
+| The two documented commands on `meta/grant-W45` | `policy` rc 0 (2 files), `jobs check` ok, `gates --fast` 0 failed |
+| Grant landed on main | `jobs check` ok, `jobs next --peek` runs and passes over W45 |
+| `job/W45` merges main | conflicts in `registries/jobs/W45.json` and `warscape/policy.py`, as the report says; `docs/CONSUMING.md` 30645 of 30720 bytes |
+| Row `fix`, then `## Fix round 3` and row `review` | `jobs fix` runs, `jobs check` ok at each step |
+| `jobs review --id W45` from main | "Claimed round 4", "This is round 4" |
+| Round 4 `merge`, row `done` | `jobs check` ok, `policy --branch job/W45` rc 0 (27 files) |
+| Round 4 non-merge | row `fix` refused, wants "4 review rounds without merge"; row blocked by 4 is ok |
+| A fifth round | `jobs check` rc 1, "at most 4" |
+
+**Refusals, with the grant and the blocked row together on the head, the strongest form:**
+
+| Branch | Result |
+| --- | --- |
+| `meta/ok`, `meta/job/W45` | accepted |
+| `plan/x`, `plan/grant-W45`, `brief/W45`, `brief/W132`, `brief/foo`, `release/v0.47.0`, `release/v9.9.9`, `release/x`, `job/W45`, `job/W132`, `job/W999` | refused by the grant rule |
+| `spike/g`, `rev/W45`, `grant`, `meta`, `metax`, `Meta/g`, `META/g`, `meta-x/g`, `plan`, `job`, `refs/heads/meta/g` | refused by the grant rule |
+| `decide/2026-11-06`, `decide/x` | refused as an unknown kind |
+| `job/foo` | refused by the crash W133 owns |
+
+Also refused:
+
+- **The grant alone:** on `plan/x`, `brief/W45`, `release/v9.9.9`, `job/W45` and `job/W999`.
+- **On the real branch:** a grant on real `job/W45`.
+- **Riding in:** a `plan/` branch and `job/W45`, each after merging a `meta/` grant that had not landed. `changed` runs from the merge base, so the row is still seen, and both are refused by the grant rule itself.
+- **Wrong rows on `meta/`:** the row left `queued`, `reversible=yes`, another blocked reason, `blocked_by` with a newline, a `done` job, a `needs_brief` job, no such job, and the ids `w45`, `W045`, `W45` with a newline, an empty string, `45`, null and a list.
+- **Smuggling:** a grant added to an existing row on `plan/`, `meta/` and `job/`; a row in a subfolder; a `.JSON` name; a symlink row; a `registries/Decisions/` tree entry on `plan/`; a BOM; a duplicate key in either order; an escaped key.
+
+Control: a plain decision row on `plan/` passes (rc 0), so the grant field is what is refused.
+
+**Risk-first reading:** `grant_problems` and `read_grants`, as they are the boundary, and the difference between the two parsers. `decision_row` uses `json.loads` and `read_grants` uses `strict_loads`, so I looked for a row one reads and the other misses. A row `decision_row` cannot read is refused by the append-only rule, and duplicate keys only make `read_grants` count less, so it fails closed. `not_ready`, `round_status_problems` and `review_steps` read as the report says. A `blocked` row on main does not disturb the queue: the branch's row wins in the view and `jobs next` passes over it.
+
 ## Round 1 (2026-11-06, branch job/W132 at 270254b)
 
 **Verdict: do not merge.**
