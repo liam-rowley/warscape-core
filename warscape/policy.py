@@ -311,14 +311,12 @@ def record_holds(r, read, audit_dir):
 
 
 def auto_refusal(r, rows, read, audit_dir):
-    """Why `[audit] auto_apply` may not take the row `r`, or '': the one rule for the judge, `wsc proposals answer --auto` and `check`. `rows`: every row to read a tag from. A tag holds its
+    """Why `[audit] auto_apply` may not take the row `r`, or '': the one rule for the judge, `wsc proposals answer --auto` and `check`. `rows`: every row to read a tag from, `r` among them. A tag holds its
     finding for good, on a closed row too: the row asked once is what a new row on that finding would dodge. `read`, `audit_dir`: `record_holds`."""
-    if r.get('kind') != 'finding' or finding_rule(r) is None:
+    if r.get('kind') != 'finding':
         return 'only a finding is auto-applied'
     if r.get('class') != finding_rule(r):
         return f'class {r.get("class")!r} is not the rule of its finding, {finding_rule(r)}'
-    if r.get('tag'):
-        return f'tag {r.get("tag")}: it is always asked'
     if tagged := sorted({str(x.get('id')) for x in rows if x.get('tag') and x.get('finding') == r.get('finding')}):
         return f'{r.get("finding")} has a tag on {", ".join(tagged)}: it is always asked'
     if not record_holds(r, read, audit_dir):

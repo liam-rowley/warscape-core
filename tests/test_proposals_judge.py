@@ -205,6 +205,9 @@ class RealJudge(unittest.TestCase):
             del r[k]
         self.refused('plan/r8', {rowfile(NEW): pjson(auto(r))}, 'finding')
 
+    def test_a_question_row_carrying_a_real_finding(self):
+        self.refused('plan/r8b', {rowfile(NEW): pjson(auto(on('N', kind='question')))}, 'only a finding')
+
     def test_a_baseline_naming_a_file_that_is_no_record(self):
         fake = 'docs/fake.json'
         r = on('Q')
@@ -268,9 +271,10 @@ class RealJudge(unittest.TestCase):
         self.refused('plan/t10', {rowfile(T): text}, 'tag')
 
     def test_the_row_of_a_tagged_finding_under_another_file_name(self):
-        for n, name in enumerate(('P261106%2D0001.json', 'P261106-0001', 'P261106-0001.JSON', 'sub/P261106-0001.json')):
+        for n, name in enumerate(('P261106%2D0001.json', 'P261106-0001', 'sub/P261106-0001.json')):
             with self.subTest(name):
-                self.refused(f'plan/t11-{n}', {f'registries/proposals/{name}': pjson(auto(on('T', T)))})
+                self.refused(f'plan/t11-{n}', {f'registries/proposals/{name}': pjson(auto(on('T', T)))}, 'file name')
+        self.refused('plan/t11-case', {'registries/proposals/P261106-0001.JSON': pjson(auto(on('T', T)))})   # no wording: on Windows this is the tracked file, edited
 
     def test_the_head_cannot_widen_auto_apply(self):
         self.refused('plan/t12', {'wsc.toml': TOML.replace('["doc_cap"]', '["doc_cap", "hot_file"]'), rowfile(H): pjson(auto(on('H', H, rule='hot_file')))})
