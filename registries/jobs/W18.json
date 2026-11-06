@@ -6,6 +6,7 @@
   "status": "queued",
   "model": "sonnet",
   "needs_pc": true,
+  "semver": "minor",
   "depends_on": [],
   "brief": "jobs/W18/brief.md"
 }

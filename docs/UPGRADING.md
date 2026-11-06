@@ -115,3 +115,11 @@ What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROX
 ## Decisions as row files and `later` rows (core W43)
 
 Nothing is forced: a repo keeps its Markdown decisions file, and a pin bump past W43 changes nothing until it opts in (CONSUMING_OPTIONS.md, "Decisions as one file per row"). The `later` status and the `backlog_id` and `area` fields are in the core's jobs schema from this release on.
+
+## DLL changes: the headless guard (core W18)
+- **No key, no adapter change.** `proxy/src` changes (a new DLL input: the build id changes), so rule 79 applies: one 20-pass acceptance run on the new build id
+  (`python3 core/harness/acceptance.py run`) covers every tag the bump crosses.
+- **Behaviour:** a window a DLL shows after start-up is hidden at show time, not within the 250 ms sweep; the guard's own move is recognised at a scaled target DPI;
+  `headless_status.json` is rewritten after each verified relocation and gains `relocations` (see [PROXY_HARNESS.md](PROXY_HARNESS.md), "The headless guard").
+- **Game docs:** the game's own "Headless" doc (napoleon-remastered `proxy/README.md`) names the show hook beside the sweep, the logical own-move rect and its near-miss line,
+  and the status rewrite with `relocations`. A game pinned below this tag also follows each earlier version's notes in this file.
