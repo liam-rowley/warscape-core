@@ -47,4 +47,4 @@ The core is game-agnostic: no game paths, addresses or facts live here; those be
   first, with host tests, and ships in a tag.
 
 ## Usage
-The game repo's usage rules apply (napoleon-remastered `docs/DECISIONS.md` D15; its `CLAUDE.md` "Usage" owns the wording).
+The game repo's usage rules apply (napoleon-remastered decision D15; its `CLAUDE.md` "Usage" owns the wording).
