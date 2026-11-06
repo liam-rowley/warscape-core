@@ -3,10 +3,11 @@
   "description": "Liam, 2026-11-05: automate the audits (napoleon docs/audits/AUDIT_2026-11-03.md, and the 2026-11-05 audit that found core CONSUMING.md in 32 of 38 job merges and napoleon at 12 ready rows with nothing building) so that he only answers questions (C41). A wsc audit verb (warscape/audit.py, warscape/verbs/audit.py) that computes the pipeline's metrics from git, the registries and, online, gh, compares them with [audit] thresholds and writes findings with stable ids to a dated record (docs/audits/AUDIT_<date>.json and .md with --record; _scratch/audits/ otherwise). Code only, no model in the loop. Host tests on synthetic repositories; calibrated on the core and on napoleon.",
   "title": "wsc audit: the pipeline measured, findings as data",
   "phase": 1,
-  "status": "queued",
+  "status": "review",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",
   "depends_on": [],
-  "brief": "jobs/W44/brief.md"
+  "brief": "jobs/W44/brief.md",
+  "report": "jobs/W44/report.md"
 }
