@@ -1,0 +1,11 @@
+{
+  "id": "W120",
+  "description": "**The installer stops printing the repo commit as \"build\"**: The installer prints the repo commit as \"build\", which reads like the DLL's identity; print the DLL build id, or name the commit as a commit. Raised: napoleon J25 report, 2026-11-06",
+  "title": "The installer stops printing the repo commit as \"build\"",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "harness"
+}
