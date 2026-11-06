@@ -2,7 +2,7 @@
 
 W45 adds the half of C41 between a finding and a change: a proposals registry, `wsc proposals draft|check|ask|answer|close`, a `decide/` branch kind only the owner merges, and a guard on every branch kind so that nothing but `decide/` can write an answer. `wsc audit` now reads the rows, suppressing declined findings and re-measuring applied ones, and `doc_caps` leaves out the job folders. The dry run went end to end: the answers pass `policy` on `decide/`, and the same diff is refused on `plan/`. Branch `job/W45`, session 8c158f7a.
 
-Usage: 130 tool calls; models: opus; 2 sessions, counted by hand, about, brief 30, build 75 and fix 25, 2026-11-06
+Usage: 205 tool calls; models: opus; 3 sessions, counted by hand, about, brief 30, build 75, fix 25 and fix round 2 75, 2026-11-06
 
 ## What was built
 - `schemas/proposals.schema.json`, declared in `wsc.toml` with one file per row. The registry stays empty here: W47's session raises the first real rows.
@@ -114,3 +114,66 @@ The rule changes are in the `warscape/policy.py` docstring and `docs/PROPOSALS.m
 **Left as filed:** the review's later items are W124 to W126, and `max_questions` in no doc is unchanged. Report question 5 stays Liam's.
 
 **Evidence.** `python3 wsc.py gates` on this Windows PC at `e624dcc`, merged with origin/main `27506b4`, 2026-11-06: 15 ok, 1 warn, 0 failed, 1439 host tests passed, 5 skipped, 660.7 s. The warn is the known skips. origin/main was checked again after that run and had not moved. `python3 wsc.py policy --branch job/W45 --base origin/main` refuses on only the two expected lines, the missing merge verdict and the done row. The mutation check was not repeated for the new guards.
+
+## Fix round 2
+Fixed on `job/W45`, with origin/main merged first (`ae802cb`, `b4aceec`, then `0ac0bf6` before the last push). All four should-fix items are done, and the class is closed but for one route that a judge reading a diff cannot close: route 13 below. Liam's brief for this round was the whole class, not the named route, so the routes are listed and each was run through the real judge.
+
+1. **Should-fix 1, a new row with a class its finding lacks: `0b0c8d4`.** A row is refused at the add, open or not, unless `class` is its finding's rule, and `auto_refusal` checks it again at the acceptance for a row already on a base.
+2. **Should-fix 2, a tagged finding through a new row: `0b0c8d4`.** `run_check` reads the rows at the base's tip and the head and passes them to `check` as an optional argument, so the child's arguments and `JUDGE_API` do not change. No row with a tag on that finding may exist, closed ones included. All three forms in the finding are refused, plus the `None` default's test.
+3. **Should-fix 3, `decide/` on a row it does not answer: `0b0c8d4`.** More than the one word: the frozen fields below apply to `decide/` as they do to `plan/`.
+4. **Should-fix 4, `docs/PROPOSALS.md`: `61ab9e4`.** `registries/decisions/*` is named, and why.
+
+**One rule, three callers.** `auto_refusal` in `warscape/policy.py` is what the judge, `wsc proposals answer --auto` and `wsc proposals check` all call. The verb therefore leaves open what the guard would refuse, where before it would have written a branch the judge refuses (the row `close` re-raises on a tagged finding, a `question` row, which was a `KeyError`). `b4d577e` removed one check of mine the mutation run showed was dead.
+
+**A bug found on the way.** `Registry.save` rewrites every row file, and the guard compared text, so a closed row merely reformatted was refused as "a closed row stays closed". The guard now compares parsed rows (`0b0c8d4`, with a test).
+
+### The routes
+`tests/test_proposals_judge.py`: one seeded repo holding this checkout's code, `auto_apply = ["doc_cap"]`. Each case is a real commit on a real branch name, judged by `wsc policy --branch <b> --base origin/main`, the parent and the `--judge` child. "Before" is that same test at `f706ec1` plus origin/main, before the fix.
+
+| # | Route | Before | Now |
+| --- | --- | --- | --- |
+| 1 | New row accepted, class of another rule (should-fix 1) | passed | refused |
+| 2 | The same row added open, to accept later | passed | refused at the add |
+| 3 | A row already on the base with a wrong class, accepted | passed | refused |
+| 4 | Relabel `class` on an existing row, with or without accepting | refused | refused |
+| 5 | Change `finding` on an existing row to fit its class | refused only because the test's `class` moved too | refused on `finding` |
+| 6 | Invented finding: `doc_cap:docs/H.md` where the record's finding on that subject is `hot_file` | passed | refused |
+| 7 | A real finding under another `metric` | passed | refused |
+| 8 | `kind: question`, with no finding (run) or with a real one (test added after the "before" run, so read, not run) | passed | refused |
+| 9 | Baseline names a file that is no record (`docs/fake.json`, or a `..` path) | passed | refused |
+| 10 | Rewrite or delete a merged `AUDIT_` record to add the finding | passed | refused, every kind but `meta/` |
+| 11 | Alias finding, spelled to miss the tag (`docs//T.md`, trailing space, `./docs/T.md`) | passed (read, not run: the test came after the "before" run) | refused, as 6: the record has no such id |
+| 12 | Other file names for a row: `%2D` in the name, no extension (both passed); `.JSON`, a subfolder (both refused) | mixed | refused |
+| 13 | **A new hand-written `AUDIT_` record holding an invented finding, with its row** | passed | **passes: see Left** |
+| 14 | Tagged row left open, new accepted row on its finding | passed | refused |
+| 15 | Close the tagged row as `gone` and add the row, one branch | passed | refused |
+| 16 | The same in two branches, the close merged first | passed | refused |
+| 17 | A row closed long ago still holds its tag | passed | refused |
+| 18 | The tag added on another row in the same branch | passed | refused |
+| 19 | A stale branch cut before the tag landed (read at the tip, not the merge base) | passed | refused |
+| 20 | Move the tagged row off its finding, then add a clean row | passed | refused at the first branch |
+| 21 | Change `kind`, `metric`, `date`, `reraises` or `baseline` on a tagged row | passed | refused |
+| 22 | Strip a tag as null, `""`, `false`, absent, or change it; strip and accept | refused | refused |
+| 23 | A duplicate JSON key, the last one null | refused | refused |
+| 24 | The head's `wsc.toml` lists the class | refused | refused |
+| 25 | A status outside the states (`Accepted`) | passed | refused |
+| 26 | `answer` that is no object | refused | refused |
+| 27 | `registries/proposals.jsonl` beside the folder: `plan/` | refused by its globs | refused |
+| 28 | The same on `job/` | not named by the guard | refused by name |
+| 29 | `meta/` or `job/` adding a row | refused | refused |
+| 30 | `decide/` stripping a tag, changing one, relabelling, moving `finding` (should-fix 3) | passed | refused |
+| 31 | Two branches each passed alone, one tagging a finding, one accepting it | both pass, and `check` said only "two live" | both still pass; `proposals check` names the tag: see Left |
+
+Controls, all ok through the judge: add, fill, add a tag, close a tagged row as `gone`, auto-accept a listed row, a new row accepted on a branch that also adds its record (W47's flow), and `answer --auto` on a real tree, where the listed row is accepted, the row on a tagged finding stays open and the branch it leaves passes `policy`.
+
+### Left
+- **Route 13, open, and not closable here.** The judge reads a diff and cannot re-measure, so a new `AUDIT_` record with an invented finding passes as `wsc audit` output. W47 commits the record on the same `plan/` branch as its rows, so no rule on who adds a record fits. I looked at re-running the metric in the judge: `record` depends on the job and brief branches of the day and on `gh`, so it cannot be reproduced later, and it would be a design change in a last round. `test_the_known_limit_a_new_hand_written_record` pins the behaviour and `docs/PROPOSALS.md` "Traps" says it. It is narrow: a session that can do this can already accept any real finding of a listed class with any recipe, so what it adds is not needing a real finding. It needs an answer before `auto_apply` is filled: for Liam, and for the reviewer to file as a `later` row, which a `job/` branch cannot.
+- **Route 31 is caught after the merge, not before.** Neither branch sees the other. `proposals check` fails the `jobs` gate on the tree they leave, so the result is a red main, not a stopped merge. This is the merge skew of report question 5, still Liam's.
+- **Not in the class, not touched.** Whether a row should carry a tag is the filling session's judgement, and what an option's recipe says is its word: no rule reads either. A tag holding a finding for good is deliberately strict: a real change of mind goes through `decide/`.
+- W124 to W126 stay as filed, and `max_questions` in no doc is unchanged.
+
+### Evidence
+- **Mutation check, repeated as round 2 asked:** 23 mutants across `auto_refusal`, `record_holds`, the frozen fields, the add rule, the record rule, the rows read and the verb's and `check`'s use, on 2026-11-06. 20 killed at first; the 3 survivors gave `b4d577e` (one dead check removed, two routes given their own assertion), and those were rerun and killed. The mutants were run before `cb4cb17`, which only moves a test helper.
+- **`python3 wsc.py gates`** on this Windows PC at `cb4cb17`, 2026-11-06: 15 ok, 1 warn, 0 failed, 1479 host tests passed, 5 skipped, 897.6 s. The warn is the known skips. An earlier run at `b4d577e` failed one test, `test_core_sources_are_stdlib_only`, on my import of a sibling test: `cb4cb17` fixes it.
+- **Test time:** `tests/test_proposals_judge.py` is 35 tests in about 110 s run alone. The gate's 897.6 s is well above the 640 to 660 s of the earlier rounds, by more than this module explains, and other sessions shared this PC. `[tests] timeout_s` is 1080. The reviewer should read the Windows CI time, not this one.
+- `python3 wsc.py policy --branch job/W45 --base origin/main`: see the row's next push; only the missing merge verdict and the done row may fail.

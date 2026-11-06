@@ -3,7 +3,7 @@
   "description": "C41, after W44 (the findings) and W43 (decisions as minted-id registry rows: answers are written through it). The proposals registry (core:proposals, one file per row): a finding becomes a proposal with its evidence, options each with an apply recipe (decision, job, defer, none), a recommended option, a class and an optional taste, risk or legal tag. Verbs: wsc proposals draft (a skeleton per new finding, its baseline from the record), check (in the jobs gate: an open proposal has options and a recommendation), ask [--max 8] (the question table, highest severity first), answer (Liam's answers: statuses, one decision row naming each accepted proposal through wsc reg add decisions --mint, needs_brief job rows for job options, and docs/audits/ANSWERS_<date>.md quoting his message), close (applies W44's re-measure findings). A decide/<date> branch kind in policy: only proposal rows, new decision rows, new needs_brief job rows and that ANSWERS record; every answered proposal names the [jobs.text] owner and the record. [audit] auto_apply classes are accepted at their recommendation on a plan/ branch without a question; a tagged proposal never is. A Waiting on Liam lane in jobs view. wsc audit suppresses a finding whose proposal was declined or deferred until the metric worsens past [audit] reraise_margin, and reports moved or not moved for applied ones.",
   "title": "Proposals registry, the answer round and the decide/ branch kind",
   "phase": 1,
-  "status": "fix",
+  "status": "review",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",

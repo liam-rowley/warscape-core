@@ -232,6 +232,11 @@ class RealJudge(unittest.TestCase):
     def test_a_tagged_row_left_open_beside_a_new_accepted_row(self):
         self.refused('plan/t1', {rowfile(NEW): pjson(auto(on('T')))}, 'tag')
 
+    def test_an_alias_of_a_tagged_finding(self):
+        for n, f in enumerate(('doc_cap:docs//T.md', 'doc_cap:docs/T.md ', 'doc_cap:./docs/T.md')):
+            with self.subTest(f):
+                self.refused(f'plan/t1-{n}', {rowfile(NEW): pjson(auto(on('T', finding=f)))}, 'record')
+
     def test_closed_as_gone_and_a_new_accepted_row_in_one_branch(self):
         self.refused('plan/t2', {rowfile(T): pjson(on('T', T, tag='risk', status='closed', outcome='gone')), rowfile(NEW): pjson(auto(on('T')))}, 'tag')
 
