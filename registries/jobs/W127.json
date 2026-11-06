@@ -1,0 +1,13 @@
+{
+  "id": "W127",
+  "description": "**The PC steps 10 to 12 of W9, which no session could run** (installed watcher 1.4.0, core 1.5.0): (1) update the installed watcher to the core kit (`job.sh update kit=<id>`) and run the watcher preflight against the real copy; (2) B60: the 30-cycle hist_dresden to hist_nile loop at gaps 0/5/15 s through `ctl.py scene`, each lost launch kept in its own `attempt_<k>` folder, the cause named or the null result reported with the cycle table (B60 stays open on a null result); (3) the staged-save sitting with J46 saves, including `ctl reset` on a staged row and whether the game keeps a loaded save open, which would make the `unlink` in `stage_save`'s finally raise and replace the scene's result; (4) a 3-pass `acceptance.py run` into a scratch ledger, then `check-pass` on each file with `--ledger`. Why: W9 is host-proved only (tests/test_w9.py) and its brief's proof section is unmet until this runs. W65 (B60) asks for a retry inside the verb, which W9 decision 3 ruled out, so rewrite or close W65 when this reports. Raised: W9 review round 1 (should-fix 7), 2026-11-06",
+  "title": "W9 PC part: watcher update, B60 cycle loop, staged-save sitting, 3-pass scratch acceptance",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": true,
+  "depends_on": [
+    "W9"
+  ],
+  "area": "harness"
+}
