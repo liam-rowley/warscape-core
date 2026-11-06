@@ -3,7 +3,7 @@
   "description": "Covers B19, B22, B23. A WinEvent hook (EVENT_OBJECT_SHOW, pumped on the guard thread) hides a window a DLL opens after start-up at once instead of within a sweep (B19); display_guard.h IsOwnMove recognises the logical rect at a scaled target DPI, or logs and re-places once (B22); headless.cpp rewrites headless_status.json after each verified relocation (B23).",
   "title": "Headless display guard: show-time hook, scaled-DPI own moves, status after relocation",
   "phase": 1,
-  "status": "fix",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": true,
   "semver": "minor",

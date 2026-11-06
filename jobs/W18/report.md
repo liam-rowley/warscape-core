@@ -33,3 +33,26 @@ B19, B22, B23 are the `later` rows **W51, W52, W53**. A job branch may not edit 
 
 ## What napoleon must do after the tag
 See `docs/UPGRADING.md` "DLL changes: the headless guard (core W18)": rule 79 (20 acceptance passes on the new build id), its Headless doc names the hook, the logical rect and the status rewrite; no adapter or key change. Its pin (0.30.0) also needs the earlier sections' `config_keys` rows (`proxy.file_rules`, `proxy.dxvk_wndproc_fix`).
+
+## Fix round 1
+Round 1 verdict: merge after fixes. All three findings are addressed. B22 now arms, but it has not been proven with the game on a scaled target (see Limits).
+
+**1. Blocker, B22 inert: fixed by the review's option (a).** Commits 77e10f4 (red tests, the probe) and c67d801 (the fix).
+- `LogicalRect` no longer asks the window. It reads the target monitor in the window's DPI context (`DpiScope d(ctx)`, `GetMonitorInfoW(s_t.hmon, ...)`) and maps `want` through the new pure `LogicalOnMonitor(phys, physMon, logMon, out)` in `display_guard.h`. **This deviates from brief decision 2**, which prescribed the point conversion; that call refuses any point outside the window (run 20261106_w18review).
+- The review had not proven that the message carries this mapping, so I measured it first (verified 2026-11-06, run 20261106_w18fix): a window in each DPI context, hidden and shown-cloaked, moved with `PlaceLocked`'s flags across all three monitors. The message matches within 1 px on every edge, and exactly for a whole monitor, the main window's only move. No display setting changed.
+- One thing the review's sketch did not have: an unaware context keeps a monitor's origin and scales its size, a system-aware one scales the origin too. So the map reads both monitor rects and derives no scale from a DPI.
+- Tests: `TestLogicalOnMonitor` uses the measured rows (125 % and 150 %, non-zero origins, both contexts, rects inside a monitor), feeds each real message to `IsOwnMove`, and covers an unchanged monitor and an empty one. A lint refuses the old call in `headless.cpp` and pins the order scope, then monitor query, then map. Red: failed to compile (`LogicalOnMonitor` not declared). Green: `test_display_guard` 369 passed, 0 failed; 17 core host tests and the null game test pass; the DLL builds. CI at c67d801, run 42232966335: green.
+- Docs and comments corrected: `docs/PROXY_HARNESS.md`, `docs/UPGRADING.md`, the comment above `kOwnMoveMs`, `headless.cpp`'s header. Both docs now say the map is measured with a probe window, not with a game.
+
+**2. Should-fix, proof b's first status was quoted: fixed.** 71210f1 commits `b_headless_status_after1.json` (`"relocations": 1`, rect 3840,0,7680,2160, `state` `on_virtual`) and the `shot.sh` output as text.
+
+**3. Should-fix, the proofs must name the DLL that merges: fixed.** 71210f1, run 20261106_w18pc2, verified 2026-11-06: a, b and d pass on sha256 `5d646e47...` from core c67d801, each log's `self_hash` line carrying it. Commits after c67d801 change no `proxy/` file. The PC is back as it was: status identical to the record before, folder identical to the snapshot (1564 files), exe vanilla, lock released, scratch clone removed.
+
+**Later, proof a's wording: done on the re-run.** The new README calls the log order a bound and the probe the measurement: first seen already cloaked, `visible_ms` 11 = `cloaked_ms` 11, 0 ms on a real monitor. W51 to W53 are untouched: they are for the round that merges.
+
+### Limits and what went wrong
+- **B22 is not proven with the game.** The proofs ran at 96 DPI, where nothing is armed (no `own move armed` line in any log), so they show no regression, not the logical arm. It rests on the host tests and the probe, which is a Python window, not Napoleon. Proof c stays Liam's opt-in; W52 should stay `later` as "PC proof at a scaled display" unless he accepts this.
+- **The build id cannot tell these DLLs apart.** The logs say `a005f6cccc17-dirty`, the same as the first sitting's different DLL, because `build_id.py` hashes the inputs at the superproject's gitlink and a scratch tree's newer core only adds `-dirty`. By design, but anyone reading the id alone would think nothing changed: the sha256 and core commit name the DLL. The real id comes with the pin bump, whose rule 79 run is on that id.
+- **One b launch was discarded.** It moved the origin 5.2 s after start, during loading, because a wait of mine was refused and the next call ran at once. It is kept, labelled, in the run folder; the counted launch moved at 61.9 s.
+- **Local full `wsc gates`:** 15 ok, 1 warn, 0 failed in 695.6 s. The warn is `tests`: 1383 host tests passed, 5 skipped here (a POSIX hook test, four that need capstone). A first run was cut off by my own 560 s limit and gave no result. `wsc policy` refuses only for the missing merge verdict and the `done` row, as expected.
+- J99: the user said it was on the PC, but the watcher showed the lock free, the game not running and an empty queue at each check, so the sitting went ahead on that rule. The lock was released between launches, so another job could have taken it; none did.
