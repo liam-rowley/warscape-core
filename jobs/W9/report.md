@@ -51,4 +51,4 @@ Review round 1 (merge after fixes), addressed on job/W9 after merging origin/mai
 10. **Adapter in `check-pass`** (`caabe23`): `main` resolves the harness adapter only for `run` and `measure`; `check-pass` and `streak` work in a repo with no single adapter (same test as item 1).
 11. **Header** (`caabe23`): the docstring says the watcher is compared in content with LF endings.
 
-Left: the review's "mutation check" is not repeated by me; the pass-file test was checked only by reading, not by changing `cmd_run` to mode `w`.
+Mutation check of item 5 (2026-11-06): `cmd_run` opened with mode `w` fails `test_a_pass_file_is_never_overwritten`; restored. Nothing else left from items 1-5 and 8-11.

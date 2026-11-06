@@ -3,7 +3,7 @@
   "description": "Covers B26 (with B31 merged into it), B51, B60. acceptance.py (through ctl.py build_info()) reads the DLL build id after the launch, or refuses the kit-id fallback, so pass 1 on a fresh install counts (B26, B31); ctl.py scene stages a row's named save into the save folder under a harness name and clears it after (B51); find why the hist_nile relaunch sometimes gets no on_virtual within 180 s and retry the launch once inside v_scene, logged (B60). Audit 2026-11-03 (napoleon-remastered docs/audits/AUDIT_2026-11-03.md) adds H3 (core half), H4, H5, H10. H4: a headless failure before on_virtual with a passing exe check is recorded as result: flake, and N flakes per streak (config, default 1) do not restart it (J24 needed 49 ledger lines for 20 passes). H5: refuse a --run id that already has pass files (acceptance.py:373-377 overwrites them). H3: each pass file records the shot sha256s, the kit sha, the DLL sha256 (from W24's proxy.log self-hash when present) and the installed watcher.ps1 sha (the docstring promises shot shas; none are written). H10: a preflight before pass 1 refuses a watcher whose installed source sha differs from the kit at HEAD, so the watcher's version is its sha, not the hand-kept $Version (watcher.ps1:11).",
   "title": "Acceptance and scene launches: build id after launch, staged saves, hist_nile retry, flakes, evidence shas, watcher preflight",
   "phase": 1,
-  "status": "fix",
+  "status": "review",
   "model": "sonnet",
   "needs_pc": true,
   "semver": "minor",
