@@ -41,9 +41,11 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
               `<[audit] dir>/ANSWERS_<date>[_<n>].md`. Each row it answers has `answer.by` the `[jobs.text] owner`, `answer.record` that file, its id in that file, the status of its
               option and, for a `decision` or `job` option, a decision row added here that names it, and for `job` a job row added here. Needs the proposals registry.
 Anything else is refused. On every branch kind (`proposal_problems`, W45): only `decide/` writes an answer, so `plan/`, which merges itself (C40), cannot approve anything for the
-owner. Its one exception is a row the base's `[audit] auto_apply` lists, untagged, at its recommendation, with nothing else changed. A `plan/` branch may add and fill open rows, close
-an answered row, and close an open row as `gone`, but on an existing row never change `class` or change or remove `tag`; no other kind touches a row. An answered row keeps its content, its status goes only to `closed`, and no row is ever deleted. An
-`ANSWERS_` file changes only on `decide/`, which adds its own and never rewrites or deletes one the base has.
+owner. Its one exception is a finding row of a class the base's `[audit] auto_apply` lists, at its recommendation, with nothing else changed, and `auto_refusal` says what else: the class is the rule of its finding,
+the finding is in the `AUDIT_` record its baseline names, and no row at the base's tip or the head carries a tag on that finding, a closed one included. A `plan/` branch may add and fill open rows, close
+an answered row, and close an open row as `gone`. A row is added with its finding's rule as `class`, and on an existing row `plan/` and `decide/` change only what a fill or an answer writes (`FILLED`), add a `tag` but never change or remove one;
+no other kind touches a row, and a row file has the name of its id. An answered row keeps its content, its status goes only to `closed`, and no row is ever deleted. An
+`ANSWERS_` file changes only on `decide/`, which adds its own and never rewrites or deletes one the base has. An `AUDIT_` record merged once is rewritten or deleted only on `meta/`.
  Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
 YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. With `decisions = "registry:<name>"` (core W43)
@@ -82,7 +84,7 @@ import tomllib
 from pathlib import Path
 
 from . import gatemods
-from .registry import file_to_id
+from .registry import file_to_id, id_to_file
 from .repo import DEFAULTS, Ctx, decisions_registry, git_env, matches
 
 # The judge's interface (the `--judge` child's arguments), read from a base core's text by warscape/policy_base.py: keep it on a line of its own.
@@ -90,6 +92,9 @@ JUDGE_API = 1
 ANSWERED = ('accepted', 'declined', 'deferred')
 OPTION_STATUS = {'decision': 'accepted', 'job': 'accepted', 'defer': 'deferred', 'none': 'declined'}
 AUTO_BY = 'auto_apply'   # `answer.by` of a row `[audit] auto_apply` accepted
+FILLED = ('question', 'options', 'recommended', 'tag', 'status', 'answer', 'decision', 'job', 'outcome')   # what a row's fill and answer write: every other field stays as drafted
+STATES = ('open', 'closed', *ANSWERED)
+AUDIT_RECORD = re.compile(r'AUDIT_(\d{4}-\d\d-\d\d)(?:_(\d+))?\.json')
 DECIDE = re.compile(r'decide/(\d{4}-\d\d-\d\d)(?:-([2-9]|[1-9][0-9]+))?')
 
 
@@ -287,15 +292,55 @@ def option_kind(r, key):
     return next((o.get('kind') for o in r.get('options') or [] if isinstance(o, dict) and o.get('key') == key), None)
 
 
-def auto_applied(old, new, cfg):
-    """A plan/ row accepted by the base's `[audit] auto_apply` (C41): untagged, at its recommendation, the answer naming the baseline's record, nothing else changed."""
-    a = new.get('answer') or {}
-    if a.get('by') != AUTO_BY or new.get('class') not in cfg['auto_apply'] or new.get('tag') or a.get('option') != new.get('recommended'):
+def finding_rule(r):
+    """The rule of the row's finding, which is what `draft` sets `class` to, or None on a row with no finding."""
+    f = r.get('finding')
+    return f.partition(':')[0] if isinstance(f, str) else None
+
+
+def record_holds(r, read, audit_dir):
+    """Does the record the row's baseline names hold the row's finding, under its metric? `read`: callable path -> text or None. The path must be a record of `[audit] dir` by name:
+    anywhere else, a plan/ branch could write the file it cites, and one there it can only add, never change (`proposal_problems`)."""
+    b = r.get('baseline')
+    path = b.get('record') if isinstance(b, dict) else None
+    folder, _, name = path.rpartition('/') if isinstance(path, str) else ('', '', '')
+    if folder != audit_dir or not AUDIT_RECORD.fullmatch(name):
         return False
-    if a.get('record') != (new.get('baseline') or {}).get('record') or new.get('status') != OPTION_STATUS.get(option_kind(new, a.get('option'))):
-        return False
+    rec = decision_row(read(path) or '') or {}
+    return any(isinstance(f, dict) and f.get('id') == r.get('finding') and f.get('metric') == r.get('metric') for f in rec.get('findings') or ())
+
+
+def auto_refusal(r, rows, read, audit_dir):
+    """Why `[audit] auto_apply` may not take the row `r`, or '': the one rule for the judge, `wsc proposals answer --auto` and `check`. `rows`: every row to read a tag from. A tag holds its
+    finding for good, on a closed row too: the row asked once is what a new row on that finding would dodge. `read`, `audit_dir`: `record_holds`."""
+    if r.get('kind') != 'finding' or finding_rule(r) is None:
+        return 'only a finding is auto-applied'
+    if r.get('class') != finding_rule(r):
+        return f'class {r.get("class")!r} is not the rule of its finding, {finding_rule(r)}'
+    if r.get('tag'):
+        return f'tag {r.get("tag")}: it is always asked'
+    if tagged := sorted({str(x.get('id')) for x in rows if x.get('tag') and x.get('finding') == r.get('finding')}):
+        return f'{r.get("finding")} has a tag on {", ".join(tagged)}: it is always asked'
+    if not record_holds(r, read, audit_dir):
+        return f'the record its baseline names does not hold {r.get("finding")} under {r.get("metric")}'
+    return ''
+
+
+def auto_problem(old, new, cfg, rows, read):
+    """Why this plan/ row is not one the base's `[audit] auto_apply` accepted, at its recommendation, the answer naming the baseline's record, nothing else changed; or ''."""
+    a = new.get('answer')
+    if not isinstance(a, dict) or a.get('by') != AUTO_BY:
+        return 'it is not by auto_apply'
+    if why := auto_refusal(new, rows, read, cfg['audit_dir']):
+        return why
+    if new.get('class') not in cfg['auto_apply']:
+        return f"the base's `[audit] auto_apply` does not list {new.get('class')}"
+    if a.get('option') != new.get('recommended') or a.get('record') != new['baseline'].get('record') or new.get('status') != OPTION_STATUS.get(option_kind(new, a.get('option'))):
+        return "it is not the recommendation, on the baseline's record, with that option's status"
     written = ('status', 'answer', 'decision', 'job')
-    return old is None or {k: v for k, v in old.items() if k not in written} == {k: v for k, v in new.items() if k not in written}
+    if old is not None and {k: v for k, v in old.items() if k not in written} != {k: v for k, v in new.items() if k not in written}:
+        return 'it changes more than the answer'
+    return ''
 
 
 def decide_answer_problems(r, record, head_file, added, new_jobs, owner):
@@ -326,9 +371,13 @@ def decide_answer_problems(r, record, head_file, added, new_jobs, owner):
     return errs
 
 
-def proposal_row_problems(kind, old, new, cfg, decide):
-    """What a branch of `kind` may not do to one row. `decide`: callable(row) -> errors, for an answer on a decide/ branch."""
+def proposal_row_problems(kind, old, new, decide, auto):
+    """What a plan/ or decide/ branch may not do to one row. `decide`: callable(row) -> errors, for an answer on a decide/ branch. `auto`: callable(old, row) -> `auto_problem`."""
     rid = new.get('id')
+    if old == new:   # the same row, written differently: `Registry.save` rewrites every file
+        return []
+    if new.get('status') not in STATES:
+        return [f'{rid}: status {new.get("status")!r} is not one of {", ".join(STATES)}']
     if old and old.get('status') == 'closed':
         return [f'{rid}: a closed row stays closed']
     if old and (old.get('answer') or old.get('status') in ANSWERED):
@@ -338,21 +387,25 @@ def proposal_row_problems(kind, old, new, cfg, decide):
         if new.get('status') != 'closed' or new.get('outcome') not in ('moved', 'not_moved', 'gone'):
             return [f'{rid}: an answered row goes only to `closed`, with an outcome']
         return []
-    if old and kind == 'plan' and (moved := [k for k in ('class', 'tag') if old.get(k) != new.get(k) and (k == 'class' or old.get(k))]):
-        return [f'{rid}: plan/ may add a tag, but not change {" or ".join(moved)} on a row that exists: they decide what `[audit] auto_apply` may accept (C41)']
+    if old:
+        moved = sorted(k for k in set(old) | set(new) if old.get(k) != new.get(k) and (k not in FILLED or (k == 'tag' and old.get(k))))
+        if moved:
+            return [f'{rid}: on a row that exists a tag may be added, but {", ".join(moved)} stays as drafted: the finding, its class and a tag decide what `[audit] auto_apply` may accept (C41)']
+    elif (new.get('kind') != 'question' or 'finding' in new) and new.get('class') != finding_rule(new):
+        return [f'{rid}: class {new.get("class")!r} is not the rule of its finding {new.get("finding")!r}: `[audit] auto_apply` names rules (C41)']
     if new.get('status') in ANSWERED or 'answer' in new:
         if kind == 'decide':
             return decide(new)
-        if auto_applied(old, new, cfg):
-            return []
-        return [f'{rid}: an answer is written only on a decide/ branch, which the owner merges (C41); `wsc proposals answer`']
+        why = auto(old, new)
+        return [f'{rid}: an answer is written only on a decide/ branch, which the owner merges (C41); `wsc proposals answer`. Not auto-applied: {why}'] if why else []
     if new.get('status') == 'closed' and (old is None or new.get('outcome') != 'gone'):
         return [f'{rid}: an open row closes only as `gone` (its finding left the record)']
     return []
 
 
-def proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, head_file, added, cfg):
-    """The guard on every branch kind (W45): see the module docstring. A file the head has as the base has it is no change. Fails closed on what it cannot parse."""
+def proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, head_file, added, cfg, proposals=None):
+    """The guard on every branch kind (W45): see the module docstring. A file the head has as the base has it is no change. Fails closed on what it cannot parse. `proposals`: every
+    row at the base and the head, for the tags on a finding; None, for the pure-logic tests, reads the rows of `changed`."""
     d, errs = cfg.get('proposals_dir'), []
     if not d:
         return []
@@ -360,11 +413,18 @@ def proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, he
     new_jobs = set(head_rows) - set(base_rows)
     owner = cfg['text'].get('owner')
     decide = lambda r: decide_answer_problems(r, record, head_file, added, new_jobs, owner) if record else []
+    if proposals is None:
+        proposals = [r for p in changed if p.startswith(d + '/') for t in (base_file(p), head_file(p)) if t and (r := decision_row(t))]
+    auto = lambda old, new: auto_problem(old, new, cfg, proposals, head_file)
     for p in changed:
         if p.startswith(f"{cfg['audit_dir']}/ANSWERS_") and kind != 'decide' and base_file(p) != head_file(p):
             errs.append(f'{p}: an ANSWERS file quotes the owner, so it changes only on a decide/ branch')
         if kind == 'decide' and p == record and base_file(p) is not None and base_file(p) != head_file(p):
             errs.append(f'{p}: the record of an earlier round of the owner quoted is never rewritten or deleted: answer on {next_decide(branch)}')
+        if kind != 'meta' and p.startswith(f"{cfg['audit_dir']}/AUDIT_") and base_file(p) is not None and base_file(p) != head_file(p):
+            errs.append(f'{p}: an audit record is what a row is tied to, so it is never rewritten or deleted: `wsc audit --record` writes the next one')
+        if p == f'{d}.jsonl':
+            errs.append(f'{p}: a second copy of the proposal rows, which live one per file in {d}/, where the guard reads them')
         if not p.startswith(d + '/'):
             continue
         name, old_t, new_t = p[len(d) + 1:], base_file(p), head_file(p)
@@ -376,10 +436,10 @@ def proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, he
             errs.append(f'{p}: a proposal row is never deleted')
         elif (new := decision_row(new_t)) is None or (old_t is not None and decision_row(old_t) is None):
             errs.append(f'{p}: not a JSON object')
-        elif new.get('id') != file_to_id(name):
+        elif not isinstance(new.get('id'), str) or not new['id'] or id_to_file(new['id']) != name:
             errs.append(f'{p}: id {new.get("id")!r} is not its file name')
         else:
-            errs += proposal_row_problems(kind, decision_row(old_t) if old_t is not None else None, new, cfg, decide)
+            errs += proposal_row_problems(kind, decision_row(old_t) if old_t is not None else None, new, decide, auto)
     return errs
 
 
@@ -405,13 +465,13 @@ def allowed(path, globs):
     return matches(path, globs)
 
 
-def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=None, cfg=None, hook=None, base_ref=None, reads=None, warnings=None):
+def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=None, cfg=None, hook=None, base_ref=None, reads=None, warnings=None, proposals=None):
     """Errors for this pull request. `base_file`/`head_file` are callables path -> text or None. `sessions`: callable path ->
     list with one set of trailer values per branch commit that touched it (job branches; an empty set is a commit without a trailer, which
     is refused; None skips the authorship check, for the pure-logic tests). `cfg`: settings(). `hook`: callable(facts) -> [str], the
     repo's `policy`-stage gate modules (facts: branch, kind, jid, changed, added_decision_rows), called after the decisions check. `base_ref`:
     the base's name for messages. `reads`: the git reads of rules A-E (a GitReads, or a fake with its methods; None skips them, for the
-    pure-logic tests). `warnings`: a list the warnings are appended to (they never refuse)."""
+    pure-logic tests). `warnings`: a list the warnings are appended to (they never refuse). `proposals`: `proposal_problems`."""
     cfg = cfg or settings(_default_config())
     T, jd, trailer = cfg['text'], cfg['jobs_dir'], cfg['trailer']
     if cfg.get('decisions_dir'):
@@ -426,7 +486,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         added = added_decision_files(changed, base_file, head_file, cfg)
     else:
         added = added_decision_rows(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] in changed else []
-    errs += proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, head_file, added, cfg)
+    errs += proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, head_file, added, cfg, proposals)
     if cfg.get('decisions_cite_job') and kind == 'job':   # rule F
         errs += [f"decision row {r['id']} on {branch} must name the brief that required it (add `{m.group(2)}` to the row, or move it to a plan/ branch)"
                  for r in added if not re.search(rf'(?<![A-Za-z0-9]){re.escape(m.group(2))}(?![0-9])', r['text'])]
@@ -852,8 +912,10 @@ def run_check(ctx, branch, base, head, repo, extra_facts=None, base_ref=None, wa
     def hook(f):
         return gatemods.problems(gatemods.run_stage(ctx, 'policy', facts={**facts, **f, **(extra_facts or {})}))
 
+    d = cfg['proposals_dir']   # the base's tip, not the merge base: a tag that landed after the branch was cut still holds
+    proposals = [r for ref in (b, h) for r in (dir_rows_at(ref, d, repo) or {}).values()] if d else None
     errs = check(branch, changed, rows_at(mb, cfg, repo), rows_at(h, cfg, repo), lambda p: show(b, p, repo), lambda p: show(h, p, repo),
-                 sessions, cfg, hook, base_ref, GitReads(repo, b, h, mb, trailer) if trailer else None, warnings)
+                 sessions, cfg, hook, base_ref, GitReads(repo, b, h, mb, trailer) if trailer else None, warnings, proposals)
     return errs, changed
 
 

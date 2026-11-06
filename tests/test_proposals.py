@@ -62,6 +62,11 @@ def job(rid='W200', status='needs_brief'):
     return {'id': rid, 'title': 't', 'description': 'd', 'phase': 1, 'status': status, 'model': 'sonnet', 'needs_pc': False, 'depends_on': []}
 
 
+def audit_file(*fids):
+    """The record the rows' baselines name, holding `fids`: `auto_apply` takes only a finding its record has."""
+    return {row()['baseline']['record']: json.dumps({'findings': [{'id': f, 'metric': 'doc_caps'} for f in fids or ('doc_cap:docs/X.md',)]})}
+
+
 def judge(branch, base=None, head=None, base_rows=None, head_rows=None, cfg=CFG):
     """Errors for a pull request whose changed paths are the files that differ between `base` and `head` ({path: text})."""
     base, head = base or {}, head or {}
@@ -282,8 +287,24 @@ class Allowed(unittest.TestCase):
 
     def test_auto_apply_on_plan_for_a_listed_class(self):
         r = answered(by='auto_apply', record=row()['baseline']['record'])
-        self.assertEqual(judge('plan/x', {path(): text(row())}, {path(): text(r)}, cfg=AUTO), [])
-        self.assertEqual(judge('plan/x', {}, {path(): text(r)}, cfg=AUTO), [])   # W47 drafts and applies in one branch
+        self.assertEqual(judge('plan/x', {path(): text(row()), **audit_file()}, {path(): text(r), **audit_file()}, cfg=AUTO), [])
+        self.assertEqual(judge('plan/x', {}, {path(): text(r), **audit_file()}, cfg=AUTO), [])   # W47 records, drafts and applies in one branch
+
+    def test_the_pure_logic_default_reads_the_tags_of_the_changed_rows(self):
+        """`proposals=None`: the rows of `changed`, so a tag on an unchanged row is out of sight here, and in sight when the rows are passed, as `run_check` does."""
+        new, tagged = answered(ID2, by='auto_apply', record=row()['baseline']['record']), row(tag='risk')
+        files = {path(ID2): text(new), **audit_file()}
+        base = {path(): text(tagged), **audit_file()}
+        head = {path(): text(tagged), **files}
+        changed = [path(ID2)]
+        call = lambda **k: pp.check('plan/x', changed, {}, {}, base.get, head.get, cfg=AUTO, **k)
+        self.assertEqual(call(), [])
+        self.assertTrue(any('tag' in e for e in call(proposals=[tagged, new])))
+        self.assertTrue(any('tag' in e for e in judge('plan/x', {path(): text(tagged), **audit_file()}, {path(): text(row(tag='risk', status='closed', outcome='gone')), **files}, cfg=AUTO)))
+
+    def test_the_same_row_written_differently_is_no_change(self):
+        closed = answered(status='closed', outcome='moved')
+        self.assertEqual(judge('plan/x', {path(): text(closed)}, {path(): json.dumps(closed)}), [])
 
     def test_a_row_as_the_base_has_it_is_no_change(self):
         self.assertEqual(pp.check('job/W9', [path()], {}, {}, {path(): text(row())}.get, {path(): text(row())}.get, cfg=CFG)
@@ -596,12 +617,40 @@ class Folder(unittest.TestCase):
 
     def test_auto_accepts_a_listed_untagged_class_at_its_recommendation(self):
         other = row('P261106-eeee', finding='other:x', **{'class': 'other'})
+        self.record([found(), found(fid='doc_cap:docs/Y.md'), found(fid='other:x')])
         self.put(row(), row(ID2, finding='doc_cap:docs/Y.md', tag='risk'), other)
         made = P.answer_auto(self.ctx, 'plan/audit-x', today='2026-11-06', taken=set())
         self.assertEqual(made, [ID])
         a = self.status()
         self.assertEqual((a['status'], a['answer']['by'], a['answer']['option'], a['answer']['record']), ('accepted', 'auto_apply', 'split', 'docs/audits/AUDIT_2026-11-05.json'))
         self.assertEqual((self.status(ID2)['status'], self.status('P261106-eeee')['status']), ('open', 'open'))
+
+    def test_auto_leaves_what_the_guard_would_refuse(self):
+        """Each stays open and is asked: a finding a closed row tagged, the row `close` re-raises on it, a class that is not the finding's rule, a finding not in its record, a question."""
+        self.record([found(fid='doc_cap:docs/T.md')])
+        question = row('P261106-dddd', kind='question')
+        for k in ('finding', 'metric', 'baseline'):
+            del question[k]
+        rows = [row('P261106-eeee', finding='doc_cap:docs/T.md', tag='risk', status='closed', outcome='gone'), row(ID, finding='doc_cap:docs/T.md', reraises='P261106-eeee'),
+                row(ID2, finding='hot_file:docs/T.md'), row('P261106-ffff', finding='doc_cap:docs/Absent.md'), question]
+        self.put(*rows)
+        self.assertEqual(P.answer_auto(self.ctx, 'plan/audit-x', today='2026-11-06', taken=set()), [])
+
+    def test_check_refuses_a_class_that_is_not_the_findings_rule(self):
+        self.put(row(finding='hot_file:docs/X.md'))
+        self.assertTrue(any('rule of its finding' in e for e in P.check(self.ctx)))
+
+    def test_check_refuses_an_auto_answer_the_rule_would_not_give(self):
+        """Two branches each passed alone: the tree they leave."""
+        self.record([found()])
+        self.put(answered(option='later', status='deferred', by='auto_apply', record=row()['baseline']['record']), row(ID2, tag='taste'))
+        self.assertTrue(any('answered by auto_apply' in e and ID2 in e for e in P.check(self.ctx)))
+
+    def test_check_passes_an_auto_answer_after_the_finding_is_closed(self):
+        """A closed row is history: a tag added on the finding later must not turn the gate red."""
+        self.record([found()])
+        self.put(answered(option='no', status='closed', outcome='moved', by='auto_apply', record=row()['baseline']['record']), row(ID2, tag='taste', options=row()['options']))
+        self.assertFalse([e for e in P.check(self.ctx) if 'auto_apply' in e])
 
     def test_auto_is_refused_off_a_plan_branch(self):
         with self.assertRaises(ValueError):

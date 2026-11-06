@@ -12,7 +12,7 @@
     "kind": {"enum": ["finding", "question"], "description": "`wsc proposals draft` writes `finding`; `question` is W32's and needs no `finding` or `baseline`"},
     "finding": {"type": "string", "minLength": 1, "description": "the audit finding id, `<rule>:<subject>`"},
     "metric": {"type": "string", "minLength": 1},
-    "class": {"type": "string", "minLength": 1, "description": "the finding's rule: `[audit] auto_apply` names classes"},
+    "class": {"type": "string", "minLength": 1, "description": "the finding's rule, the text of `finding` before its first `:` (`wsc policy`, `wsc proposals check`): `[audit] auto_apply` names classes"},
     "question": {"type": "string", "minLength": 1, "description": "one sentence"},
     "baseline": {
       "type": "object",

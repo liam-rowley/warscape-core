@@ -20,7 +20,7 @@ SEVERITY = {'high': 0, 'medium': 1, 'low': 2}
 JOB_RECIPE = ('title', 'description', 'phase', 'model', 'needs_pc', 'semver', 'depends_on')
 DECISION_RECIPE = ('decision', 'reversible')
 AUTO_BY = pp.AUTO_BY
-RECORD = re.compile(r'AUDIT_(\d{4}-\d\d-\d\d)(?:_(\d+))?\.json\Z')
+RECORD = pp.AUDIT_RECORD
 
 
 def declared(ctx):
@@ -131,15 +131,27 @@ def recipe_problems(rid, o):
     return out
 
 
+def reader(ctx):
+    """callable path -> text or None, on the working tree: what `warscape/policy.py` reads with git."""
+    def read(p):
+        f = ctx.root / p
+        return f.read_text(encoding='utf-8') if f.is_file() else None
+    return read
+
+
 def check(ctx):
-    """`wsc proposals check`, in the `jobs` gate: what a row of any status must hold. A skeleton fails until it is filled, on purpose."""
+    """`wsc proposals check`, in the `jobs` gate: what a row of any status must hold. A skeleton fails until it is filled, on purpose. It also sees what the judge cannot: two branches
+    each passed alone, whose rows break the auto_apply rule once both are merged."""
     if not declared(ctx):
         return []
     regs = load(ctx)
     rows = regs[NAME].rows
     errs, live = [], {}
+    read, folder = reader(ctx), ctx.config['audit']['dir']
     for r in rows:
         rid, opts = r['id'], r.get('options') or []
+        if r.get('finding') and r['class'] != pp.finding_rule(r):
+            errs.append(f'{rid}: class {r["class"]!r} is not the rule of its finding {r["finding"]!r}')
         keys = [o.get('key') for o in opts]
         if r['status'] == 'open':
             if not opts:
@@ -158,6 +170,8 @@ def check(ctx):
                 errs.append(f'{rid}: answer.record {a["record"]} does not exist')
             if not option_of(r, a['option']):
                 errs.append(f'{rid}: answer.option {a["option"]!r} is not one of its options')
+            if a['by'] == AUTO_BY and r['status'] in ANSWERED and (why := pp.auto_refusal(r, rows, read, folder)):
+                errs.append(f'{rid}: answered by {AUTO_BY}, but {why}')
         if r.get('decision') and r['decision'] not in regs['decisions'].by_id():
             errs.append(f'{rid}: decision {r["decision"]} is not a row')
         if r.get('job') and r['job'] not in regs['jobs'].by_id():
@@ -168,7 +182,7 @@ def check(ctx):
 
 def newest_record(folder):
     """The newest `AUDIT_<date>[_n].json` in `folder`, or None."""
-    got = [(m.group(1), int(m.group(2) or 1), f) for f in Path(folder).glob('AUDIT_*.json') if (m := RECORD.match(f.name))]
+    got = [(m.group(1), int(m.group(2) or 1), f) for f in Path(folder).glob('AUDIT_*.json') if (m := RECORD.fullmatch(f.name))]
     return max(got, key=lambda t: t[:2])[2] if got else None
 
 
@@ -301,13 +315,13 @@ def answer(ctx, answers, quote, branch, today=None, taken=()):
 
 
 def answer_auto(ctx, branch, today=None, taken=()):
-    """Accept each open row of an `[audit] auto_apply` class at its recommendation, on a plan/ branch (C41). A tagged row is always asked. Returns the ids."""
+    """Accept each open row of an `[audit] auto_apply` class at its recommendation, on a plan/ branch (C41). What `pp.auto_refusal` turns down stays open and is asked. Returns the ids."""
     if not branch.startswith('plan/'):
         raise ValueError(f'{branch} is not a plan/ branch: --auto runs on plan/ (a decide/ branch carries the owner\'s answers)')
     today = today or today_utc()
     regs = load(ctx)
-    classes = ctx.config['audit']['auto_apply']
-    picks = [(r, o) for r in regs[NAME].rows if r['status'] == 'open' and r['class'] in classes and not r.get('tag') and (o := option_of(r, r.get('recommended')))]
+    classes, rows, read, folder = ctx.config['audit']['auto_apply'], regs[NAME].rows, reader(ctx), ctx.config['audit']['dir']
+    picks = [(r, o) for r in rows if r['status'] == 'open' and r['class'] in classes and (o := option_of(r, r.get('recommended'))) and not pp.auto_refusal(r, rows, read, folder)]
     by_record = {}
     for r, o in picks:
         by_record.setdefault(r['baseline']['record'], []).append((r, o))

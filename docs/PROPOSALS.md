@@ -5,7 +5,7 @@ the fields: `schemas/proposals.schema.json`. What is measured is [AUDIT_METRICS.
 
 ## The round
 1. `wsc audit --record` writes the findings. `wsc proposals close` applies what that record re-measured, then `wsc proposals draft` writes a skeleton per finding with no live row. A person or a session fills each: a question, options, a `recommended`, a `tag` if it must always be asked. `wsc proposals check` refuses a skeleton, so an unfilled row cannot merge.
-2. `wsc proposals answer --auto` accepts the rows of `[audit] auto_apply` at their recommendation. This all goes on a `plan/` branch, which merges itself.
+2. `wsc proposals answer --auto` accepts the rows of `[audit] auto_apply` at their recommendation, and leaves open what the guard below would refuse. This all goes on a `plan/` branch, which merges itself.
 3. `wsc proposals ask` prints the table; `jobs view` shows the same rows under "Waiting on" the owner. The owner answers in one message.
 4. On `decide/<date>`: put the message in a file, the answers in `{"<id>": "<option key>"}` (`"recommended"` is allowed; rows not named stay open), and run `wsc proposals answer --answers FILE --quote FILE`. It writes the rows, one decision row for the round, a `needs_brief` job row per job option and `<[audit] dir>/ANSWERS_<date>.md`. It commits nothing. **Only the owner merges a `decide/` branch**: never queue auto-merge on one.
 5. Job rows go through the queue. The next audit re-measures each applied row, and step 1's `close` closes it or re-raises it.
@@ -25,7 +25,14 @@ A `closed` row has `outcome` `moved`, `not_moved` or `gone`. `not_moved` also dr
 `P<yymmdd>-<4 hex>`, as decisions are (W43): a finding id holds `:` and `/`, which no file name may, and two branches need not agree on a number. `finding` is a field; `class` is the finding's rule, the word `[audit] auto_apply` lists.
 
 ## Who may write what
-Judged with the base's rules, on every branch kind (`warscape/policy.py` docstring): only `decide/` writes an answer. `plan/` may add and fill open rows, close an answered row, close an open row as `gone`, and accept a row the base's `auto_apply` lists, untagged, at its recommendation. On an existing row it may add a `tag`, but not change or remove one, nor change `class`: those two decide what is auto-accepted. No other kind touches a row. An answered row keeps its content, and no row is deleted. An `ANSWERS_` file changes only on `decide/`, because it quotes the owner, and a `decide/` branch only adds one: a name reused after its round merged is refused, and the next is `decide/<date>-2`.
+Judged with the base's rules, on every branch kind (`warscape/policy.py` docstring): only `decide/` writes an answer. `plan/` may add and fill open rows, close an answered row, close an open row as `gone`, and accept a row the base's `auto_apply` lists, at its recommendation. No other kind touches a row. An answered row keeps its content, and no row is deleted. An `ANSWERS_` file changes only on `decide/`, because it quotes the owner, and a `decide/` branch only adds one: a name reused after its round merged is refused, and the next is `decide/<date>-2`.
+
+What `auto_apply` may take is one rule, `auto_refusal`, for the judge, `answer --auto` and `check`:
+- A finding row only, whose `class` is its finding's rule. A row is added that way, on `plan/` and `decide/`, open or not.
+- Its finding is in the `AUDIT_` record of `[audit] dir` its baseline names, under its metric. That record may arrive on the same branch; once merged it is rewritten or deleted only on `meta/`.
+- No row at the base's tip or the head has a tag on that finding. A tag holds its finding for good, on a closed row too, so closing a tagged row and raising a clean one gets nothing.
+
+On an existing row, `plan/` and `decide/` change only what a fill or an answer writes: `question`, `options`, `recommended`, `status`, `answer`, `decision`, `job`, `outcome`, and they may add a `tag` but not change or remove one. `finding`, `class`, `kind`, `metric`, `baseline`, `date` and `reraises` stay as drafted. A row file has the name of its id, and there is no `proposals.jsonl` beside the folder.
 
 ## Re-measuring and suppression
 Both are read from the rows at the measured sha, and are in the record as `suppressed` and `remeasured` ([AUDIT_METRICS.md](AUDIT_METRICS.md), "The record"). Worse is `sign * (value - baseline) > reraise_margin * abs(baseline)`; on a baseline of 0, any worsening. A `remeasured` verdict is `unmeasured` (the metric is not in the record: never read as fixed), `too_soon` (the window starts before the change, so it still holds the old state), `gone` (the subject left main), `moved` (no finding, or better by the margin) or `not_moved`.
@@ -34,6 +41,8 @@ Both are read from the rows at the measured sha, and are in the record as `suppr
 - Until W117 lands, a drafted `idle_queue` on a quiet main may be false: a fresh claim reads as parked. Look at the queue before filling it.
 - A `decide/` branch is judged by its name: a second round on one day is `decide/<date>-2`, and its record is `ANSWERS_<date>_2.md`.
 - Nothing can tell the owner's merge from an agent's: the agents push with the same account. The rule is that no tool and no session queues the merge, as with `meta/`.
+- The judge cannot re-measure: a hand-written new `AUDIT_` record passes as `wsc audit` output, so a listed class's finding is only as true as the record. Read what `plan/` adds before widening `auto_apply`.
+- Two `plan/` branches judged alone can pass, one tagging a finding and one accepting it. `wsc proposals check`, in the `jobs` gate, refuses the tree they leave, so that is a red main, not a merge stopped.
 
 ## What a game declares
 `proposals = "core:proposals"` in `[registries]`, `"proposals"` in `[storage] dir`, `registries/proposals/*` in `[policy] plan` and in any list of paperwork paths, a `[jobs.text] owner`, and `[policy] decisions = "registry:<name>"`. Without the registry none of this runs, and `decide/` is refused. The registry outside `[storage] dir` is a config error, because the guard reads only that folder.
