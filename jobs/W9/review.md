@@ -1,5 +1,46 @@
 # W9 review
 
+## Round 2 (2026-11-06, branch job/W9 at c31077a)
+
+**Verdict: merge.**
+
+All eleven findings of round 1 are answered in `## Fix round 1`, and I checked each against the code. Nothing is left at blocker or should-fix level. The host side is proved; the PC part is not, and that is W127, not this job. No code was changed in this round.
+
+### What was run
+- **CI on the head, run 42205388934 (c31077a), completed green**: `gates (ubuntu-latest)`, `gates (windows-latest)` and `harness-windows` passed, `proxy` skipped (no `proxy/` input changed). As round 1 asked, I read the new Windows run rather than the check names: `changes` set `gates_windows=true` and `harness=true` with no marker hit, `gates (windows-latest)` ran 1374 host tests with 5 skipped (none W9's: the POSIX hook test and four capstone tests), and `harness-windows` ran 60 unit and 35 integration tests, 0 failed. The `policy` run 42205391892 is skipped because the pull request is a draft, which is expected before this verdict.
+- **Local, this PC, Windows, at c31077a**: `wsc gates` 14 ok, 2 warn, 0 failed (1374 host tests, the same 5 skips; the `hooks` warn is this worktree's absolute `core.hooksPath`). `tests.test_w9 tests.test_acceptance tests.test_ctl`: 141 tests, OK.
+- **`wsc policy --branch job/W9 --base origin/main` before this round**: refused only for the verdict and the row not being `done`.
+- **Against the latest origin/main (0ac0bf6, refetched after the gates finished)**: the branch is one commit behind. That commit (#153) adds only `registries/jobs/W127.json`, no file W9 changes; `git merge-tree` is clean (tree d2f1f5a). W127 `depends_on` W9, so the order is right. I did not merge main into the branch: the squash carries it, and the row cannot affect W9's code.
+- **Mutation check of the fixes**: 15 mutants of round 1's items 1 to 5 and 8 to 10, broken one at a time in a scratch copy, 13 caught. Item 5's mode `w` is among the caught, which confirms the fix's own claim. The two survivors are not worth a round: `attempt.json` is written but no test reads it, and `stage_save`'s default `say` going back to stdout survives because both callers pass their own, so production never reaches the default.
+- **`check-pass` by hand**: a missing `--ledger` prints the refusal and exits 1 in this core, with no adapter (items 1 and 10).
+
+### Round 1's findings
+1. Missing ledger: fixed, `acceptance.py` `cmd_check_pass`. Seen failing closed by hand and held by a test.
+2. A pass that proves nothing: fixed as round 1 specified, `pass_proof_problems`, and `run_pass` fails an unhashable shot. Every clause is held by a test (mutants 2a to 2f). See Later for what round 1 did not list.
+3. Attempt evidence: fixed, next free `attempt_<k>`, and attempt 2 of a lost launch is kept too (`ctl.py` `Pc.launch`).
+4. `reset` on a staged row: fixed, `v_reset` stages around `_reset`, and the settle runs inside the stage. Not run in the game: W127.
+5. The pass-file test: fixed, it now goes through `cmd_run`.
+6. Backlog rows: the report's correction is right; W98, W99, W100 and W65 are on main and say what it says they do. They stay open until W9 merges (see Later).
+7. PC row: W127 is on main (#153), `needs_pc: true`, depends on W9, and carries round 1's open question about a loaded save and `unlink`. The brief's open question 1 has no answer from Liam, and the brief says the recommended answer stands when none comes, so this is not a reason to hold the merge. The step-10 stop was a kill criterion, so the unmet PC proof is a reported stop, not a missed deliverable.
+8. Pass label: fixed, `launches[0]`.
+9. stdout: fixed for `scene`, which now returns `staged_notes`. See Later for `reset`.
+10. Adapter: fixed, resolved only for `run` and `measure`.
+11. Header: fixed.
+
+**Also read, which round 1 did not list as covered.** Decision 7's self-hash: W24 is merged, and `SELF_HASH_RE` (`ctl.py:54`) is the exact format of `proxy/src/dllmain.cpp:78` on main. Decision 2's `save_file` root: `ctl.py` `ROOT` is `layout.game_root`, so the path is under the game repo in a consumer too.
+
+### Blockers
+None.
+
+### Should-fix
+None.
+
+### Later
+All in **W128** (`plan/W128-check-pass-consistency`). None of these can be reached by a file `cmd_run` writes, which is why they do not hold the merge.
+1. **`pass_problems` does not check that a pass agrees with itself.** `harness/acceptance.py:240`. To see it: a schema-2 doc with `result: pass` and every field of round 1's list returns `[]` with `steps: {}`, with a step `{ok: false}`, with `dll_sha256_logged` differing from `dll_sha256`, with `watcher_sha256` differing from `watcher_kit_sha256`, and with a launch of another build. `cmd_run` cannot write these (`record` clears `passed`, and `build_checks` fails the two launch cases), so it takes a hand-edited file, but a hand-edited ledger line is how H5 began and `check-pass` is the consumer's gate. A `steps` list raises `AttributeError` instead of a problem line; that fails closed.
+2. **`v_reset` drops the leftover note.** `harness/ctl.py:1068` passes `say=lambda t: None`, so a leftover is overwritten and not said on this path (decision 2). `v_scene` loses its note too when `_scene` raises. Return it as `staged_notes`, as `v_scene` does.
+3. **Close W98, W99 and W100** with this job as evidence once it is on main. Nothing else records that step (W127 covers W65).
+
 ## Round 1 (2026-11-06, branch job/W9 at 51bbdad)
 
 **Verdict: merge after fixes.**
