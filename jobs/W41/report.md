@@ -4,6 +4,8 @@ The session cap is built. The first session stopped at the brief's second kill c
 and asked four questions; Liam answered them on 2026-11-06 ("Yes your pick"), and a second session built the job from those answers. Decisions 3 and 4 of the brief
 changed as a result; the rest are built as written. No existing test assertion changed.
 
+Usage: 40 tool calls; models: opus; 2 sessions, counted by hand, about, the build session only; the first session stopped at the kill criterion and its count is not known, 2026-11-06
+
 ## Liam's answers, 2026-11-06
 1. **Build decisions 1, 2, 3, 5 and 6 as written, with the `kind == 'background'` test added.** Yes.
 2. **Decision 4: as the first session recommended.** `jobs sessions` reads `--all` and shows every state. `--stop-finished` stops only `done` rows that still have a `pid`,
