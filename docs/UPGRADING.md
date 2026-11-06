@@ -3,6 +3,12 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## Session cap (W41)
+
+`[jobs] max_sessions` is off by default; a game on a shared PC sets it (napoleon: 4, its D59). It counts background sessions with a pid in any state, across every repo on the PC, so a
+core or game queue with no cap can still fill it. `jobs next` then prints the count, says wait at the cap and claims nothing; `jobs next --id` goes on. `--auto` reads `job.sh status`
+each tick and starts no `needs_pc` session during an acceptance run, or while a harness cannot answer. `wsc jobs sessions` is new.
+
 ## `wsc audit` (W44, C41)
 
 A new core verb and an `[audit]` table; nothing is required at the bump. A game verb named `audit` in `[cli] verb_dirs` now refuses to load: rename it. The keys a game sets:
