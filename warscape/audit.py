@@ -138,10 +138,11 @@ def hours(seconds):
 
 # ------------------------------------------------------------------ reading main
 def subject_kind(subject, prefix):
-    """(kind, job id or '') of a first-parent subject: `<prefix><n>:` or `<prefix><n> ` is a job; `brief`, `plan`, `meta`, `release` start theirs."""
+    """(kind, job id or '') of a first-parent subject: `<prefix><n>:` or `<prefix><n> ` is a job, but `<prefix><n> brief` is that job's brief (napoleon's
+    early form); `brief`, `plan`, `meta`, `release` start theirs."""
     m = re.match(rf'({re.escape(prefix)}\d+)[: ]', subject)
     if m:
-        return 'job', m.group(1)
+        return ('brief', '') if re.match(r' brief\b', subject[m.end(1):]) else ('job', m.group(1))
     for kind in ('brief', 'plan', 'meta', 'release'):
         if re.match(rf'{kind}\b', subject):
             return kind, ''

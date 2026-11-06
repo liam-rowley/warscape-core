@@ -616,6 +616,17 @@ class Throughput(Case):
         k = f.audit()['metrics']['throughput']['details']['kinds']
         self.assertEqual(k, {'job': 2, 'brief': 2, 'plan': 1, 'meta': 1, 'release': 1, 'other': 1})
 
+    def test_an_id_then_brief_is_a_brief_merge_and_no_job(self):
+        self.assertEqual(A.subject_kind('T6 brief: a diff (#21)', 'T'), ('brief', ''))
+        self.assertEqual(A.subject_kind('T38: row and brief (#3)', 'T'), ('job', 'T38'))
+        self.assertEqual(A.subject_kind('T7 briefing fix (#4)', 'T'), ('job', 'T7'))
+        f = self.fixture('[audit]\nhot_file_min = 1\n')
+        f.commit('T6 brief: a diff (#1)', {'docs/A.md': 'a\n'}, 3)
+        f.merge_job(7, 3, {'docs/B.md': 'b\n'})
+        rec = f.audit(only=['hot_files', 'throughput'])
+        self.assertEqual((rec['window']['job_merges'], rec['metrics']['hot_files']['value']), (1, {'docs/B.md': 1}))
+        self.assertEqual(rec['metrics']['throughput']['details']['kinds']['brief'], 1)
+
 
 def gh_down(argv, **kw):
     if argv[0] == 'gh':

@@ -12,7 +12,7 @@ A finding is `{id, metric, subject, severity, value, threshold, direction, evide
 it. `direction` is the worse way: `above` or `below`. Severity is `medium` unless the rule says otherwise.
 
 ## How a merge is read
-First-parent commits of main. A subject starting `<[jobs] id_prefix><n>:` or `<id> ` is a job merge; `brief`, `plan`, `meta` and `release` start theirs; the rest are `other`
+First-parent commits of main. A subject starting `<[jobs] id_prefix><n>:` or `<id> ` is a job merge, except `<id> brief`, a brief merge; `brief`, `plan`, `meta` and `release` start theirs; the rest are `other`
 (`throughput` details, `kinds`). A job can merge twice (W38: its row, then its work): each merge counts in `hot_files`, the id once elsewhere, measured to its last merge. No
 rename detection: a move touches both names.
 
