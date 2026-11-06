@@ -26,7 +26,7 @@ retire_after_days = 0     # stays off in the core (C33): its tools are used thro
 
 [docs]
 max_kb = 30          # living-doc cap in KiB; dated records (a YYYY-MM-DD in the file name, or under records/ reports/ runs/) are exempt
-path_ignore = ["plan/", "brief/", "meta/", "job/", "release/",   # branch-name prefixes, not folders (doc_paths gate, W28)
+path_ignore = ["plan/", "brief/", "meta/", "decide/", "job/", "release/",   # branch-name prefixes, not folders (doc_paths gate, W28)
                "release/vX.Y.Z",                                 # the release branch pattern (W29): `.Z` reads as a file extension
                "core/", "reports/", "runs/", "records/",         # a game's core submodule; the dated-record folder names
                # other repos' paths, named on purpose (folders the core does not have; review W28 round 1):
