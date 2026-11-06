@@ -1,0 +1,11 @@
+{
+  "id": "saves.esf_diff",
+  "kind": "script",
+  "path": "saves/esf_diff.py",
+  "purpose": "list changed values, added and removed records and record-array items between two saves, by record path (NAME[i], NAME#n, @N = child position)",
+  "usage": "python3 -I saves/esf_diff.py A.save B.save [--under PATH] [--max N] [--ignore-float EPS] [--skip NAME,NAME|@<game>/noise.txt]",
+  "when": "mapping which records encode a game state from two saves made one action apart (saves/SAVE_FORMAT.md), and checking that a recipe changed only what it meant to; read-only, offset based (two files in memory, no tree objects)",
+  "not_a_verb": "a game-agnostic ESF reader run on the PC against saves outside the repo (warscape-core candidate, D10)",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

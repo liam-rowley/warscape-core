@@ -398,11 +398,55 @@ class CoreMode(Branches, unittest.TestCase):
             self.assertRefused(res, 'a plan/ branch may only touch', JUDGED)
             self.assertIn('warscape/policy.py', self.note(res[1]))
 
-    def test_bypass_4_an_empty_decisions_key_on_the_head_keeps_the_file_append_only(self):
-        dec = self.text('docs/DECISIONS.md').replace('| C1 | 2026-10-28 |', '| C1 | 2025-10-28 |', 1)
-        self.branch('meta/dec', {'wsc.toml': self.toml().replace('decisions = "docs/DECISIONS.md"', 'decisions = ""'), 'docs/DECISIONS.md': dec})
+    def test_bypass_4_an_empty_decisions_key_on_the_head_keeps_the_rows_append_only(self):
+        dec = self.text('registries/decisions/C1.json').replace('2026-10-28', '2025-10-28', 1)
+        self.branch('meta/dec', {'wsc.toml': self.toml().replace('decisions = "registry:decisions"', 'decisions = ""'), 'registries/decisions/C1.json': dec})
         for res in (self.ci('meta/dec'), self.local('meta/dec')):
-            self.assertRefused(res, 'docs/DECISIONS.md is append only: rows C1 were changed', JUDGED)
+            self.assertRefused(res, 'registries/decisions is append only: C1.json was changed', JUDGED)
+
+    def test_w43_a_changed_row_is_refused_with_and_without_a_replacing_row(self):
+        dec = self.text('registries/decisions/C36.json').replace('"yes"', '"no"', 1)
+        new = '{"id": "C261105-a3f2", "date": "2026-11-05", "who": "t", "decision": "Replaces C36.", "reversible": "yes", "replaces": ["C36"]}\n'
+        self.branch('plan/edit', {'registries/decisions/C36.json': dec})
+        self.branch('plan/both', {'registries/decisions/C36.json': dec, 'registries/decisions/C261105-a3f2.json': new})
+        for name in ('plan/edit', 'plan/both'):
+            self.assertRefused(self.local(name), 'registries/decisions is append only: C36.json was changed', JUDGED)
+
+    def test_w43_two_branches_mint_rows_and_the_second_needs_no_merge(self):
+        rows = {n: '{"id": "%s", "date": "2026-11-05", "who": "t", "decision": "A.", "reversible": "yes"}\n' % n for n in ('C261105-aaaa', 'C261105-bbbb')}
+        self.branch('plan/one', {'registries/decisions/C261105-aaaa.json': rows['C261105-aaaa']})
+        self.branch('plan/two', {'registries/decisions/C261105-bbbb.json': rows['C261105-bbbb']})
+        for name in ('plan/one', 'plan/two'):
+            res = self.local(name)
+            self.assertEqual(res[0], 0, res[1])
+
+    def w43_stale(self):
+        """(the base after the frozen key, the commit before it): the merge base a branch cut before W43 has, whose head's wsc.toml lacks the key."""
+        git(self.d, 'checkout', '-q', '-f', '-B', 'w43-before', 'main')
+        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(), flags=re.M)})
+        git(self.d, 'checkout', '-q', '-f', '-B', 'w43-after', 'w43-before')
+        self.commit({'wsc.toml': self.toml()})
+        self.back()
+        self.assertNotIn('decisions_retired', self.toml('w43-before'))
+        return 'w43-after', 'w43-before'
+
+    def test_w43_a_stale_markdown_row_is_refused_by_the_bases_rules(self):
+        """Review round 1: the head's own `registries` gate has no key and passes, and `docs/*` is in the plan globs: only the base's rule stops it."""
+        base, start = self.w43_stale()
+        table = self.text('docs/DECISIONS.md')
+        self.branch('plan/stale-md-row', {'docs/DECISIONS.md': table + '| C999 | 2026-11-06 | t | Stale. | yes |\n'}, start=start)
+        self.assertRefused(self.policy('plan/stale-md-row', base), 'docs/DECISIONS.md is frozen: its table differs from w43-after')
+        self.branch('plan/stale-md-prose', {'docs/DECISIONS.md': 'Prose first.\n\n' + table}, start=start)
+        res = self.policy('plan/stale-md-prose', base)
+        self.assertEqual(res[0], 0, res[1] + res[2])
+
+    def test_w43_the_follow_up_that_deletes_the_frozen_file_passes(self):
+        git(self.d, 'checkout', '-q', '-f', '-B', 'meta/retire-decisions-md', 'main')
+        git(self.d, 'rm', '-q', 'docs/DECISIONS.md')
+        self.commit({'wsc.toml': re.sub(r'^decisions_retired = .*\n', '', self.toml(), flags=re.M)})
+        self.back()
+        res = self.local('meta/retire-decisions-md')
+        self.assertEqual(res[0], 0, res[1] + res[2])
 
     def test_a_release_branch_is_judged_by_the_bases_rules(self):
         """W29 (C27): release/vX.Y.Z may change only VERSION, one step above the base's; a head that widens its own kind changes nothing."""

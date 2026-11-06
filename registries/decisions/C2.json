@@ -1,0 +1,7 @@
+{
+  "id": "C2",
+  "date": "2026-10-28",
+  "who": "Liam",
+  "decision": "Python 3.12, standard library only, so CI and a fresh clone need no installs.",
+  "reversible": "yes"
+}

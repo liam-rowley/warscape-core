@@ -1,0 +1,7 @@
+{
+  "id": "C28",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W25), reversible",
+  "decision": "**A running watcher never weakens `exe_check`.** A `watcher.ini` reload keeps the value in force when the ini now asks for `warn` (logged once, `exe_check_refused` in `watcher.status`; the other keys still apply), and a `restart`/`update` exit (3/4) writes `restart.carry` so the next start takes the stricter of carry and ini (a carry older than 5 minutes is ignored). `exe_check=warn` takes effect only when the watcher is stopped and started by hand (Liam). The launch gate hashes the exe on every launch; only the status check caches (path, size, mtime, creation time). Not covered: a watcher that crashes (any other exit) restarts through `watch.cmd` without a carry and reads the ini as written. Raised by the 2026-11-03 audit (napoleon-remastered `docs/audits/AUDIT_2026-11-03.md`, H1). Reversible: `Reload-ExeCheck`, `Resolve-ExeCheck` and `restart.carry` in `harness/watcher.ps1`",
+  "reversible": "yes"
+}

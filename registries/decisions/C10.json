@@ -1,0 +1,7 @@
+{
+  "id": "C10",
+  "date": "2026-10-29",
+  "who": "proposed (Claude, napoleon J5)",
+  "decision": "`core_pin` checks the tag (B5): a game's pin is `vX.Y.Z` (lower-case v) and must be a tag on the core checkout's HEAD whenever the checkout has tags (a shallow CI submodule has none, so VERSION alone is compared there); inside the core, every tag on HEAD is `v` + `VERSION`. The existing tag `V0.1.0` breaks this: the next release is tagged lower-case.",
+  "reversible": "yes"
+}

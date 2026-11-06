@@ -1,0 +1,11 @@
+{
+  "id": "wsc.reg",
+  "kind": "verb",
+  "path": "warscape/verbs/reg.py",
+  "purpose": "Change, check and render registries (rows + JSON Schema + generated Markdown view): add a row, set fields, remove rows nothing points at, check everything, re-render views, move a registry between JSONL and one-file-per-row storage.",
+  "usage": "wsc reg add <reg> key=value key:=<json> ... | wsc reg add tools <path>... [--id ID] [--status S] [--missing] | wsc reg set <reg> <id> key=value key:=null ... | wsc reg remove <reg> <id>... | wsc reg check [<reg>...] | wsc reg render [<reg>...] [--out DIR] | wsc reg migrate <reg> --to dir|jsonl",
+  "when": "whenever a registry fact changes (a new tool, scenario, asset, engine site, fact ...); `check` runs in the gates; `render` after a hand edit of a row file or a merge; `migrate` once, to switch a registry's storage.",
+  "verb": "reg",
+  "status": "live",
+  "last_used": "2026-10-28"
+}

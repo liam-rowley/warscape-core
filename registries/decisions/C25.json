@@ -1,0 +1,7 @@
+{
+  "id": "C25",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W24)",
+  "decision": "**The build id names one DLL.** The mingw-w64 toolchain is pinned by exact package versions (and the build image by digest) in a committed build-id input, `proxy/tools/toolchain.py` (the `toolchain` role), and checked at build time: `build.sh` refuses a toolchain off the pin (exit 2) and `WSP_TOOLCHAIN=any` builds it with a `-dirty` id. The installed compiler is never measured into the id, so rule 79 of the first consumer recomputes it from committed content with no compiler (the version lines also miss the package revision and `mingw-w64-i686-dev`). The DLL compiles tracked sources only (`build_id.py --sources`; an untracked or ignored source under the core sources or the adapter refuses the build) and logs its own file sha256 at init, synchronously under the loader lock (the `self_hash` line, `docs/PROXY_BUILD.md`). The runner image stays outside the CI pass-marker key.",
+  "reversible": "yes"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "harness.vdisplay_probe",
+  "kind": "script",
+  "path": "harness/vdisplay_probe.ps1",
+  "purpose": "the virtual display tool: probe the Virtual Display Driver's modes (CDS_TEST), check it is the one display at the wanted size (-Check), set its mode (-Set), move its origin (-Origin) and put both back (-Restore: the saved origin if it is legal and applies, else the saved mode at the display's current origin, 'position gone'); every change touches ONLY the display selected by name, never a real monitor",
+  "usage": "powershell -NoProfile -ExecutionPolicy Bypass -File vdisplay_probe.ps1 [-Test 1920x1080,2560x1440] [-Hz n] [-Name \"Virtual Display Driver\"] | -Check -Size WxH | -Set WxH [-Hz n] -SaveTo <json> | -Origin X,Y -SaveTo <json> | -Restore <json>   (as a watcher ps1 job or called by the watcher's launch; exit 0 ok, 2 bad arguments, 3 no unique virtual display (VIRTUAL MISSING), 4 wrong size (VIRTUAL WRONG SIZE), 5 apply failed or did not verify, 6 mode not offered, 7 refused (primary, name mismatch, overlap, -SaveTo exists))",
+  "when": "before every headless launch (the watcher runs -Check, then -Set when the size differs, and -Restore after the game exits); to probe which modes the driver offers; to move the virtual display's origin in a topology test (the only display change an agent may make)",
+  "not_a_verb": "runs on the PC under Windows PowerShell 5.1, outside the repo checkout",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

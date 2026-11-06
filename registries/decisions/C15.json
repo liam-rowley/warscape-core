@@ -1,0 +1,7 @@
+{
+  "id": "C15",
+  "date": "2026-11-01",
+  "who": "proposed (Claude, napoleon J55)",
+  "decision": "**Registry storage and views are a repo's choice, opt-in** (`wsc.toml` `[storage] dir`, `[views] commit`): a registry may keep one canonical file per row (`<name>/<id_to_file(id)>.json`, indented, name derived from the id by a reversible Windows-safe percent-encoding and checked against it), and views may be written to a git-ignored folder and checked only for rendering. Declared by the repo, not the schema, because one game's merge pattern is not a property of a core schema (B2 is unbuilt). Defaults keep the 0.5.0 layout byte for byte.",
+  "reversible": "yes"
+}

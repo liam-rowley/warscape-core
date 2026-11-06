@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/decisions.schema.json",
+  "title": "Decisions",
+  "description": "One row per decision, one file per row, append only: `wsc policy` refuses a row changed, moved or removed, and a reversal is a new row whose `replaces` names the old one. Old ids keep their numbers; a new id is minted (`wsc reg add <registry> --mint`), so two branches never share a next number.",
+  "type": "object",
+  "required": [
+    "id",
+    "date",
+    "who",
+    "decision",
+    "reversible"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z]([1-9][0-9]*|[0-9]{6}-[0-9a-f]{4})$"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "who": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reversible": {
+      "type": "string",
+      "minLength": 1,
+      "description": "yes or no; rows imported from a Markdown table keep the words they had"
+    },
+    "replaces": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "x-ref": "decisions"
+      },
+      "description": "the rows this one reverses or amends"
+    }
+  },
+  "x-view": {
+    "title": "Decisions",
+    "columns": [
+      "id",
+      "date",
+      "who",
+      "decision",
+      "reversible"
+    ],
+    "sort": [
+      "date",
+      "id"
+    ],
+    "full": true
+  }
+}

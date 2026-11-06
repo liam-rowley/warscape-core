@@ -49,7 +49,7 @@ the branch merge), and findings ranked **blocker**, **should-fix**, **later**, e
   to `merge after fixes`; once that session is gone, a fresh round goes on top, and its first commit clears the commits it descends from (an old round is never edited).
 - A job that touches a workflow: check that its brief on the base named each file. `policy` only warns when it did not (W36), so clear that warning yourself: an unnamed workflow is a blocker unless you read it and it posts no check.
 - Leave blockers and larger items as findings for the job chat.
-- **Later** items for the core go to warscape-core `docs/BACKLOG.md` through a warscape-core pull request; for the repo itself, into the review.
+- **Later** items for the core go in a `later` row of the warscape-core jobs registry, through a `plan/` pull request there; `later` rows are picked up batched by area, not one job each. For the repo itself, into the review.
 - Write the review into `jobs/<id>/review.md` on the branch as a round section at the **top** of the file:
   `## Round N (YYYY-MM-DD, branch job/<id> at <sha>)`, with exactly one verdict line inside it. Rounds are newest first, numbered from 1 with no gap, at most 3;
   never edit an earlier round (in round 2 and 3, read it and check its findings were answered in `## Fix round N-1` of the report). `wsc jobs check`

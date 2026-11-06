@@ -1,0 +1,11 @@
+{
+  "id": "wsc.crash",
+  "kind": "verb",
+  "path": "warscape/verbs/crash.py",
+  "purpose": "Name the frames of a proxy crash dump from anywhere: read a minidump (exception, modules, the faulting thread's stack bytes) and symbolise it against the GNU ld map of the build that crashed (the map and its sidecar CI keeps as proxy-map-<build id>, or a release attaches).",
+  "usage": "wsc crash symbolise <dump> [--map <d3d9.map> | --build-id <id> [--run <run id>] [--repo OWNER/NAME]] [--log <proxy.log>] [--dll <d3d9.dll>] [--module <name>] [--sites <engine_sites.json[l]>] [--force-map] [--json]   (exit 0 the exception frame named in the DLL, 1 the dump parses but names no frame in the DLL, 2 refused: bad dump, wrong map, no map)",
+  "when": "a crash left <mod>\\\\dumps\\\\<launch id>_<code>.dmp (or a WER LocalDumps dump): run it in the cloud or on the PC, no debugger; docs/PROXY_BUILD.md \"Symbolising a crash\".",
+  "verb": "crash",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

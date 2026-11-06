@@ -1,0 +1,11 @@
+{
+  "id": "wsc.find",
+  "kind": "verb",
+  "path": "warscape/verbs/find.py",
+  "purpose": "One search across every registry (tools, scenarios, assets, UI elements, engine sites, config keys, hotkeys, engine facts; plus the core's tools from a game repo), and the game's exe string index for exe-shaped words.",
+  "usage": "wsc find <words> [--in tools,scenarios,exe_strings] [--all] [--exe] [-n 20] [--json]",
+  "when": "before writing a tool, probing the game or searching the repo: look it up first (reuse before you write); an exe-shaped word (gfx_hardware_shadows, CampaignUI) also searches the exe's strings.",
+  "verb": "find",
+  "status": "live",
+  "last_used": "2026-10-28"
+}

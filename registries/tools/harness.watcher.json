@@ -1,0 +1,11 @@
+{
+  "id": "harness.watcher",
+  "kind": "script",
+  "path": "harness/watcher.ps1",
+  "purpose": "the PC watcher: runs job requests dropped into <root>\\jobs\\ by agents through harness/core/job.sh (control jobs launch/kill/profile/status/noop/restart/update, cmd and ps1 scripts) one at a time, enforces the game lock, watches the game for hangs, restores config profiles byte for byte",
+  "usage": "powershell -NoProfile -ExecutionPolicy Bypass -File watcher.ps1 [-Root <dir>] [-Adapter <adapter.json>]   (started by watch.cmd; protocol, layout and settings: harness/README.md)",
+  "when": "runs permanently on the PC after \"Install watcher.cmd\"; agents never start it, they submit jobs with harness/core/job.sh",
+  "not_a_verb": "a Windows PowerShell 5.1 service loop that runs on the PC, not a repo operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

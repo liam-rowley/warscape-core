@@ -1,0 +1,11 @@
+{
+  "id": "harness.tests.test-integration",
+  "kind": "script",
+  "path": "harness/tests/Test-Integration.ps1",
+  "purpose": "integration host tests for the harness on Windows: a real watcher (through watch.cmd) with fake games, driven by job files; refusals, lock, launch/kill, zombie, profiles, auto-restore, hang dump and archive, timeouts, queue rules, update with rollback, installer and uninstaller",
+  "usage": "powershell -NoProfile -ExecutionPolicy Bypass -File Test-Integration.ps1 [-Repo <repo root>] [-Only <case-name regex>] [-Repeat <n>]   (CI: GitHub's Windows runner, Windows PowerShell 5.1; needs python for the real-kit test)",
+  "when": "on every push (CI job harness-windows); never on the PC, it starts and kills processes named Fake*.exe and sets the time zone of the machine while it runs",
+  "not_a_verb": "a PowerShell test script, not a repo operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "C7",
+  "date": "2026-10-28",
+  "who": "proposed (Claude, PR 1)",
+  "decision": "Registry JSONL merges by union (`.gitattributes`); a union that keeps two versions of a row fails `wsc reg check` (duplicate id) until fixed.",
+  "reversible": "yes"
+}

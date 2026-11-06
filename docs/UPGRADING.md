@@ -100,3 +100,7 @@ What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROX
   retires its own copy's `tools` row at the bump.
 - **Proof on a PC:** host tests model the switches; only the game shows the fix works. After the bump, change the resolution in the game with the key on
   and read the log lines above. The wine smoke has no DXVK window, so it cannot.
+
+## Decisions as row files and `later` rows (core W43)
+
+Nothing is forced: a repo keeps its Markdown decisions file, and a pin bump past W43 changes nothing until it opts in (CONSUMING_OPTIONS.md, "Decisions as one file per row"). The `later` status and the `backlog_id` and `area` fields are in the core's jobs schema from this release on.

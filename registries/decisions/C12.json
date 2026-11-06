@@ -1,0 +1,7 @@
+{
+  "id": "C12",
+  "date": "2026-10-29",
+  "who": "proposed (Claude, napoleon J5)",
+  "decision": "Every git subprocess the core runs drops the repository-selecting `GIT_*` variables git exports to hooks (`warscape/repo.py` `git_env`): in a worktree the pre-push hook's `GIT_DIR` made `core_pin` read the game's index and refuse the push.",
+  "reversible": "yes"
+}

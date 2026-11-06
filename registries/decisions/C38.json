@@ -1,0 +1,7 @@
+{
+  "id": "C38",
+  "date": "2026-11-04",
+  "who": "proposed (Claude, core W40)",
+  "decision": "**Rule A's severity is a `[policy]` key, and a fresh round clears it.** Amends C30's rule A: `[policy] reviewer_code` is `warn` (the default) or `error`, and the core's `wsc.toml` sets `error`, so a `merge` round over reviewer code is refused here while a game keeps the warning until it opts in at a pin bump. Key over outright because the W40 scan found 1 core hit since W27 (W29), not 0. A commit that the first commit of a newer round descends from is no longer a hit, in either mode (ancestry, not log order; a round's later edits of itself clear nothing): rule C keeps the old verdict and a fresh session may not edit it, so a stranded `merge` round could otherwise never be cleared. C28's file set is unchanged. The scan is now `wsc policy --scan`.",
+  "reversible": "yes"
+}

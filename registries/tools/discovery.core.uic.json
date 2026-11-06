@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.uic",
+  "kind": "script",
+  "path": "discovery/uic.py",
+  "purpose": "parse and re-serialise UI layout files byte for byte (V009-V033 of the earlier game; V039 of the later one and the uied.templates v18 and v35 records)",
+  "usage": "import uic; doc = uic.parse(bytes, name); uic.serialise(doc) == bytes   |   python3 discovery/uic.py <folder>  (round-trip report)",
+  "when": "any reading or editing of a layout (J6 layouts pass, J10 UI atlas, later the scale work); extend SPEC when a version's field is decoded",
+  "not_a_verb": "a binary codec library, ported from empire-remastered ui_scale_mod/tools/uic.py (J6: V039 state_ref, animations; J10: V039 transitions and keyframe state changes)",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

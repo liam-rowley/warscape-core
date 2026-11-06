@@ -1,0 +1,7 @@
+{
+  "id": "C1",
+  "date": "2026-10-28",
+  "who": "Liam",
+  "decision": "The core holds the game-agnostic machinery (`napoleon-remastered` `docs/plans/PLAN.md` section 4; its D10, D18); game repos pin a released version and never patch it in place. Empire is not modified until it moves onto the core.",
+  "reversible": "no"
+}

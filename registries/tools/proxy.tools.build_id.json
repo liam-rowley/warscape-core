@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.build_id",
+  "kind": "script",
+  "path": "proxy/tools/build_id.py",
+  "purpose": "print the 12-hex build id of the DLL inputs (their git object ids at a revision, each under a fixed role name), plus -dirty when an input differs from HEAD; list the core sources the DLL compiles (tracked only)",
+  "usage": "python3 proxy/tools/build_id.py [--root <game repo>] [--rev HEAD] [--no-dirty] [--inputs | --sources]   (--inputs: print each role, path and object id instead; --sources: the tracked top-level *.cpp of the core sources folder, byte-sorted, one per line, exit 2 naming any untracked or ignored source file under it or the adapter folder; default root: proxy/tools/layout.py game-root)",
+  "when": "build.sh calls it for every DLL build (the id, then --sources for dll, all and repro); tools/pr_policy.py imports it for rule 79; run it by hand to see which id a DLL or a ledger line should carry",
+  "not_a_verb": "a build helper shared by build.sh and the policy check, not a registry operation",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

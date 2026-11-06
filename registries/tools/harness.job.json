@@ -1,0 +1,11 @@
+{
+  "id": "harness.job",
+  "kind": "script",
+  "path": "harness/job.sh",
+  "purpose": "agent helper on the PC (Git Bash): submit a watcher job, block inside ONE call until its result (or a timeout), print the output, return the job's exit code (refused 2, no answer 124); also take, refresh and release the game lock",
+  "usage": "job.sh [--adapter FILE] <owner> <file|-> [timeout_s (default 100)]  |  job.sh adapter  |  job.sh [--adapter FILE] lock [--wait S] <owner|-> <session> <purpose> [hang_s]  |  touch <owner>  |  unlock <owner> [--force]  |  vdisplay-aside <owner|-> <session> <why>  |  holds <owner>  |  status  |  root  |  scratch <owner>  |  ctl <owner> '<verb args>' [wait_s (default 100)]",
+  "when": "every time an agent runs something on the PC (launch, kill, profile, scripts): the watcher root comes from the adapter (state_dir + watcher_subdir), never a default path; waiting belongs here, not in repeated agent calls",
+  "not_a_verb": "a bash helper agents call directly from Git Bash (python3 only reads JSON); the PC side of the protocol is harness/watcher.ps1",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

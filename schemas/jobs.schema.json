@@ -11,7 +11,7 @@
     "description": {"type": "string", "minLength": 1, "description": "the scope in one or two lines (what a brief must cover)"},
     "title": {"type": "string", "minLength": 1},
     "phase": {"type": "integer", "minimum": 0},
-    "status": {"enum": ["needs_brief", "queued", "review", "fix", "done", "blocked"], "description": "fix: a review round asked for changes; only a reviewer sets it"},
+    "status": {"enum": ["later", "needs_brief", "queued", "review", "fix", "done", "blocked"], "description": "fix: a review round asked for changes; only a reviewer sets it. later (W43): recorded and searchable, ignored by jobs next, jobs review and the autopilot; set needs_brief to promote it, batched by area"},
     "model": {"enum": ["sonnet", "opus"], "description": "opus only with the reason in the brief"},
     "needs_pc": {"type": "boolean"},
     "semver": {"enum": ["patch", "minor", "major", "none"], "description": "the release level the job's merge asks for (W29, C27: the release workflow owns VERSION); required from status queued on for ids at or above [jobs] semver_from; none = no release"},
@@ -20,6 +20,8 @@
     "report": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/report\\.md$"},
     "review": {"type": "string", "pattern": "^jobs/[A-Z][0-9]+/review\\.md$"},
     "blocked_by": {"type": "string", "minLength": 1, "description": "why, when status is blocked"},
+    "backlog_id": {"type": "string", "pattern": "^[A-Z][0-9]+$", "description": "W43: the number this item had in the old backlog table; `wsc find <number>` resolves it, and job files cite it"},
+    "area": {"type": "string", "minLength": 1, "description": "W43: what a later row is batched under when it is picked up"},
     "budget_lifts": {
       "type": "array",
       "description": "W31: each raise of the job's call budget, oldest first (`wsc reg set jobs <id> budget_lifts:='[...]'`). The brief stays as written; the newest `to` is the budget `wsc jobs check` holds the report's Usage line to, and each `from` is the previous `to`, the brief's budget for the first",

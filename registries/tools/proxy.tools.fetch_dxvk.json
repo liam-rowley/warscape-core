@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.fetch_dxvk",
+  "kind": "script",
+  "path": "proxy/tools/fetch_dxvk.py",
+  "purpose": "download the pinned stock DXVK release tarball, verify its sha256, extract x32/d3d9.dll as d3d9_dxvk.dll plus DXVK's LICENSE, and verify both",
+  "usage": "python3 proxy/tools/fetch_dxvk.py [--out build/dxvk] [--print-pin]",
+  "when": "before kitting the proxy for the PC (pc_deploy.py kit runs it); to move to a newer DXVK change PIN below (version, URLs, three sha256) in its own commit",
+  "not_a_verb": "needs network and writes build output, not a registry operation; pc_deploy.py and agents call it directly",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

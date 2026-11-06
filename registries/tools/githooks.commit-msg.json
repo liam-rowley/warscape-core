@@ -1,0 +1,11 @@
+{
+  "id": "githooks.commit-msg",
+  "kind": "script",
+  "path": ".githooks/commit-msg",
+  "purpose": "Refuse a commit whose message has no `Claude-Session:` trailer with a value (`wsc policy --commit-msg`; git reads a trailer only in the last paragraph, with Co-Authored-By); silent unless the repo sets `[policy] commit_msg_hook = true`.",
+  "usage": "git config core.hooksPath .githooks   (in a game repo with the core at core/: core/.githooks), then opt in with `[policy] commit_msg_hook = true` in wsc.toml. Fix a refusal with git commit --trailer \"Claude-Session: <session id>\"; a human commit bypasses once with git commit --no-verify.",
+  "when": "automatic on every git commit (git passes the message file); merge commits are skipped.",
+  "not_a_verb": "git runs hooks by file name; this one only calls `wsc policy --commit-msg`.",
+  "status": "live",
+  "last_used": "2026-11-04"
+}

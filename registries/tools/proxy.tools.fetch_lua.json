@@ -1,0 +1,11 @@
+{
+  "id": "proxy.tools.fetch_lua",
+  "kind": "script",
+  "path": "proxy/tools/fetch_lua.py",
+  "purpose": "download lua-5.1.1.tar.gz (pinned sha256), extract src/*.c|h into build/lua/src and apply the three engine patches",
+  "usage": "python3 proxy/tools/fetch_lua.py [--out build/lua]",
+  "when": "build.sh runs it before compiling the DLL (the Lua bridge needs lua_* that work on the ENGINE's lua_State); never commit the output",
+  "not_a_verb": "needs network and writes build output, not a registry operation; build.sh calls it",
+  "status": "live",
+  "last_used": "2026-10-31"
+}

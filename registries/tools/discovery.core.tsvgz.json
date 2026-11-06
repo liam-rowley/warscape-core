@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.tsvgz",
+  "kind": "script",
+  "path": "discovery/tsvgz.py",
+  "purpose": "write and read the committed discovery tables (discovery/assets/index.tsv.gz, discovery/loc/keys.tsv.gz) so a re-run diffs cleanly",
+  "usage": "from tsvgz import write, read, problems; write(path, header, rows); header, rows = read(path); problems(path) -> [str]   (library)",
+  "when": "every J7 pass that commits a large table; `wsc discovery check` runs problems() on each committed file",
+  "not_a_verb": "a library module imported by the discovery passes and the discovery verb",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

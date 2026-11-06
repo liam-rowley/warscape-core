@@ -1,0 +1,11 @@
+{
+  "id": "discovery.core.api_inventory",
+  "kind": "script",
+  "path": "discovery/api_inventory.py",
+  "purpose": "walk compiled UI scripts symbolically and list the engine API they use (globals, table functions, component methods, OnXxx handlers)",
+  "usage": "python3 discovery/api_inventory.py <dir of .luac> --json out.json   (library: Inventory is used by lua_api.py)",
+  "when": "J6 Lua API pass; ported unchanged from empire-remastered ui_scale_mod/tools/api_inventory.py (runs on the later game's scripts as-is, imports luachunk from this folder)",
+  "not_a_verb": "a static reader for game files, not a registry operation",
+  "status": "live",
+  "last_used": "2026-11-03"
+}

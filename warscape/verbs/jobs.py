@@ -1,7 +1,7 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
 purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix.
-usage: wsc jobs check | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE]
+usage: wsc jobs check | jobs later --from-md <file> [--area <name>] [--check] | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE]
 when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo; `usage` to fill a report's `Usage:` line before status=review.
 verb: jobs
 
@@ -35,13 +35,14 @@ from datetime import datetime, timezone
 
 from .. import jobq as J
 from .. import worktrees as W
+from ..registry import load_all, md_table_rows
 
 NAME = 'jobs'
 HELP = 'the job queue: check it, claim the next job to build (next), to review (review) or to fix (fix), view it, its stale worktrees (worktrees), a report\'s usage line (usage)'
 
 
 def add_arguments(p):
-    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees', 'usage'])
+    p.add_argument('action', choices=['check', 'next', 'review', 'fix', 'view', 'worktrees', 'usage', 'later'])
     p.add_argument('job', nargs='?', help='usage: the job id (every other action takes --id)')
     p.add_argument('--offline', action='store_true', help='use local remote-tracking refs instead of asking origin (a single-branch or shallow clone sees only the branches it fetched)')
     p.add_argument('--id', help='next, review, fix: this job only (J<n>): its steps when it is ready, else exit 1 with the reason')
@@ -57,12 +58,38 @@ def add_arguments(p):
     p.add_argument('--interval', type=int, default=300, help='view --serve --auto: seconds between autopilot ticks (default %(default)s)')
     p.add_argument('--write', action='store_true', help='usage: put the line in jobs/<id>/report.md (replaces the one there, or goes after the first paragraph)')
     p.add_argument('--from-json', metavar='FILE', help='usage: the numbers from this file, the JSON [jobs] usage_cmd prints, instead of running the command')
+    p.add_argument('--from-md', metavar='FILE', help='later: a `| # | Change | Why | Raised |` table; each row becomes a `later` row with the next job id (W43); rows already moved are left alone')
+    p.add_argument('--area', help='later: the area the rows go under (they are picked up batched by area)')
+    p.add_argument('--check', action='store_true', help='later: write nothing; exit 1 naming each table row lost or changed')
     p.add_argument('--session', help='review: the name the round is claimed for (default $WSC_SESSION_ID, $CLAUDE_CODE_SESSION_ID, then user@host)')
 
 
 def refuse(why):
     print(f'jobs: {why}', file=sys.stderr)
     return 1
+
+
+def later(args, ctx):
+    """`jobs later --from-md FILE [--area NAME] [--check]`: move a backlog table into `later` rows, or compare them."""
+    if not args.from_md:
+        return refuse('later needs --from-md FILE')
+    reg = load_all(ctx)['jobs']
+    tables = md_table_rows((ctx.root / args.from_md).read_text(encoding='utf-8'), 4)
+    if args.check:
+        errs = J.later_problems(tables, reg.rows, args.from_md)
+        for e in errs:
+            print(f'jobs: {e}', file=sys.stderr)
+        if not errs:
+            print(f'jobs later: {args.from_md}: {len(tables)} rows, every one a job row')
+        return 1 if errs else 0
+    have = {r.get('backlog_id') for r in reg.rows}
+    n, new = max((J.num(r['id']) for r in reg.rows), default=0), [c for c in tables if c[0] not in have]
+    for i, cells in enumerate(new, 1):
+        reg.add(J.later_row(f'{J.S.prefix}{n + i}', cells, args.area))
+    reg.save()
+    reg.write_view()
+    print(f'jobs later: {args.from_md}: added {len(new)} rows, {len(tables) - len(new)} already there')
+    return 0
 
 
 def usage(args, ctx, by):
@@ -119,6 +146,8 @@ def run(args, ctx):
 
     if args.action == 'usage':
         return usage(args, ctx, by)
+    if args.action == 'later':
+        return later(args, ctx)
 
     if args.action == 'worktrees':   # W26: what a game's setup verb prints (warscape.worktrees.report); --prune removes dead registrations only
         if getattr(args, 'prune', False):
