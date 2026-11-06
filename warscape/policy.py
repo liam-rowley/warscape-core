@@ -252,27 +252,35 @@ def added_decision_files(changed, base_file, head_file, cfg):
     return out
 
 
-GRANT_KINDS = ('meta', 'decide')   # the branch kinds only the owner merges (W132); `decide` is refused as a kind until a base knows it
+GRANT_KINDS = ('meta', 'decide')   # the branch kinds the owner merges, by rule: nothing here sees who merged (W132); `decide` is refused as a kind until a base knows it
 GRANT_JOB = re.compile(r'[A-Z][1-9][0-9]*')
 GRANT_BLOCKED = re.compile(r'[1-9][0-9]* review rounds without merge')
+GRANT_BASE_STATUS = ('queued', 'blocked')   # main's row of a job that ran: `queued` until the job merges, `blocked` after a grant
 
 
-def grant_problems(kind, branch, changed, base_file, head_file, base_rows, cfg):
+def grant_problems(kind, branch, changed, base_file, head_file, base_rows, head_rows, cfg):
     """W132: an added decision row with `grants_round` (one more review round for that job) is refused on every branch kind the owner does not
-    merge (`plan/` merges itself, a `job/` branch is the job's own), and must name a job that is blocked after its rounds on the base."""
+    merge (`plan/` merges itself, a `job/` branch is the job's own). A job's status changes only on its own branch, so main's row of a blocked job
+    still says `queued`: the same pull request sets the row to blocked after its rounds, and the rule reads that head row, as data. The base row
+    must be one a job that ran can have, and a grant says reversible=no, as `read_grants` counts every row."""
     d, errs = cfg.get('decisions_dir'), []
     for p in changed if d else ():
         if not p.startswith(d + '/') or base_file(p) is not None or not (r := decision_row(head_file(p) or '')) or 'grants_round' not in r:
             continue
         job = r['grants_round']
         if kind not in GRANT_KINDS:
-            errs.append(f"{p}: grants_round is the owner's alone: refused on {branch}, put the row on a `meta/` branch, which only the owner merges")
+            errs.append(f"{p}: grants_round is the owner's alone: refused on {branch}, put the row on a `meta/` branch, which the owner merges by rule (nothing enforces who merges)")
         if not isinstance(job, str) or not GRANT_JOB.fullmatch(job):
             errs.append(f'{p}: grants_round {job!r} is not a job id')
         elif (row := base_rows.get(job)) is None:
             errs.append(f'{p}: grants_round {job} is not a row of the jobs registry on the base')
-        elif row.get('status') != 'blocked' or not GRANT_BLOCKED.fullmatch(str(row.get('blocked_by'))):
-            errs.append(f'{p}: grants_round {job}: its row on the base is {row.get("status")}, not blocked by its review rounds')
+        elif row.get('status') not in GRANT_BASE_STATUS:
+            errs.append(f'{p}: grants_round {job}: its row on the base is {row.get("status")}, not {" or ".join(GRANT_BASE_STATUS)}: this job has no review rounds to extend')
+        elif (head := head_rows.get(job) or {}).get('status') != 'blocked' or not GRANT_BLOCKED.fullmatch(str(head.get('blocked_by'))):
+            errs.append(f'{p}: grants_round {job}: its row on this branch is {head.get("status")}, not blocked by its review rounds: set it in the same pull request '
+                        f'(wsc reg set jobs {job} status=blocked blocked_by="<n> review rounds without merge")')
+        if str(r.get('reversible')).lower() != 'no':
+            errs.append(f'{p}: grants_round cannot be reversed (a later row does not cancel it): write reversible=no')
     return errs
 
 
@@ -301,7 +309,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         added = added_decision_files(changed, base_file, head_file, cfg)
     else:
         added = added_decision_rows(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] in changed else []
-    errs += grant_problems(kind, branch, changed, base_file, head_file, base_rows, cfg)
+    errs += grant_problems(kind, branch, changed, base_file, head_file, base_rows, head_rows, cfg)
     if cfg.get('decisions_cite_job') and kind == 'job':   # rule F
         errs += [f"decision row {r['id']} on {branch} must name the brief that required it (add `{m.group(2)}` to the row, or move it to a plan/ branch)"
                  for r in added if not re.search(rf'(?<![A-Za-z0-9]){re.escape(m.group(2))}(?![0-9])', r['text'])]
