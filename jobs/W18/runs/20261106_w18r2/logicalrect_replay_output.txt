@@ -1,0 +1,12 @@
+unaware: ctx 0x6010 per-monitor False
+  \\.\DISPLAY10: prev ok physical (3839, 2160, 7679, 4320) logical (3839, 2160, 7679, 4320) arms False
+  \\.\DISPLAY2: prev ok physical (-2560, 327, 0, 1767) logical (-2560, 327, -512, 1479) arms True
+  \\.\DISPLAY1: prev ok physical (0, 0, 3840, 2160) logical (0, 0, 2560, 1440) arms True
+system: ctx 0x9011 per-monitor False
+  \\.\DISPLAY10: prev ok physical (3839, 2160, 7679, 4320) logical (5759, 3240, 11519, 6480) arms True
+  \\.\DISPLAY2: prev ok physical (-2560, 327, 0, 1767) logical (-3840, 491, -768, 2219) arms True
+  \\.\DISPLAY1: prev ok physical (0, 0, 3840, 2160) logical (0, 0, 3840, 2160) arms False
+pmv2: ctx 0x22 per-monitor True
+  \\.\DISPLAY10: prev ok physical (3839, 2160, 7679, 4320) logical (3839, 2160, 7679, 4320) arms False
+  \\.\DISPLAY2: prev ok physical (-2560, 327, 0, 1767) logical (-2560, 327, 0, 1767) arms False
+  \\.\DISPLAY1: prev ok physical (0, 0, 3840, 2160) logical (0, 0, 3840, 2160) arms False

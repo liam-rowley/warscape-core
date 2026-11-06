@@ -1,5 +1,49 @@
 # W18 review
 
+## Round 2 (2026-11-06, branch job/W18 at cfc8446)
+
+**Verdict: merge.**
+
+Round 1's findings are all answered. B22 now has a working arm on the Windows calls and a measured map, and it ships unproven with the game, which is what the brief allows and what the docs and the report say. This round changed no file outside the job folder and its row.
+
+### Is "B22 arms but is not proven with the game" honest?
+
+Yes, with one word too strong, in the report only.
+
+- **What the claim rests on holds.** I re-ran the probe (run 20261106_w18r2, verified 2026-11-06): the same monitor rects, largest edge difference 1 over all moves, 0 for a whole monitor. I also logged what the fix round did not: `WM_WINDOWPOSCHANGED`, which `GuardProc` passes to `OwnLocked` too, carries the same rect as `WM_WINDOWPOSCHANGING` on all 36 moves, flags `0x421c`. A replay of `LogicalRect`'s calls in its order, with the context from `GetWindowDpiAwarenessContext`, arms an unaware window on DISPLAY1 and DISPLAY2 and never a per-monitor one.
+- **The limit is stated where a reader meets it.** `docs/PROXY_HARNESS.md:83` ("measured with a probe window ... not yet with a game on a scaled target"), `docs/UPGRADING.md:122` ("not yet with a game there"), the report's Limits, the run READMEs. Round 1's false "recognised at a scaled target DPI" has no unqualified copy left in those docs. The `headless.cpp` header states the mechanism without the limit, which is right for a comment on what the code does.
+- **It is within the brief.** Proof c runs only if Liam opts in, and "without it, B22 ships host-tested and its backlog line is reworded to the open PC proof". The deviation from decision 2 is named, with its reason.
+- **The word too strong:** "B22 now arms" (`jobs/W18/report.md:38`). The compiled `LogicalRect` has never returned a logical rect in any run: no log has an `own move armed` line. The sentence is true of the Windows calls, not of an observed arm. The report's own Limits bullet says as much, so nobody is misled, and it does not need a round.
+
+### Findings
+
+No blocker, no should-fix.
+
+### Later (rows, through the `plan/` follow-up)
+
+- **The two new log lines have no budget, and they repeat in the case they exist for.** `proxy/src/headless.cpp:272`, `:347`. `RelocateLocked` runs at every Present while `s_pending` (`:735`) and each run re-arms, and the near-miss line is once per arming, so it is once per frame when a move matches neither rect: the window stays cloaked, `s_pending` stays set, and both lines repeat at frame rate until the launch is killed, with no cap in `LogWrite`. Seen by reading; it needs the map to be wrong on a scaled target, so no run shows it, and the near-miss line follows the brief's wording. The shared `Budget()` is not the fix: its 40 lines may be spent before a late relocation, and this line is the evidence. It needs its own small count.
+- **The logs cannot name the game window's DPI context.** `jobs/W18/runs/20261106_w18pc2/README.md:18` says "a 96 DPI target: nothing to arm", which is true of an unaware or per-monitor window only: a system-aware window arms on DISPLAY10 too (run 20261106_w18r2). So no arm line rules out system-aware and cannot separate the other two, and if the game is per-monitor, B22's path never runs. One log line of the context at the first placement would settle it, and proof c needs it. The arm line's "(DPI-unaware)" is also wrong for a system-aware window.
+- **Rows W51, W52, W53.** The `plan/` follow-up after this merge: W51 and W53 done; W52 stays `later` as the PC proof at a scaled display, unless Liam accepts this evidence, and it takes the two items above.
+
+### Round 1's findings
+
+- **1, blocker, B22 inert: answered by option (a).** `LogicalRect` (`proxy/src/headless.cpp:192`) reads the target monitor in the window's context and maps through `LogicalOnMonitor`. `PhysicalToLogicalPoint` is gone, and a lint refuses it. `TestLogicalOnMonitor` uses measured rows and feeds them to `IsOwnMove`. Red is real: at 77e10f4 the test names `LogicalOnMonitor` and `display_guard.h` does not. The map reads both monitor rects, which the system-aware rows need; my sketch in round 1 would not have held for them.
+- **2, should-fix, proof b's status quoted: answered.** `b_headless_status_after1.json`: `relocations` 1, rect 3840,0,7680,2160, `on_virtual`. `b1_shot_output.txt` and `b2_shot_output.txt` are committed.
+- **3, should-fix, proofs on the DLL that merges: answered.** All four logs in run 20261106_w18pc2 carry sha256 `5d646e47...` on `self_hash`. `git diff c67d801 cfc8446 -- proxy/` is empty, so the head's source is that DLL's.
+- **Later, proof a's wording: done.** The README calls the log order a bound and the probe the measurement.
+
+### What was checked
+
+- **CI on the fix, per commit:**
+  - **c67d801, run 42232966335, the only code commit of the fix (with its red, 77e10f4, pushed together):** `gates (ubuntu-latest)`, `gates (windows-latest)` (15 ok, 1 warn, 0 failed) and `proxy` ran and passed. `proxy` shows `test_display_guard: 369 passed, 0 failed`, the mingw DLL and the wine smoke passing. `harness-windows` skipped, correctly: no file in the diff matches `[ci.inputs] harness`.
+  - **cfc8446 (head), run 42239465941:** `gates (ubuntu-latest)` ran and passed. `proxy` and `gates (windows-latest)` show **skipped**, and that is a pass marker, not a gap: the `changes` log hit the marker of run 42232966335 for both input trees. I checked why: from c67d801 to head only `jobs/W18/`, `registries/decisions/C261106-bcaa.json` and `registries/jobs/` rows change, none an input of either set. The commits between (2e05859, 71210f1, 631cd99) had no run of their own and need none: they went up with cfc8446 and change nothing the skipped sets read.
+  - **What "on Windows" means here:** `gates (windows-latest)` runs the Python gates and compiles no C++. The C++ is built and tested only in `proxy`, on Linux; the hook, the pump and `LogicalRect` run on Windows only on Liam's PC. The PC proofs cover the hook and the pump, and nothing covers a compiled `LogicalRect` that arms. The run above is the most this CI can say.
+- **Proofs against their files, run 20261106_w18pc2:** a: winevent line present, probe `longest_visible_on_real_ms` 0, the window's `cloaked_ms` 11, status `on_virtual`, `relocations` 0. b: two `relocated and verified`, statuses 1 and 2 with the README's rects, probe 0, `cloaked_ms` 1307, four WARNs (test hooks, crash filter, two expected CLOAKED). d: `relocations` 0, probe 0, one WARN (crash filter). No `matches neither` line anywhere. `pc_deploy_status_before.txt` and `_after.txt` are byte-identical. The discarded launch is labelled and does not count.
+- **Risk-first reading:** `LogicalRect` and the path after it, because a mistake leaves the game cloaked for good. The nested `DpiScope` restores to `PlaceLocked`'s per-monitor scope; `GatePos` passes an own move whole; `PlacementVerified` compares physical rects, and the probe's "now" shows the window lands on the physical target. `MapEdge` is exact at both monitor edges and cannot divide by zero behind the empty-monitor check. A wrong accept costs little: the slack is 1 px, in a 2 s window, and only for a window whose thread sees another rect.
+- **The brief:** scope holds, with round 1's named deviations plus decision 2's. Report's other claims: fixer session differs from the builder and from round 1 (trailers).
+- **Latest origin/main:** b81d55a, fetched again after the gates finished. The branch contains it, 0 commits behind, so the merge brings nothing untested.
+- **Local:** full `wsc gates` at cfc8446 finished: 14 ok, 2 warn, 0 failed in 807.2 s. The warns are `hooks` (the worktree's absolute `core.hooksPath`) and `tests` (1383 passed, 5 skipped: one POSIX hook test, four that need capstone). `wsc policy` before this round refused only for the missing merge verdict and the `done` row.
+
 ## Round 1 (2026-11-06, branch job/W18 at 92c5414)
 
 **Verdict: merge after fixes.**
