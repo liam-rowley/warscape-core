@@ -12,10 +12,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / 'tests'))
-from test_proposals import ID as L, row  # noqa: E402
 
-T, G, W, H = 'P261106-0001', 'P261106-0002', 'P261106-0003', 'P261106-0004'   # tagged open, tagged closed, a class it should not have, a hot_file row
+L, T, G, W, H = 'P261106-aaaa', 'P261106-0001', 'P261106-0002', 'P261106-0003', 'P261106-0004'   # listed, tagged open, tagged closed, a class it should not have, a hot_file row
 NEW, OTHER, AUD = 'P261106-00ff', 'P261106-00fe', 'docs/audits/AUDIT_2026-11-05.json'
 TOML = """registries_dir = "registries"
 [ci]
@@ -37,6 +35,14 @@ owner = "Liam"
 [audit]
 auto_apply = ["doc_cap"]
 """
+
+
+def row(rid=L, **kw):
+    return {'id': rid, 'date': '2026-11-06', 'kind': 'finding', 'finding': 'doc_cap:docs/X.md', 'metric': 'doc_caps', 'class': 'doc_cap', 'question': 'Split it?',
+            'baseline': {'record': AUD, 'value': 29.0, 'threshold': 27.0, 'direction': 'above', 'severity': 'medium', 'evidence': 'It is 29 KB.'},
+            'options': [{'key': 'split', 'kind': 'job', 'summary': 'Split it.', 'recipe': {'title': 'Split', 'description': 'Split it.', 'phase': 1, 'model': 'sonnet', 'needs_pc': False, 'semver': 'none', 'depends_on': []}},
+                        {'key': 'rule', 'kind': 'decision', 'summary': 'Keep it.', 'recipe': {'decision': 'It stays whole.', 'reversible': 'yes'}}],
+            'recommended': 'split', 'status': 'open', **kw}
 
 
 def pjson(r):
