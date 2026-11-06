@@ -983,7 +983,7 @@ def resolve_keys(text, sets):
 def pending_restore(state):
     """The watcher's pending profile restore (<state>/watcher/profiles/_active.json) as a dict, or None. The watcher removes the file once the
     game is closed and the lock released, expired or changed owner; a restore that runs after `set` or `uninstall` puts the old keys back (B39,
-    W94). The watcher never writes `null` or `{}` (it removes the file); those read as none, as the watcher's Get-Active and napoleon's
+    W94). The watcher never writes `null` or `{}` (it removes the file); those read as none, as the watcher's Get-Active and a game's
     profile_active do. A file that cannot be read counts as pending."""
     p = Path(state) / 'watcher' / 'profiles' / '_active.json'
     if not p.exists():

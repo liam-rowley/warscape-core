@@ -878,7 +878,7 @@ class UninstallWaitsForRestore(DeployBase):
 
     def test_each_shape_of_active_json(self):
         # the watcher removes the file when idle (Remove-Quiet) and writes a JSON object when a profile is active; null and {} are what
-        # Get-Active, napoleon's profile_active and the status line's profile_active all read as "none"; a file nobody can read stays pending
+        # Get-Active, a game's profile_active and the status line's profile_active all read as "none"; a file nobody can read stays pending
         for name, raw, pending in (('missing', None, False), ('null', b'null', False), ('empty object', b'{}', False),
                                    ('named', b'{"name": "p", "owner": "o"}', True), ('unreadable', b'\xff\xfe{not json', True)):
             with self.subTest(name):
