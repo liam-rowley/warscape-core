@@ -337,6 +337,17 @@ def gated_by(rows):
     return out
 
 
+def parked(a, lanes):
+    """{id: hours} of the `progress` rows whose branch head is over `max_job_hours` old: claimed and left, so nobody is building them."""
+    branch = {j: f'{"job" if a.rows[j].get("status") == "queued" else "brief"}/{j}' for j, v in lanes.items() if v == 'progress'}
+    if not branch:
+        return {}
+    shas = sorted({a.heads[b] for b in branch.values()})
+    when = dict(line.split() for line in a.git('show', '-s', '--format=%H %ct', *shas).splitlines())
+    age = {j: hours(a.now.timestamp() - int(when[a.heads[b]])) for j, b in branch.items()}
+    return {j: h for j, h in sorted(age.items(), key=lambda kv: J.num(kv[0])) if h > a.cfg['max_job_hours']}
+
+
 def queue(a):
     c = a.cfg
     rows = a.rows
@@ -349,11 +360,13 @@ def queue(a):
     lanes = {r['id']: J.lane({**r, 'needs_pc': False}, rows, branches, on_branch)[0] for r in rows.values()}
     value = {k: sum(1 for v in lanes.values() if v == k) for k, _, _ in J.LANES}
     ready = [j for j, v in lanes.items() if v == 'ready']
-    busy = value['progress'] + value['review'] + value['fix']
+    idle = parked(a, lanes)
+    busy = value['progress'] - len(idle) + value['review'] + value['fix']
     pc = [j for j in ready if rows[j].get('needs_pc')]
     out = []
     if ready and not busy:
-        out.append(finding('idle_queue', 'queue', '', 'high', len(ready), 1, 'above', f'{len(ready)} rows are ready and nothing is in progress, in review or in fix.'))
+        left = f' ({", ".join(idle)} parked: no commit on the branch for over {c["max_job_hours"]} hours)' if idle else ''
+        out.append(finding('idle_queue', 'queue', '', 'high', len(ready), 1, 'above', f'{len(ready)} rows are ready and nothing is in progress{left}, in review or in fix.'))
     s = share(len(pc), len(ready))
     if len(ready) >= c['pc_serial_min'] and s >= c['pc_serial_share']:
         out.append(finding('pc_serial', 'queue', '', 'medium', s, c['pc_serial_share'], 'above', f'{len(pc)} of {len(ready)} ready rows need the PC, which runs one at a time ({s:.0%}).'))
@@ -363,7 +376,7 @@ def queue(a):
             st = rows[j].get('status')
             out.append(finding('chokepoint', 'queue', j, 'high' if st == 'needs_brief' else 'medium', len(g), c['chokepoint_fanout'], 'above',
                                f'{j} ({st}) gates {len(g)} rows that are not done: {", ".join(g)}.'))
-    return value, {'ready': sorted(ready, key=J.num), 'ready_needs_pc': len(pc), 'gating': {j: len(g) for j, g in gated.items() if g}}, out
+    return value, {'ready': sorted(ready, key=J.num), 'ready_needs_pc': len(pc), 'parked': idle, 'gating': {j: len(g) for j, g in gated.items() if g}}, out
 
 
 def round_one_merge(text):

@@ -396,6 +396,52 @@ class Queue(Case):
         self.assertEqual(rec['metrics']['queue']['value']['review'], 1)
         self.assertNotIn('idle_queue', [x['id'] for x in rec['findings']])
 
+    def test_a_parked_branch_is_not_busy_and_the_lanes_do_not_change(self):
+        f = self.fixture()
+        f.commit('plan: rows (#1)', {**f.row('T1', 'queued'), **f.row('T2', 'queued'), **f.row('T3', 'queued')}, 5)
+        f.branch('job/T1')
+        f.commit('the PC plan for the later slot', {'jobs/T1/note.md': 'x\n'}, 3)
+        f.main()
+        rec = f.audit()
+        x = self.finding(rec, 'idle_queue')
+        self.assertEqual(x['value'], 2)
+        self.assertIn('T1 parked', x['evidence'])
+        q = rec['metrics']['queue']
+        self.assertEqual((q['value']['progress'], q['value']['ready']), (1, 2))
+        self.assertEqual(q['details']['parked'], {'T1': 72.0})
+
+    def test_the_branch_head_decides_not_where_it_started(self):
+        f = self.fixture()
+        f.commit('plan: rows (#1)', {**f.row('T1', 'queued'), **f.row('T2', 'queued')}, 5)
+        f.branch('job/T1')
+        f.commit('still building', {'jobs/T1/note.md': 'x\n'}, 0.5)
+        f.main()
+        rec = f.audit()
+        self.assertNotIn('idle_queue', [x['id'] for x in rec['findings']])
+        self.assertEqual(rec['metrics']['queue']['details']['parked'], {})
+
+    def test_a_brief_branch_can_be_parked_and_max_job_hours_is_the_limit(self):
+        f = self.fixture('[audit]\nmax_job_hours = 100\n')
+        f.commit('plan: rows (#1)', {**f.row('T1', 'needs_brief'), **f.row('T2', 'queued')}, 5)
+        f.branch('brief/T1')
+        f.main()
+        self.assertEqual(f.audit()['metrics']['queue']['details']['parked'], {'T1': 120.0})
+        g = self.fixture('[audit]\nmax_job_hours = 200\n')
+        g.commit('plan: rows (#1)', {**g.row('T1', 'needs_brief'), **g.row('T2', 'queued')}, 5)
+        g.branch('brief/T1')
+        g.main()
+        self.assertEqual(g.audit()['metrics']['queue']['details']['parked'], {})
+
+    def test_an_old_branch_in_review_is_still_busy(self):
+        f = self.fixture()
+        f.commit('plan: rows (#1)', {**f.row('T1', 'queued'), **f.row('T2', 'queued')}, 5)
+        f.branch('job/T1')
+        f.commit('report', f.row('T1', 'review'), 4)
+        f.main()
+        rec = f.audit()
+        self.assertNotIn('idle_queue', [x['id'] for x in rec['findings']])
+        self.assertEqual(rec['metrics']['queue']['details']['parked'], {})
+
     def test_no_ready_rows_is_not_idle(self):
         f = self.fixture()
         f.commit('plan: row (#1)', f.row('T1', 'needs_brief'), 1)
