@@ -73,7 +73,6 @@ reviewer_code = "error"    # reviewer code under a `merge` verdict is refused (W
 workflow_paths = [".github/workflows/**", "ci/**"]  # a job's change here that its brief on the base does not name warns (W36)
 bases = ["main"]           # the branches a pull request may target (W36)
 decisions = "registry:decisions"   # one file per row (W43): wsc reg add decisions --mint
-decisions_retired = "docs/DECISIONS.md"   # frozen; the follow-up meta/ branch deletes it and this key (W43 decision 10)
 decision_prefix = "C"
 plan = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/decisions/*", "README.md", "CLAUDE.md"]
 meta = ["docs/*", "docs/**", "jobs/*/brief.md", "registries/jobs/*", "registries/decisions/*", "registries/tools/*", "README.md", "CLAUDE.md", ".github/**", "ci/**", "tests/*",
