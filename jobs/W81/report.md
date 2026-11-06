@@ -1,3 +1,5 @@
+# W81 report: `job.sh lock --wait` measures whole seconds
+
 W81 makes `job.sh lock --wait S` wait at least S seconds: the deadline and the clock are now in milliseconds (`now_ms()`, `date +%s%N`), and the last sleep is only the time left (at most 2 s), so `--wait 3` ends at about 3.0 s instead of the second 2 s poll.
 
 ## What was built
