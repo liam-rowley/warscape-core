@@ -1,5 +1,57 @@
 # W45 review
 
+## Round 3 (2026-11-06, branch job/W45 at 735e3bc)
+
+**Verdict: merge after fixes.**
+
+The fix round holds through the real judge, and routes 13 and 31 do not block a merge. But `735e3bc` could not merge: since its base, W9 and W94 gave it a conflict, and a clean merge of the rest would have failed `doc_size`. Both needed a change outside this folder, so under `docs/REVIEW.md` this verdict is the only one open to me, and in round 3 it blocks the job for Liam. I made both fixes on the branch (`0bfc589`, `0ae0a89`), so no finding is left open on it, and CI is green on the merged tree. No fresh round has reviewed those two commits. My recommendation is to merge at `0ae0a89` or later.
+
+### Findings
+
+**Blocker, fixed in `0bfc589`: the branch conflicted with main.** W9 and W45 each raised the count in `tests/test_schema.py:11` from 11 to 12, so `git merge-tree` reports a conflict. The right count on the merged tree is 13: `proposals` and W9's `acceptance_pass`. CI on `735e3bc` could not show this, because a push run tests the branch alone.
+
+**Blocker, fixed in `0ae0a89`: the merge failed `doc_size` by one byte.** `docs/CONSUMING.md` is 30688 bytes at the merge base; W45 adds 9 and W94 adds 24, giving 30721 against a cap of 30720. `git merge` raises no conflict here, and `python3 wsc.py gates --fast` on the merge fails, so this would have turned main red. "answers:" for "the answers:" brings it to 30717.
+
+**Should-fix, for the review record: `0bfc589` has no readable `Claude-Session` trailer.** My mistake: the trailer was not in the last paragraph, and the hook did not stop the merge commit, though it refused the next commit for the same fault. It is this session's commit. Rewriting it needs a force-push, so it stays. No `policy` line refuses it (run below).
+
+**Later, W130 in pull request #160 (open, not merged: see Notes).** Everything under "Routes 13 and 31" that must hold before `auto_apply` is filled.
+
+### Routes 13 and 31
+Run through `python3 wsc.py policy --branch <b> --base origin/main` (parent and `--judge` child) in throwaway repos made from the merged tree, each with real commits on real branch names. The list-empty repo uses the core's own `wsc.toml`; the filled one adds `auto_apply = ["doc_cap"]`.
+
+**With `auto_apply` empty, neither can accept anything.** A forged record with an accepted row, a real finding accepted, and route 31's accepting branch were each refused: "the base's `[audit] auto_apply` does not list doc_cap". That check needs no tag, record or race to fail, so no forgery gets past it. This is why they do not block the merge. No proposal row exists on main yet.
+
+**What route 13 can do today:**
+- Add a false question: a forged record with an open row passes, and `proposals check` says ok. Liam would be asked about something unreal.
+- **Stop the audit loop quietly, which the report does not name.** `AUDIT_2099-12-31.json` with no findings passes on `plan/`. `newest_record` then reads it for good, so `draft` wrote 0 rows, and `close` closed all three open rows, the tagged one too, on a branch `policy` passed. Deleting the record on `plan/` is refused; only `meta/` can. Closing a tagged row needs no record anyway (W125), but the pinned record is new, and a mistyped date would do it by accident. W130 carries it; it matters once W47 runs.
+
+**What route 31 can do today:** only the plain form, two rows on one finding. Both pass alone, `proposals check` fails on the merged tree, and a `plan/` close repairs it.
+
+**With a class listed, both are worse than the report says:**
+- **Route 13 defeats the tag, not only the need for a real finding.** The report's route 11 is refused only because the record lacks the alias. A new record holding it passes: `doc_cap:docs//T.md`, `./docs/T.md`, a trailing space, `docs\T.md` and `DOCS/T.md` were each accepted beside the tagged `doc_cap:docs/T.md`, and `proposals check` said ok on all five. `answer --auto` does the same. The exact finding is still refused. Route 6 reopens the same way: `doc_cap:docs/H.md`, where the audit says `hot_file`, passes.
+- **Route 31's red main does not undo anything.** After both branches land, `check` fails, but one `plan/` branch closing the accepted row as `gone`, with no evidence, passes `policy` and turns `check` green, because `check` reads answered rows only. The job and decision rows stay. The report's "caught after the merge" is true of the gate and not of the effect. The same red main comes from an accept landing first and a tag after it, with no forgery.
+
+**The report's limit on route 13 needs one correction.** It is right that `plan/` can already add job and decision rows directly, so a forged accept adds no new power today. What it forges is the record of who approved a thing, and C41's "a tagged proposal never is".
+
+**What must hold before anyone fills `auto_apply` (W130):**
+1. A class is listed only if the judge can re-derive its finding from git at the record's sha, and a finding id that is not canonical is refused.
+2. A branch is up to date before merge, or the judge reads the merged tree. This is report question 5, and this round's two blockers are the same skew.
+3. W125 is closed, so a close needs evidence, and W46 does not start a job whose accept broke the rule.
+4. `audit_problem` refuses a non-empty list until 1 to 3 land. Today only prose orders this: C41 says `meta/`, but a `job/` branch may change `wsc.toml` too (read, not run).
+
+### What was checked
+- **The fix round through the real judge.** Refused: close a tagged row and add an accepted one, a new row with a wrong class, `decide/` stripping a tag, the head's `wsc.toml` listing a class, a merged record rewritten, accept and close in one diff, a closed row added holding an answer, an answer forged on a row closed as `gone`. Controls ok: fill, accept a listed row, `proposals check` after it. `tests/test_proposals_judge.py` passes in the full gates. All four round 2 findings are answered. I did not repeat the mutation check.
+- **CI on Windows covered the fix commits.** Run 42207804357 at `735e3bc` holds all of them: `gates (windows-latest)` job 127858758658 ran 1480 tests in 883.8 s, with marker `commit=735e3bc1df62`, and `harness-windows` passed. The red run 42201717253 at `50ab6e0` failed on `test_core_sources_are_stdlib_only`, which `cb4cb17` fixed, as the report says.
+- **CI on the merged tree.** Run 42213144412 at `0ae0a89`, success: `gates (windows-latest)` job 127877111548, 1543 tests passed, 5 skipped, 779.0 s, 301 s under `[tests] timeout_s`, 15 ok, 1 warn, 0 failed. `harness-windows`, `gates (ubuntu-latest)` and `proxy` passed; `proxy` really ran, on W94's input. So the 883.8 s was not a trend.
+- **Locally.** `python3 wsc.py gates` on the same tree on this Windows PC, 2026-11-06: 14 ok, 2 warn, 0 failed, 1543 tests, 753.4 s. The warns are this clone's hook path and the known skips. That tree was merged with `68a4cf8`; `0ae0a89` adds `0acddb3`, which brings W81's brief and row and `VERSION`, and CI ran it whole.
+- **Against the latest origin/main.** `0acddb3` (release v0.46.0), an ancestor of `0ae0a89`; `git merge-tree` is clean. `python3 wsc.py policy --branch job/W45 --base origin/main` at `0ae0a89` refuses on only the two expected lines, the verdict and the row not `done`.
+- **The budget.** 205 calls against the lift to 200 is within 1.25 x, and I accept the lift: Liam widened fix round 2 to the whole class. Workflows: none changed.
+
+### Notes
+- **For Liam.** `jobs check` allows three rounds, so a further round needs that limit lifted, and `policy` refuses a merge while this verdict stands. The only unreviewed changes are `0bfc589` (one test line) and `0ae0a89` (one doc line).
+- **W130 is not on main.** `gh pr merge --auto` on #160 was denied in this session, so that pull request is open and green for Liam to merge. Do not fill `auto_apply` before it is dealt with.
+- Report question 5 stays Liam's; this round is new evidence for it.
+
 ## Round 2 (2026-11-06, branch job/W45 at 80d3fb7)
 
 **Verdict: merge after fixes.**
