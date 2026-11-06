@@ -42,7 +42,7 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
               option and, for a `decision` or `job` option, a decision row added here that names it, and for `job` a job row added here. Needs the proposals registry.
 Anything else is refused. On every branch kind (`proposal_problems`, W45): only `decide/` writes an answer, so `plan/`, which merges itself (C40), cannot approve anything for the
 owner. Its one exception is a row the base's `[audit] auto_apply` lists, untagged, at its recommendation, with nothing else changed. A `plan/` branch may add and fill open rows, close
-an answered row, and close an open row as `gone`; no other kind touches a row. An answered row keeps its content, its status goes only to `closed`, and no row is ever deleted. An
+an answered row, and close an open row as `gone`, but on an existing row never change `class` or change or remove `tag`; no other kind touches a row. An answered row keeps its content, its status goes only to `closed`, and no row is ever deleted. An
 `ANSWERS_` file changes only on `decide/`.
  Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
@@ -332,6 +332,8 @@ def proposal_row_problems(kind, old, new, cfg, decide):
         if new.get('status') != 'closed' or new.get('outcome') not in ('moved', 'not_moved', 'gone'):
             return [f'{rid}: an answered row goes only to `closed`, with an outcome']
         return []
+    if old and kind == 'plan' and (moved := [k for k in ('class', 'tag') if old.get(k) != new.get(k) and (k == 'class' or old.get(k))]):
+        return [f'{rid}: plan/ may add a tag, but not change {" or ".join(moved)} on a row that exists: they decide what `[audit] auto_apply` may accept (C41)']
     if new.get('status') in ANSWERED or 'answer' in new:
         if kind == 'decide':
             return decide(new)

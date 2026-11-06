@@ -121,6 +121,22 @@ class Forgeries(unittest.TestCase):
         r = answered(by='auto_apply', record=row()['baseline']['record'], question='Another question?')
         self.refused(judge('plan/x', {path(): text(row())}, {path(): text(r)}, cfg=AUTO), 'decide/')
 
+    def test_a_plan_branch_cannot_strip_a_tag(self):
+        self.refused(judge('plan/x', {path(): text(row(tag='risk'))}, {path(): text(row())}, cfg=AUTO), 'tag')
+
+    def test_a_plan_branch_cannot_change_a_tag(self):
+        self.refused(judge('plan/x', {path(): text(row(tag='risk'))}, {path(): text(row(tag='cost'))}, cfg=AUTO), 'tag')
+
+    def test_a_plan_branch_cannot_relabel_a_rows_class(self):
+        self.refused(judge('plan/x', {path(): text(row(**{'class': 'hot_file'}))}, {path(): text(row())}, cfg=AUTO), 'class')
+
+    def test_a_plan_branch_may_add_a_tag(self):
+        self.assertEqual(judge('plan/x', {path(): text(row())}, {path(): text(row(tag='risk'))}, cfg=AUTO), [])
+
+    def test_a_tag_or_class_survives_closing_as_gone(self):
+        self.assertEqual(judge('plan/x', {path(): text(row(tag='risk'))}, {path(): text(row(tag='risk', status='closed', outcome='gone'))}), [])
+        self.refused(judge('plan/x', {path(): text(row(tag='risk'))}, {path(): text(row(status='closed', outcome='gone'))}), 'tag')
+
     def test_a_job_branch_cannot_change_a_row(self):
         self.refused(judge('job/W9', {path(): text(row())}, {path(): text(row(question='New?'))}), 'proposal')
 
