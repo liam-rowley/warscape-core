@@ -1313,6 +1313,8 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
     lanes = ''.join(f'<section class="lane" id="lane-{k}"><h2>{e(h)} <span class="muted">({len(placed[k])})</span></h2>'
                     f'<p class="muted">{e(why)}</p>' + ''.join(card(r, n) for r, n in placed[k]) + '</section>'
                     for k, h, why in LANES if placed[k])
+    from . import proposals
+    lanes = proposals.view_html(ctx) + lanes
     refresh = ('Served by <code>wsc jobs view --serve</code>: reload to refresh; the buttons start background sessions.' if token else
                'Rerun it to refresh; the buttons copy the command (<code>wsc jobs view --serve</code> makes them start it).')
     if auto:

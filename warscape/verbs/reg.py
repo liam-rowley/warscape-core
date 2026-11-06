@@ -25,7 +25,7 @@ def add_arguments(p):
     a.add_argument('--id', help='tools: row id (default: wsc.<verb> or the path slug)')
     a.add_argument('--status', help='tools: status (live, or superseded:<id>)')
     a.add_argument('--missing', action='store_true', help='tools: add a row for every tool file without one')
-    a.add_argument('--mint', action='store_true', help='the `[policy] decisions` registry: draw a new id (<prefix><yymmdd>-<4 hex>); date defaults to today (W43)')
+    a.add_argument('--mint', action='store_true', help='the `[policy] decisions` registry or proposals: draw a new id (<prefix><yymmdd>-<4 hex>); date defaults to today (W43, W45)')
     s = sub.add_parser('set', help='change fields of one row (key:=null removes a field)')
     s.add_argument('registry')
     s.add_argument('id')
@@ -221,9 +221,10 @@ def run(args, ctx):
             row = json.loads(args.json) if args.json else {}
             row.update(parse_items(args.items))
             if args.mint:
-                if reg.name != decisions_registry(ctx.config) or 'id' in row:
-                    raise RegistryError('--mint draws the id of a row of the `[policy] decisions` registry: give no id, and no other registry')
-                row['id'] = mint_id(ctx.config['policy']['decision_prefix'], set(reg.by_id()))
+                prefix = {decisions_registry(ctx.config): ctx.config['policy']['decision_prefix'], 'proposals': 'P'}.get(reg.name)
+                if not prefix or 'id' in row:
+                    raise RegistryError('--mint draws the id of a row of the `[policy] decisions` registry or of proposals: give no id, and no other registry')
+                row['id'] = mint_id(prefix, set(reg.by_id()))
                 row.setdefault('date', datetime.now(timezone.utc).strftime('%Y-%m-%d'))
             reg.add(row)
             print(f'added {reg.name}:{row["id"]}')

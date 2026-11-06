@@ -93,7 +93,7 @@ DEFAULTS = {
         'bases': ['main'],                 # the branches a pull request may target, as origin/<name>; [] = any (core W36)
         'thin_merge_lines': 500,           # a `merge` on more changed lines than this outside jobs/ and the registries...
         'thin_merge_files': 20,            # ...or more files, whose newest round cites no evidence, is a warning (core W27 rule E)
-        'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
+        'plan': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'registries/proposals/*', 'README.md', 'CLAUDE.md'],     # what a plan/* branch may touch
         'meta': ['docs/*', 'docs/**', 'jobs/*/brief.md', 'registries/jobs/*', 'README.md', 'CLAUDE.md', '.github/**', 'tests/*',
                  'tests/**', 'wsc.toml', '.gitattributes', '.gitignore', '.gitmodules', 'registries/*'],   # what a meta/* branch may touch
         # Exact branch names exempt from the branch-kind rules (the decisions check and the repo's policy hooks still run). Only for the one pull
@@ -151,6 +151,9 @@ DEFAULTS = {
         'ci_runs': 20,                     # ci_durations: this many last runs on main, per workflow
         'ci_check_default': 10,            # slow_check: a median over this many minutes, for a check not in ci_check_minutes
         'ci_check_minutes': {},            # check name -> its own limit (stays empty here: _merge refuses keys a non-empty default table lacks)
+        'auto_apply': [],                  # proposal classes accepted at their recommendation with no question (C41); a tagged proposal never is
+        'reraise_margin': 0.25,            # a declined finding returns, and an applied one has moved, past this share of its baseline
+        'max_questions': 8,                # wsc proposals ask: at most this many rows
     },
 }
 
@@ -278,7 +281,7 @@ def audit_problem(au):
         elif isinstance(default, dict):
             good = isinstance(v, dict) and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v.values())
         else:
-            good = isinstance(v, (int, float)) and not isinstance(v, bool) and v >= (1 if k in ('window_days', 'window_jobs', 'ci_runs') else 0)
+            good = isinstance(v, (int, float)) and not isinstance(v, bool) and v >= (1 if k in ('window_days', 'window_jobs', 'ci_runs', 'max_questions') else 0)
         if not good:
             raise ConfigError(f'{CONFIG_NAME}: audit.{k} has the wrong type or range (default: {default!r})')
 

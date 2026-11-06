@@ -37,9 +37,12 @@ def run(args, ctx):
         written.append(A.write_pair(rec, ctx.root / '_scratch' / 'audits' / f'AUDIT_{rec["date"]}.json'))
     for f in rec['findings']:
         print(A.finding_line(f))
+    for m in rec.get('remeasured') or []:
+        if m['verdict'] in ('moved', 'not_moved', 'gone'):
+            print(A.remeasured_line(m)[2:])
     for s in rec['failed']:
         print(f'failed {s["metric"]}: {s["reason"]}')
     w = rec['window']
-    print(f'audit: {len(rec["findings"])} findings, {len(rec["metrics"])} metrics, {len(rec["skipped"])} skipped, {len(rec["failed"])} failed; '
+    print(f'audit: {len(rec["findings"])} findings, {len(rec.get("suppressed") or [])} suppressed, {len(rec["metrics"])} metrics, {len(rec["skipped"])} skipped, {len(rec["failed"])} failed; '
           f'{w["job_merges"]} job merges {w["since"]} to {w["until"]}, main {rec["main"][:7]}; {", ".join(str(p) for p in written)}')
     return 1 if rec['failed'] else 0

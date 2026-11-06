@@ -1,0 +1,11 @@
+{
+  "id": "wsc.proposals",
+  "kind": "verb",
+  "path": "warscape/verbs/proposals.py",
+  "purpose": "Draft a proposal per new finding, check the rows, print the question table, write the owner's answers on a decide/ branch and close what a record re-measured (W45, C41).",
+  "usage": "wsc proposals draft [--record PATH] | check | ask [--max N] | answer --answers FILE --quote FILE [--date D] | answer --auto [--date D] | close [--record PATH]",
+  "when": "by the audit session after `wsc audit --record` (close, draft, fill, answer --auto); `ask` when the owner sits down to answer; `answer` on decide/<date> with the owner's message.",
+  "verb": "proposals",
+  "status": "live",
+  "last_used": "2026-11-06"
+}

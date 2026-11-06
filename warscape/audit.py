@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from . import checks, ci
 from . import jobq as J
 from . import policy as P
+from . import proposals as PR
 from .repo import git_env, matches
 
 VERSION = 1
@@ -147,11 +148,11 @@ def hours(seconds):
 # ------------------------------------------------------------------ reading main
 def subject_kind(subject, prefix):
     """(kind, job id or '') of a first-parent subject: `<prefix><n>:` or `<prefix><n> ` is a job, but `<prefix><n> brief` is that job's brief (napoleon's
-    early form); `brief`, `plan`, `meta`, `release` start theirs."""
+    early form); `brief`, `plan`, `meta`, `decide`, `release` start theirs."""
     m = re.match(rf'({re.escape(prefix)}\d+)[: ]', subject)
     if m:
         return ('brief', '') if re.match(r' brief\b', subject[m.end(1):]) else ('job', m.group(1))
-    for kind in ('brief', 'plan', 'meta', 'release'):
+    for kind in ('brief', 'plan', 'meta', 'decide', 'release'):
         if re.match(rf'{kind}\b', subject):
             return kind, ''
     return 'other', ''
@@ -435,7 +436,8 @@ def startup_read(a):
 def doc_caps(a):
     c, dc = a.cfg, a.ctx.config['docs']
     at = c['doc_cap_share'] * dc['max_kb'] * 1024
-    docs = checks.living_docs(sorted(a.sizes), dc)
+    finished = [f"{a.ctx.config['jobs']['dir']}/**"]   # a brief of a finished job will not change: the doc_size gate still reads it, the finding has no one to act on it
+    docs = [p for p in checks.living_docs(sorted(a.sizes), dc) if not matches(p, finished)]
     near = {p: a.sizes[p] for p in docs if a.sizes[p] >= int(at)}
     out = [finding('doc_cap', 'doc_caps', p, 'medium', round(n / 1024, 2), round(at / 1024, 2), 'above', f'{p} is {n / 1024:.1f} KB of the {dc["max_kb"]} KB cap.')
            for p, n in sorted(near.items())]
@@ -491,7 +493,7 @@ def throughput(a):
     out = []
     if ratio is not None and ratio < c['slowdown_ratio']:
         out.append(finding('slowdown', 'throughput', '', 'medium', ratio, c['slowdown_ratio'], 'below', f'{cur:.2f} job and brief merges a day against {old:.2f} in the window before.'))
-    kinds = dict.fromkeys(('job', 'brief', 'plan', 'meta', 'release', 'other'), 0)
+    kinds = dict.fromkeys(('job', 'brief', 'plan', 'meta', 'decide', 'release', 'other'), 0)
     for m in now:
         kinds[m.kind] += 1
     return ratio, {'days': round(days, 2), 'jobs': count(now, 'job'), 'briefs': count(now, 'brief'), 'prior_jobs': count(prior, 'job'), 'prior_briefs': count(prior, 'brief'),
@@ -578,9 +580,15 @@ def record(ctx, since=None, only=None, offline=False, now=None, run=subprocess.r
             findings += got
     findings.sort(key=lambda f: (SEVERITY[f['severity']], f['id']))
     day = lambda ts: datetime.fromtimestamp(ts, timezone.utc).strftime('%Y-%m-%d')
-    return {'version': VERSION, 'repo': repo_name(a), 'date': day(a.until), 'main': a.main,
-            'window': {'since': day(a.since), 'until': day(a.until), 'job_merges': len(a.jobs())},
-            'metrics': metrics, 'findings': findings, 'skipped': skipped, 'failed': failed}
+    rec = {'version': VERSION, 'repo': repo_name(a), 'date': day(a.until), 'main': a.main,
+           'window': {'since': day(a.since), 'until': day(a.until), 'job_merges': len(a.jobs())},
+           'metrics': metrics, 'findings': findings, 'skipped': skipped, 'failed': failed}
+    if PR.NAME in ctx.config['registries']:
+        # the rows at the measured sha, not the working tree: a finding must not depend on where the audit ran
+        cfg = P.settings(ctx.config)
+        rows = P.dir_rows_at(a.main, cfg['proposals_dir'], cwd=ctx.root) or {}
+        PR.overlay(rec, list(rows.values()), P.rows_at(a.main, cfg, cwd=ctx.root), {m.job: day(m.when) for m in reversed(a.merges) if m.kind == 'job'}, a.cfg['reraise_margin'])
+    return rec
 
 
 # ------------------------------------------------------------------ output
@@ -590,6 +598,10 @@ def finding_line(f):
 
 def cell(v):
     return str(v).replace('|', '\\|').replace('\n', ' ')
+
+
+def remeasured_line(m):
+    return f'- `{cell(m["finding"])}`: {m["proposal"]} {m["verdict"]}, {cell(m["baseline"])} then, {cell(m["value"])} now'
 
 
 def render_md(rec):
@@ -608,6 +620,10 @@ def render_md(rec):
     for title, key in (('Not measured', 'skipped'), ('Failed', 'failed')):
         if rec[key]:
             out += ['', f'## {title}', ''] + [f'- {s["metric"]}: {s["reason"]}' for s in rec[key]]
+    if rec.get('suppressed'):
+        out += ['', '## Suppressed', ''] + [f'- `{cell(s["finding"])}`: {s["proposal"]} {s["status"]}, {cell(s["baseline"])} then, {cell(s["value"])} now' for s in rec['suppressed']]
+    if rec.get('remeasured'):
+        out += ['', '## Re-measured', ''] + [remeasured_line(m) for m in rec['remeasured']]
     return '\n'.join(out) + '\n'
 
 

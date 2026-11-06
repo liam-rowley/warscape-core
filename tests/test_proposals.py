@@ -390,7 +390,7 @@ class Folder(unittest.TestCase):
     def put(self, *rows):
         regs = self.regs()
         for r in rows:
-            regs['proposals'].add(r)
+            regs['proposals'].add(r, replace=True)
         regs['proposals'].save()
 
     def record(self, findings):

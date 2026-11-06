@@ -15,6 +15,7 @@ from unittest import mock
 
 from _util import main
 from warscape import audit as A
+from warscape import checks
 from warscape.repo import ConfigError, Ctx, load_config
 
 NOW = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
@@ -603,11 +604,50 @@ class DocCaps(Case):
         self.assertIn('doc_cap:docs/BIG.md', ids)
         self.assertEqual([i for i in ids if i.startswith('doc_cap')], ['doc_cap:docs/BIG.md'])
 
+    def test_it_skips_the_job_folders_and_only_the_metric_does(self):
+        f = self.fixture()
+        at = int(30 * 1024 * 0.9)
+        f.commit('plan: docs (#1)', {'jobs/W9/brief.md': 'x' * at, 'docs/BIG.md': 'x' * at}, 1)
+        self.assertEqual([i for i in f.ids() if i.startswith('doc_cap')], ['doc_cap:docs/BIG.md'])
+        ctx = Ctx.load(f.root)
+        self.assertIn('jobs/W9/brief.md', checks.living_docs(['jobs/W9/brief.md'], ctx.config['docs']))   # the doc_size gate still reads it
+
     def test_it_reads_main_not_the_working_tree(self):
         f = self.fixture()
         f.commit('plan: doc (#1)', {'docs/A.md': 'small\n'}, 1)
         f.write({'docs/A.md': 'x' * 30000})
         self.assertEqual([i for i in f.ids() if i.startswith('doc_cap')], [])
+
+
+class Proposals(Case):
+    """W45: the record reads the rows at the sha it measures."""
+    ONLY = 'doc_caps'
+
+    def rowfile(self, status='open', **kw):
+        row = {'id': 'P261101-aaaa', 'date': '2026-11-01', 'kind': 'finding', 'finding': 'doc_cap:docs/BIG.md', 'metric': 'doc_caps', 'class': 'doc_cap', 'question': 'Split it?',
+               'baseline': {'record': 'r', 'value': 27.0, 'threshold': 27.0, 'direction': 'above', 'severity': 'medium', 'evidence': 'e'},
+               'options': [{'key': 'no', 'kind': 'none', 'summary': 's'}], 'recommended': 'no', 'status': status, **kw}
+        return {'registries/proposals/P261101-aaaa.json': json.dumps(row)}
+
+    def proposals_fixture(self):
+        f = self.fixture()
+        at = int(30 * 1024 * 0.9)
+        t = (f.root / 'wsc.toml').read_text(encoding='utf-8').replace('[registries]\n', '[registries]\nproposals = "core:proposals"\n', 1)
+        f.commit('plan: docs (#1)', {'wsc.toml': t, 'docs/BIG.md': 'x' * at}, 2)
+        return f
+
+    def test_a_declined_row_on_main_suppresses_its_finding(self):
+        f = self.proposals_fixture()
+        f.commit('decide: answers (#2)', self.rowfile('declined', answer={'by': 'o', 'date': '2026-11-01', 'record': 'a', 'option': 'no'}), 1)
+        rec = f.audit()
+        self.assertEqual([x for x in rec['findings'] if x['id'].startswith('doc_cap')], [])
+        self.assertEqual(rec['suppressed'][0]['proposal'], 'P261101-aaaa')
+
+    def test_a_row_only_in_the_working_tree_changes_nothing(self):
+        f = self.proposals_fixture()
+        f.write(self.rowfile('declined', answer={'by': 'o', 'date': '2026-11-01', 'record': 'a', 'option': 'no'}))
+        self.assertNotIn('suppressed', f.audit())
+        self.finding(f.audit(), 'doc_cap:docs/BIG.md')
 
 
 class PinLag(Case):
@@ -725,7 +765,7 @@ class Throughput(Case):
         for s in ('T1: a job (#1)', 'T2 a job (#2)', 'brief: T3 (#3)', 'brief/T4: b (#4)', 'plan: p (#5)', 'meta: m (#6)', 'release v1.0.0 (minor): T1 (#7)', 'Backlog B1 (#8)'):
             f.commit(s, {}, 3)
         k = f.audit()['metrics']['throughput']['details']['kinds']
-        self.assertEqual(k, {'job': 2, 'brief': 2, 'plan': 1, 'meta': 1, 'release': 1, 'other': 1})
+        self.assertEqual(k, {'job': 2, 'brief': 2, 'plan': 1, 'meta': 1, 'decide': 0, 'release': 1, 'other': 1})
 
     def test_an_id_then_brief_is_a_brief_merge_and_no_job(self):
         self.assertEqual(A.subject_kind('T6 brief: a diff (#21)', 'T'), ('brief', ''))

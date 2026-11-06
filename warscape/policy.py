@@ -37,7 +37,14 @@ Moved from napoleon-remastered `tools/pr_policy.py` (napoleon J62). The branch n
   brief/<id>  only <jobs dir>/<id>/brief.md and row <id> of the jobs registry (which must be `queued` with its brief).
   plan/*      planning: the `[policy] plan` globs. No code.
   meta/*      repo infrastructure: the `[policy] meta` globs.
-Anything else is refused. Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
+  decide/<YYYY-MM-DD>[-<n>]  the owner's answers (W45, C41), merged only by the owner: only proposal rows, added decision rows, added `needs_brief` job rows and its one
+              `<[audit] dir>/ANSWERS_<date>[_<n>].md`. Each row it answers has `answer.by` the `[jobs.text] owner`, `answer.record` that file, its id in that file, the status of its
+              option and, for a `decision` or `job` option, a decision row added here that names it, and for `job` a job row added here. Needs the proposals registry.
+Anything else is refused. On every branch kind (`proposal_problems`, W45): only `decide/` writes an answer, so `plan/`, which merges itself (C40), cannot approve anything for the
+owner. Its one exception is a row the base's `[audit] auto_apply` lists, untagged, at its recommendation, with nothing else changed. A `plan/` branch may add and fill open rows, close
+an answered row, and close an open row as `gone`; no other kind touches a row. An answered row keeps its content, its status goes only to `closed`, and no row is ever deleted. An
+`ANSWERS_` file changes only on `decide/`.
+ Globs match by path segment (`*` and `?` inside one segment, `**` across folders: repo.matches). Every branch
 kind: the `[policy] decisions` file is append only (existing rows unchanged and in order; new rows numbered <prefix><last+1>, with a
 YYYY-MM-DD date and Reversible yes or no); a reversal is a new row that names the one it replaces. With `decisions = "registry:<name>"` (core W43)
 the same rule holds per file: a row file on the base never changes, moves or goes, and an added one is a minted id (`wsc reg add <name> --mint`) with
@@ -80,6 +87,10 @@ from .repo import DEFAULTS, Ctx, decisions_registry, git_env, matches
 
 # The judge's interface (the `--judge` child's arguments), read from a base core's text by warscape/policy_base.py: keep it on a line of its own.
 JUDGE_API = 1
+ANSWERED = ('accepted', 'declined', 'deferred')
+OPTION_STATUS = {'decision': 'accepted', 'job': 'accepted', 'defer': 'deferred', 'none': 'declined'}
+AUTO_BY = 'auto_apply'   # `answer.by` of a row `[audit] auto_apply` accepted
+DECIDE = re.compile(r'decide/(\d{4}-\d\d-\d\d)(?:-([2-9]|[1-9][0-9]+))?')
 
 
 class Refusal(Exception):
@@ -94,7 +105,9 @@ def settings(config):
             'reg_jsonl': f"{config['registries_dir']}/jobs.jsonl",
             'views': [f"{config['registries_dir']}/{n}.md" for n in config['registries']], 'text': dict(j['text']),
             'decisions_cite_job': bool(p.get('decisions_cite_job', False)), 'reviewer_code': p.get('reviewer_code', 'warn'), 'thin_lines': p.get('thin_merge_lines', 500),
-            'thin_files': p.get('thin_merge_files', 20), 'workflow_paths': list(p['workflow_paths']), 'template_dir': config['ci']['template_dir']}
+            'thin_files': p.get('thin_merge_files', 20), 'workflow_paths': list(p['workflow_paths']), 'template_dir': config['ci']['template_dir'],
+            'proposals_dir': f"{config['registries_dir']}/proposals" if 'proposals' in config['registries'] else '', 'audit_dir': config['audit']['dir'],
+            'auto_apply': list(config['audit']['auto_apply'])}
 
 
 def git(*args, cwd=None):
@@ -128,15 +141,21 @@ def rows(text):
 
 
 def rows_at(ref, cfg, cwd=None):
-    """{id: row} of the jobs registry at `ref`: its per-id files (one `ls-tree` and one `cat-file --batch`), or the JSONL when the ref
-    predates per-row storage. The rules compare these dicts, so they are the same for either layout."""
+    """{id: row} of the jobs registry at `ref`: its per-id files, or the JSONL when the ref predates per-row storage. The rules compare these dicts, so they are the same for
+    either layout."""
+    got = dir_rows_at(ref, cfg['reg_jobs'], cwd)
+    return rows(show(ref, cfg['reg_jsonl'], cwd)) if got is None else got
+
+
+def dir_rows_at(ref, folder, cwd=None):
+    """{id: row} of the row files in `folder` at `ref` (one `ls-tree` and one `cat-file --batch`), or None when the ref has no such folder."""
     try:
-        names = [n for n in git('ls-tree', '-z', '--name-only', f"{ref}:{cfg['reg_jobs']}", cwd=cwd).split('\0') if n.endswith('.json')]
+        names = [n for n in git('ls-tree', '-z', '--name-only', f'{ref}:{folder}', cwd=cwd).split('\0') if n.endswith('.json')]
     except subprocess.CalledProcessError:
-        return rows(show(ref, cfg['reg_jsonl'], cwd))
+        return None
     if not names:
         return {}
-    out = subprocess.run(['git', 'cat-file', '--batch'], input=''.join(f"{ref}:{cfg['reg_jobs']}/{n}\n" for n in names).encode(),
+    out = subprocess.run(['git', 'cat-file', '--batch'], input=''.join(f'{ref}:{folder}/{n}\n' for n in names).encode(),
                          capture_output=True, check=True, cwd=cwd, env=git_env()).stdout
     got, at = {}, 0
     for _ in names:
@@ -252,6 +271,126 @@ def added_decision_files(changed, base_file, head_file, cfg):
     return out
 
 
+def answers_path(audit_dir, branch):
+    """The one ANSWERS file a `decide/` branch may add, or None when `branch` is not a good decide/ name."""
+    m = DECIDE.fullmatch(branch)
+    return f'{audit_dir}/ANSWERS_{m.group(1)}{"_" + m.group(2) if m.group(2) else ""}.md' if m else None
+
+
+def option_kind(r, key):
+    return next((o.get('kind') for o in r.get('options') or [] if isinstance(o, dict) and o.get('key') == key), None)
+
+
+def auto_applied(old, new, cfg):
+    """A plan/ row accepted by the base's `[audit] auto_apply` (C41): untagged, at its recommendation, the answer naming the baseline's record, nothing else changed."""
+    a = new.get('answer') or {}
+    if a.get('by') != AUTO_BY or new.get('class') not in cfg['auto_apply'] or new.get('tag') or a.get('option') != new.get('recommended'):
+        return False
+    if a.get('record') != (new.get('baseline') or {}).get('record') or new.get('status') != OPTION_STATUS.get(option_kind(new, a.get('option'))):
+        return False
+    written = ('status', 'answer', 'decision', 'job')
+    return old is None or {k: v for k, v in old.items() if k not in written} == {k: v for k, v in new.items() if k not in written}
+
+
+def decide_answer_problems(r, record, head_file, added, new_jobs, owner):
+    """What is wrong with the row `r` a decide/ branch answers: the fields are what tie it to the owner's quoted message."""
+    rid, a, errs = r.get('id'), r.get('answer') or {}, []
+    if not owner:
+        errs.append(f'{rid}: no `[jobs.text] owner` to answer for: set it')
+    elif a.get('by') != owner:
+        errs.append(f'{rid}: answer.by {a.get("by")!r} is not the owner, {owner}')
+    if a.get('record') != record:
+        errs.append(f'{rid}: answer.record must be {record}')
+    text = head_file(record)
+    if text is None:
+        errs.append(f'{record} is missing: it quotes the answers')
+    elif str(rid) not in text:
+        errs.append(f'{record} does not name {rid}')
+    kind = option_kind(r, a.get('option'))
+    if kind is None:
+        return errs + [f'{rid}: answer.option {a.get("option")!r} is not one of its options']
+    if r.get('status') != OPTION_STATUS.get(kind):
+        errs.append(f'{rid}: status {r.get("status")} is not what a {kind} option sets, {OPTION_STATUS.get(kind)}')
+    if kind in ('decision', 'job'):
+        d = next((x for x in added if x['id'] == r.get('decision')), None)
+        if d is None or str(rid) not in d['text']:
+            errs.append(f'{rid}: decision {r.get("decision")}: no decision row added on this branch names it (the row added here does not name {rid})')
+    if kind == 'job' and r.get('job') not in new_jobs:
+        errs.append(f'{rid}: job {r.get("job")} is not a row added on this branch')
+    return errs
+
+
+def proposal_row_problems(kind, old, new, cfg, decide):
+    """What a branch of `kind` may not do to one row. `decide`: callable(row) -> errors, for an answer on a decide/ branch."""
+    rid = new.get('id')
+    if old and old.get('status') == 'closed':
+        return [f'{rid}: a closed row stays closed']
+    if old and (old.get('answer') or old.get('status') in ANSWERED):
+        moved = {k for k in set(old) | set(new) if old.get(k) != new.get(k)}
+        if moved - {'status', 'outcome'}:
+            return [f'{rid}: an answered row keeps its content; this changes {", ".join(sorted(moved - {"status", "outcome"}))}']
+        if new.get('status') != 'closed' or new.get('outcome') not in ('moved', 'not_moved', 'gone'):
+            return [f'{rid}: an answered row goes only to `closed`, with an outcome']
+        return []
+    if new.get('status') in ANSWERED or 'answer' in new:
+        if kind == 'decide':
+            return decide(new)
+        if auto_applied(old, new, cfg):
+            return []
+        return [f'{rid}: an answer is written only on a decide/ branch, which the owner merges (C41); `wsc proposals answer`']
+    if new.get('status') == 'closed' and (old is None or new.get('outcome') != 'gone'):
+        return [f'{rid}: an open row closes only as `gone` (its finding left the record)']
+    return []
+
+
+def proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, head_file, added, cfg):
+    """The guard on every branch kind (W45): see the module docstring. A file the head has as the base has it is no change. Fails closed on what it cannot parse."""
+    d, errs = cfg.get('proposals_dir'), []
+    if not d:
+        return []
+    record = answers_path(cfg['audit_dir'], branch)
+    new_jobs = set(head_rows) - set(base_rows)
+    owner = cfg['text'].get('owner')
+    decide = lambda r: decide_answer_problems(r, record, head_file, added, new_jobs, owner) if record else []
+    for p in changed:
+        if p.startswith(f"{cfg['audit_dir']}/ANSWERS_") and kind != 'decide' and base_file(p) != head_file(p):
+            errs.append(f'{p}: an ANSWERS file quotes the owner, so it changes only on a decide/ branch')
+        if not p.startswith(d + '/'):
+            continue
+        name, old_t, new_t = p[len(d) + 1:], base_file(p), head_file(p)
+        if old_t == new_t:
+            continue
+        if kind not in ('plan', 'decide'):
+            errs.append(f'{p}: a {kind or "branch of this name"} branch may change no proposal row (plan/ fills them, decide/ answers them)')
+        elif new_t is None:
+            errs.append(f'{p}: a proposal row is never deleted')
+        elif (new := decision_row(new_t)) is None or (old_t is not None and decision_row(old_t) is None):
+            errs.append(f'{p}: not a JSON object')
+        elif new.get('id') != file_to_id(name):
+            errs.append(f'{p}: id {new.get("id")!r} is not its file name')
+        else:
+            errs += proposal_row_problems(kind, decision_row(old_t) if old_t is not None else None, new, cfg, decide)
+    return errs
+
+
+def decide_problems(branch, changed, base_rows, head_rows, cfg):
+    """What a decide/ branch may touch (the kind's own rule; the answers themselves are `proposal_problems`)."""
+    if not cfg.get('proposals_dir') or not cfg.get('decisions_dir'):
+        return ['a decide/ branch needs the proposals registry and a decisions registry: declare `proposals` in `[registries]` and `[storage] dir`, and `[policy] decisions = "registry:<name>"`']
+    record = answers_path(cfg['audit_dir'], branch)
+    if not record:
+        return [f'"{branch}" is not decide/<YYYY-MM-DD> or decide/<YYYY-MM-DD>-<n>, n from 2']
+    ok = lambda p: p == record or p == cfg['reg_jsonl'] or p.startswith((cfg['proposals_dir'] + '/', cfg['decisions_dir'] + '/', cfg['reg_jobs'] + '/'))
+    extra = [p for p in changed if not ok(p)]
+    errs = [f'a decide/ branch may only change proposal rows, add decision rows and needs_brief job rows and add {record}; it also changes: {", ".join(extra)}'] if extra else []
+    for k in sorted(set(base_rows) | set(head_rows)):
+        if k in base_rows and base_rows[k] != head_rows.get(k):
+            errs.append(f'a decide/ branch adds job rows only; it changes {k}')
+        elif k not in base_rows and head_rows[k].get('status') != 'needs_brief':
+            errs.append(f'job {k} must be added as needs_brief, not {head_rows[k].get("status")}')
+    return errs
+
+
 def allowed(path, globs):
     return matches(path, globs)
 
@@ -277,6 +416,7 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         added = added_decision_files(changed, base_file, head_file, cfg)
     else:
         added = added_decision_rows(base_file(cfg['decisions']), head_file(cfg['decisions']), cfg) if cfg['decisions'] in changed else []
+    errs += proposal_problems(kind, branch, changed, base_rows, head_rows, base_file, head_file, added, cfg)
     if cfg.get('decisions_cite_job') and kind == 'job':   # rule F
         errs += [f"decision row {r['id']} on {branch} must name the brief that required it (add `{m.group(2)}` to the row, or move it to a plan/ branch)"
                  for r in added if not re.search(rf'(?<![A-Za-z0-9]){re.escape(m.group(2))}(?![0-9])', r['text'])]
@@ -357,8 +497,10 @@ def check(branch, changed, base_rows, head_rows, base_file, head_file, sessions=
         extra = [p for p in changed if not allowed(p, cfg['meta'])]
         if extra:
             errs.append(f'a meta/ branch may only touch repo infrastructure; it also changes: {", ".join(extra)} (game code goes through a job)')
+    elif branch.startswith('decide/'):
+        errs += decide_problems(branch, changed, base_rows, head_rows, cfg)
     else:
-        errs.append(f'branch "{branch}" is not job/{cfg["job_prefix"]}<n>, brief/{cfg["job_prefix"]}<n>, plan/*, meta/* or release/vX.Y.Z: all work goes through the job queue'
+        errs.append(f'branch "{branch}" is not job/{cfg["job_prefix"]}<n>, brief/{cfg["job_prefix"]}<n>, plan/*, meta/*, decide/<date> or release/vX.Y.Z: all work goes through the job queue'
                     + (f" ({T['rules_ref']})" if T.get('rules_ref') else '') + '. Rename the branch, or add the work as a job first.')
     return errs
 

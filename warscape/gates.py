@@ -289,6 +289,8 @@ def gate_jobs(ctx):
     jd = ctx.root / jobq.S.jobs_dir
     folders = [d.name for d in jd.iterdir() if d.is_dir()] if jd.is_dir() else []
     errs, warns, _ = jobq.check(ctx, rows, read, folders)
+    from . import proposals
+    errs = list(errs) + proposals.check(ctx)
     if errs:
         return Result('jobs', 'error', f'{len(errs)} queue problems', errs + warns)
     return Result('jobs', 'warn' if warns else 'ok', f'{len(rows)} jobs rows, queue ok' + (f'; {len(warns)} warnings' if warns else ''), warns)
