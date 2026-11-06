@@ -115,3 +115,9 @@ What the verbs do: [PROXY_BUILD.md](PROXY_BUILD.md) "Symbolising a crash", [PROX
 ## Decisions as row files and `later` rows (core W43)
 
 Nothing is forced: a repo keeps its Markdown decisions file, and a pin bump past W43 changes nothing until it opts in (CONSUMING_OPTIONS.md, "Decisions as one file per row"). The `later` status and the `backlog_id` and `area` fields are in the core's jobs schema from this release on.
+
+## Acceptance evidence and scene launches (W9, minor)
+
+Nothing breaks at the bump; a game with no `ctl.saves` block, no flakes and a current watcher behaves as before, except that `acceptance.py run` now refuses a reused `--run` id and a watcher whose installed bytes differ from the pin's,
+and writes schema 2. Details and the consumer's rule 79 changes: [PROXY_HARNESS.md](PROXY_HARNESS.md) "Acceptance evidence". Set `acceptance.max_flakes` in the harness adapter (suggested 1) and, for rows with `save_file`, `ctl.saves`.
+Because `harness/` changes at this pin, the first bump past it needs a 20-pass run on a PC whose installed watcher is the kit at that pin (the preflight checks it).

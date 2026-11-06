@@ -21,7 +21,9 @@ verb answer `refused` with its reason and fact. cam sets the pose with the route
 the battle clock's rate against the windows clock over `measure_s` (J43).
 """
 import argparse
+import contextlib
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -46,6 +48,9 @@ POSE_FIELDS = ('x', 'y', 'z', 'yaw', 'pitch', 'fov')
 # proxy.log's first two lines (docs/PROXY_BUILD.md): the launch line names the DLL's build id; the self_hash line (W24) its own file sha256,
 # size and build, exactly as dllmain.cpp LogSelfHash writes it. A log with no self_hash line comes from a DLL older than W24.
 LAUNCH_RE = re.compile(r'd3d9\.dll build (\S+) loaded')
+LAUNCH_PID_RE = re.compile(r'd3d9\.dll build (\S+) loaded into .*\(pid (\d+)')   # W9: the load line of one process, tied to its pid
+# the three watcher texts of a start lost before the build ran (watcher.ps1 Headless-Wait): the only launch losses that are flakes (W9, decision 4)
+LOST_RX = re.compile(r'is not running after the start|exited before reporting on_virtual|no on_virtual status')
 SELF_HASH_RE = re.compile(r'\bself_hash: sha256 ([0-9a-f]{64}) bytes ([0-9]+) build (\S+) \(hashed in ([0-9]+) ms\)')
 
 
@@ -130,12 +135,65 @@ def resolve_scenario(rows, sid):
     return rows[sid]
 
 
-def scenario_target(row, battles_dir):
+SAFE_RX = re.compile(r'[^A-Za-z0-9_-]')
+
+
+def harness_save_name(sid):
+    """W9 (B51): the name a staged save loads under: `wsc_` + the row id with unsafe characters replaced, cut to 72 with an 8-hex hash of the id
+    (the DLL's SafeToken takes plain names up to 80). The harness owns this prefix, so a name here never collides with a person's save."""
+    name = 'wsc_' + SAFE_RX.sub('_', sid)
+    if len(name) > 72:
+        name = name[:63] + '_' + hashlib.sha256(sid.encode('utf-8')).hexdigest()[:8]
+    return name
+
+
+def saves_dir(adapter):
+    """The folder a staged save is copied into: the adapter's ctl.saves {anchor: appdata|game, dir, ext} (the core names no folder or extension)."""
+    sv = (adapter.get('ctl') or {}).get('saves')
+    if not sv or not all(sv.get(k) for k in ('anchor', 'dir', 'ext')):
+        raise Refused('a scenario row with save_file needs the adapter block ctl.saves {"anchor": "appdata"|"game", "dir": "<folder>", "ext": "<.ext>"}: ctl.saves is missing')
+    base = os.path.expandvars(adapter['appdata_dir']) if sv['anchor'] == 'appdata' else adapter['game_dir']
+    return Path(base) / sv['dir'], sv['ext']
+
+
+@contextlib.contextmanager
+def stage_save(row, adapter, repo_root, say=None):
+    """W9 (B51): copy the row's `save_file` (relative to the game repo) into the game's save folder as wsc_<id>, yield the target `campaign:<name>`,
+    remove that one file on exit. A leftover of an earlier run is overwritten and reported through say(text) (default: stderr, never stdout, which is the JSON result). Refuses before any write on a missing file or a sha256 that differs from `save_sha256`; only a file named wsc_* is ever removed."""
+    say = say or (lambda t: print(t, file=sys.stderr))
+    d, ext = saves_dir(adapter)
+    src = Path(repo_root) / row['save_file']
+    if not src.is_file():
+        raise Refused(f"scenario {row['id']}: save_file {row['save_file']} is missing under {repo_root}")
+    data = src.read_bytes()
+    got, want = hashlib.sha256(data).hexdigest(), (row.get('save_sha256') or '').lower()
+    if want and got != want:
+        raise Refused(f"scenario {row['id']}: save_file {row['save_file']} has sha256 {got}, the row says {want}")
+    name = harness_save_name(row['id'])
+    dst = d / f'{name}{ext}'
+    assert dst.name.startswith('wsc_')
+    d.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        say(f'ctl: a leftover {dst.name} from an earlier run is overwritten')
+    tmp = d / f'{name}{ext}.tmp'
+    tmp.write_bytes(data)
+    os.replace(tmp, dst)
+    try:
+        yield f'campaign:{name}'
+    finally:
+        if dst.name.startswith('wsc_') and dst.exists():
+            dst.unlink()
+
+
+def scenario_target(row, battles_dir, adapter=None):
     """The autostart target a scenario row loads through: a battle preset of the same id (generated from the row; a historical one has
     type=historic), a campaign row's `save` when it starts with an autostart target (`campaign:new:<c>:<f>`, `campaign:<save>`), else refused."""
     if row['kind'] in ('land', 'siege', 'naval', 'historical') and (Path(battles_dir) / f"{row['id']}.txt").exists():
         return f"battle:{row['id']}"
     if row['kind'] == 'campaign':
+        if row.get('save_file'):
+            saves_dir(adapter or {})   # refuses naming ctl.saves when the adapter has none
+            return f"campaign:{harness_save_name(row['id'])}"
         first = str(row.get('save', '')).split(' ')[0]
         if first.startswith('campaign:'):
             return first
@@ -252,6 +310,17 @@ def ident_mod(adapter):
     return mod
 
 
+class HeadlessLaunchLost(RuntimeError):
+    """Both launch attempts ended in a pre-on_virtual watcher text (W9, decision 3): the build under test never ran. `attempts` is
+    [{rc, tail}, ...]; `cause` is what a result and a pass step carry (acceptance.classify reads it by value, not by class: the module is loaded twice)."""
+    cause = 'headless_launch_lost'
+
+    def __init__(self, attempts):
+        self.attempts = attempts
+        super().__init__('step launch: the headless start was lost on every attempt: ' +
+                         ' | '.join(f"attempt {i + 1} exit {a['rc']}: {a['tail']}" for i, a in enumerate(attempts)))
+
+
 class Pc:
     """The game on the PC: the watcher (job.sh: status, launch, kill), the proxy's installed config (pc_deploy set) and the ctl channel.
     Everything waits inside one call. `sh(argv, stdin, timeout)` -> (exit code, stdout) is injectable for the tests."""
@@ -259,6 +328,8 @@ class Pc:
         self.owner, self.adapter_path, self.a = owner, str(adapter_path), adapter
         self.launch_cfg = adapter.get('ctl', {}).get('launch', {})
         self.sh, self.clock, self.sleep = sh or self._sh, clock, sleep
+        self.launches = []        # W9: one {pid, build, dll_sha256_logged, utc} per launch, the ones scene makes by itself included
+        self.evidence_dir = None  # W9: where a failed first attempt's logs are copied before the retry recreates them (PcEnv sets it)
         self.ini_name = identity(adapter).get('config_file') or next(
             (c['path'] for c in adapter.get('config_files', []) if c.get('id') == 'mod_ini'), None)
 
@@ -348,20 +419,79 @@ class Pc:
             self.set_keys(miss)
         size = size or self.launch_cfg.get('size', '1920x1080')
         rc, out = self.job(f'launch size={size}', 300)
-        retried = None
+        attempts, retried = [{'rc': rc, 'tail': out.strip()[-300:]}], None
         if rc != 0 and 'HEADLESS FAILED' in out:
             # one retry, recorded: the headless start was lost twice on 2026-10-30 with the game itself fine (a heap corruption 10 ms after
-            # init, and an on_virtual status logged by the proxy that never reached headless_status.json; run 20261030_j44pc, J16's code)
+            # init, and an on_virtual status logged by the proxy that never reached headless_status.json; run 20261030_j44pc, J16's code).
+            # W9 (B60): the retry's launch recreates proxy.log and headless_status.json, so attempt 1's are copied away first, and the retry
+            # waits retry_settle_s after the kill
             retried = out.strip().splitlines()[-1][-300:]
+            self.keep_attempt_evidence(1, out)
+            self.sleep(self.launch_cfg.get('retry_settle_s', 10))
             rc, out = self.job(f'launch size={size}', 300)
+            attempts.append({'rc': rc, 'tail': out.strip()[-300:]})
+            if rc != 0 and all(a['rc'] != 0 and LOST_RX.search(a['tail']) for a in attempts):
+                self.keep_attempt_evidence(2, out)
+                raise HeadlessLaunchLost(attempts)
         if rc != 0:
             raise RuntimeError(f'step launch: exit {rc}: {out[-400:]}')
         vs = [l.strip() for l in out.splitlines() if l.strip().startswith('virtualstore:')]
         ok, r = self.ctl(f"waitfor frontend {self.launch_cfg.get('frontend_wait_s', 180)}", self.launch_cfg.get('frontend_wait_s', 180) + 20)
         if not ok:
             raise RuntimeError(f'step frontend: {(r or {}).get("reason", "no answer")}')
+        try:
+            pid = self.pid()
+        except RuntimeError:
+            pid = None
+        self.launches.append(self.read_launch_line(pid))
         return {'size': size, 'keys_set': sorted(miss), 'launch_s': round(self.clock() - t0, 1), **({'retried_after': retried} if retried else {}),
-                **({'virtualstore_cleared': vs} if vs else {})}
+                **({'attempts': attempts} if len(attempts) > 1 else {}), **({'virtualstore_cleared': vs} if vs else {})}
+
+    def log_path(self):
+        try:
+            return self.ini_path().parent / ident_mod(self.a) / 'logs' / 'proxy.log'
+        except (TypeError, RuntimeError, KeyError):
+            return None
+
+    def read_launch_line(self, pid, wait_s=10):
+        """W9 (B26, B31, H5): the build of THIS launch, from the load line of the game's own pid in proxy.log (one log per launch, CREATE_ALWAYS).
+        A line of another pid is a stale log and never answers. Polls up to wait_s; {pid, build, dll_sha256_logged, utc}, build None when no line matched."""
+        rec = {'pid': pid, 'build': None, 'dll_sha256_logged': None, 'utc': utc()}
+        end, polls = self.clock() + wait_s, 0
+        while pid is not None:
+            path = self.log_path()
+            text = path.read_text(encoding='utf-8', errors='replace') if path and path.exists() else ''
+            m = next((m for m in LAUNCH_PID_RE.finditer(text) if int(m.group(2)) == int(pid)), None)
+            if m:
+                h = SELF_HASH_RE.search(text)
+                rec.update(build=m.group(1), dll_sha256_logged=h.group(1) if h else None)
+                break
+            polls += 1
+            if self.clock() >= end or polls > wait_s * 4:
+                break
+            self.sleep(0.5)
+        return rec
+
+    def keep_attempt_evidence(self, n, job_out):
+        """Copy a failed attempt's proxy.log, headless status file and the job's output into <evidence_dir>/attempt_<k>/, k the next free number (attempt.json names the attempt of its launch); an earlier folder is never replaced."""
+        base = self.evidence_dir or (Path(self.a.get('state_dir', '.')) / '_scratch' / self.owner)
+        k = 1
+        while (Path(base) / f'attempt_{k}').exists():   # each lost launch keeps its own folder, across calls and within one pass
+            k += 1
+        d = Path(base) / f'attempt_{k}'
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / 'attempt.json').write_text(json.dumps({'launch_attempt': n, 'utc': utc()}), encoding='utf-8')
+            (d / 'job_output.txt').write_text(job_out, encoding='utf-8')
+            src = [self.log_path()]
+            sf = (self.a.get('headless') or {}).get('status_file')
+            if sf:
+                src.append(Path(os.path.expandvars(self.a['game_dir'])) / sf)
+            for f in src:
+                if f and f.exists():
+                    (d / f.name).write_bytes(f.read_bytes())
+        except OSError as e:
+            print(f'ctl: attempt {n} evidence not kept: {e}', file=sys.stderr)
 
     def ctl(self, line, wait_s):
         rc, out = self.sh([bash(), str(HERE / 'job.sh'), '--adapter', self.adapter_path, 'ctl', self.owner, line, str(wait_s)], None, wait_s + 30)
@@ -386,10 +516,16 @@ class Pc:
             raise RuntimeError(f'step exit: the game did not exit and the kill job failed: {out[-300:]}')
         return 'killed'
 
-    def build_info(self):
-        """build (pc_deploy's install.json), backend and size (the installed ini) of the running game: what a perf number belongs to."""
+    def build_info(self, strict=False):
+        """strict (W9, acceptance): the build of the running launch from self.launches, never a fallback; raises when there is none.
+        Otherwise (perf labels): build (pc_deploy's install.json), backend and size (the installed ini) of the running game: what a perf number belongs to."""
         inst = Path(self.a['state_dir']) / 'install.json'
         rec = json.loads(inst.read_text(encoding='utf-8')) if inst.exists() else {}
+        if strict:
+            last = self.launches[0] if self.launches else None   # decision 1: a pass takes its build from its first launch (build_stable fails a later one that differs)
+            if not last or not last.get('build'):
+                raise RuntimeError('no launch of this run logged its build in proxy.log (pid-matched load line): the build id is never guessed from the kit')
+            return {'build': last['build'], 'kit': rec.get('kit_id'), 'dll_sha256': last.get('dll_sha256_logged')}
         ini = ini_values(self.ini_path().read_text(encoding='utf-8')) if self.ini_path().exists() else {}
         # the DLL's own build id (a hash of its inputs' content, proxy/tools/build_id.py: what rule 79 compares), from its load line; the kit id names HEAD at kit time
         log = self.ini_path().parent / ident_mod(self.a) / 'logs' / 'proxy.log'
@@ -466,6 +602,7 @@ def job_sh_transport(owner, adapter=None):
 class Ctl:
     def __init__(self, transport, scenarios, adapter, battles_dir=None, shotter=None, clock=time.monotonic, sleep=time.sleep, pc=None, session=None):
         self.t, self.rows, self.cfg = transport, scenarios, adapter.get('ctl', {})
+        self.adapter = adapter
         self.battles_dir = battles_dir or layout.proxy_adapter(ROOT) / 'lua' / 'battles'
         self.shotter, self.clock, self.sleep = shotter, clock, sleep
         self.pc, self.session = pc, session or Session(None)   # pc: the game binding (launch, keys, exit, vram); None = a game already running
@@ -550,7 +687,8 @@ class Ctl:
         except Refused as e:
             return make_result(verb, 'refused', str(e), start)
         except Exception as e:   # a failure names its step and keeps going to the caller as data, never a traceback
-            return make_result(verb, 'failed', f'{type(e).__name__}: {e}', start)
+            extra = {'cause': e.cause, 'attempts': e.attempts} if isinstance(e, HeadlessLaunchLost) else {}
+            return make_result(verb, 'failed', f'{type(e).__name__}: {e}', start, **extra)
 
     # -- verbs
     def v_state(self, start):
@@ -558,12 +696,24 @@ class Ctl:
         return make_result('state', 'ok', start=start, state=s, check={'compared': 'state.json readable', 'expected': 'a scene and a frame', 'got': {'scene': s.get('scene'), 'frame': s.get('frame')}})
 
     def v_scene(self, start, sid, *opts):
+        """W9 (B51): a row with save_file is staged under the harness name before the autostart and cleared after, whatever the outcome."""
+        row = resolve_scenario(self.rows, sid)
+        if row.get('save_file'):
+            notes = []
+            with stage_save(row, self.adapter, ROOT, say=notes.append):
+                res = self._scene(start, sid, *opts)
+            if notes and isinstance(res, dict):
+                res['staged_notes'] = notes   # kept as evidence in the result, not printed ahead of the JSON
+            return res
+        return self._scene(start, sid, *opts)
+
+    def _scene(self, start, sid, *opts):
         """Load a scenario from any state: launch (with the adapter's dev keys) when no game runs or its keys are wrong, autostart from the
         front end, warm reset from a battle, relaunch from a campaign (no quit flow: the game repo's engine fact campaign.quit_to_menu); settle; then
         `--deploy end` ends deployment (the row's launch command names it) so pause, speed and battle-time shots work."""
         row = resolve_scenario(self.rows, sid)
         deploy = 'end' if ('--deploy' in opts and 'end' in opts) or 'deploy=end' in opts else 'running'
-        target = scenario_target(row, self.battles_dir)
+        target = scenario_target(row, self.battles_dir, self.adapter)
         path = {'launch': None}
         if self.pc is not None:
             pid = self.pc.pid()
@@ -913,7 +1063,13 @@ class Ctl:
 
     def v_reset(self, start, sid=None):
         row = resolve_scenario(self.rows, sid) if sid else None
-        target = scenario_target(row, self.battles_dir) if row else 'frontend'
+        target = scenario_target(row, self.battles_dir, self.adapter) if row else 'frontend'
+        if row and row.get('save_file'):   # a staged campaign row: its save is in the folder only while staged
+            with stage_save(row, self.adapter, ROOT, say=lambda t: None):
+                return self._reset(start, row, target)
+        return self._reset(start, row, target)
+
+    def _reset(self, start, row, target):
         rc, r = self.t(f'reset {target} 240', 260)
         if rc != 0 or not r:
             return make_result('reset', 'failed', f"step reset {target}: {(r or {}).get('reason', 'no result')}", start, evidence={'ctl': r})

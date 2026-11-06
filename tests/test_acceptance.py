@@ -6,6 +6,7 @@ the null game (proxy/tests/null_game). No game: fakes play ctl and the PC."""
 import copy
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,11 @@ def baseline():
             'settings_files': ['prefs', 'keys']}
 
 
+SHOT = os.path.join(tempfile.gettempdir(), 'wsc_test_acceptance_shot.jpg')   # a real file: run_pass hashes the shot where it lies (W9)
+with open(SHOT, 'wb') as _f:
+    _f.write(b'JPEG')
+
+
 class FakeCtl:
     def __init__(self, fail=None, load_s=20.0):
         self.fail, self.load_s, self.calls = fail, load_s, []
@@ -33,7 +39,7 @@ class FakeCtl:
         self.calls.append((verb, args))
         if self.fail == verb:
             return {'status': 'refused', 'reason': f'{verb} refused', 'check': {}}
-        return {'status': 'ok', 'reason': '', 'check': {'k': 1}, 'load_s': self.load_s}
+        return {'status': 'ok', 'reason': '', 'check': {'k': 1}, 'load_s': self.load_s, **({'shot': SHOT} if verb == 'shot' else {})}
 
 
 def env(ctl, exe='pin', settings_after=None):

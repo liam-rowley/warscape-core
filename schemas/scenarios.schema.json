@@ -119,6 +119,16 @@
         "$ref": "#/$defs/text"
       },
       "uniqueItems": true
+    },
+    "save_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "campaign rows only: the save to stage, a path relative to the game repo root (W9); the adapter ctl.saves block says where it is copied, under a wsc_ name"
+    },
+    "save_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of save_file; the stage refuses a file that differs"
     }
   },
   "x-view": {
@@ -148,7 +158,21 @@
         "required": [
           "time_of_day",
           "weather"
-        ]
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "save_file"
+              ]
+            },
+            {
+              "required": [
+                "save_sha256"
+              ]
+            }
+          ]
+        }
       }
     }
   ],
