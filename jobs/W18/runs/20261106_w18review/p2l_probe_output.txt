@@ -1,0 +1,7 @@
+hwnd 34605768 awareness 0 (0 = unaware)
+physical rect 150 150 450 450 dpi for window 96
+inside                               (300,300) -> ok=1 point=(200,200) err=0
+top-left corner                      (150,150) -> ok=1 point=(100,100) err=0
+bottom-right corner                  (450,450) -> ok=1 point=(300,300) err=0
+outside, near                        (500,500) -> ok=0 point=(500,500) err=0
+outside, far (a target elsewhere)    (7000,3000) -> ok=0 point=(7000,3000) err=0

@@ -19,6 +19,12 @@ starts one whenever a job branch's row says `review`, and `wsc jobs review` name
 session (`wsc jobs fix`), which appends `## Fix round N` to `report.md` and sets `review` again; the loop then starts the next round. Round 3 without
 `merge` blocks the job for the owner.
 
+**One more round (W132).** The owner grants it on a `meta/` branch. A job reads `blocked` only on its own branch, so main's row still says `queued`, and the one pull request carries both:
+`python3 wsc.py reg set jobs <id> status=blocked blocked_by="3 review rounds without merge"`, then `python3 wsc.py reg add decisions --mint who=Liam decision="<why>" reversible=no grants_round=<id>`.
+`policy` refuses the row on `plan/` (it merges itself), `brief/`, `release/` and every `job/` branch, for a job whose row there is not blocked after its rounds, or whose row on the base is not `queued` or `blocked`.
+That `meta/` is the owner's is a rule, not a control: `policy` sees the branch kind, not who merged, and nothing enforces it. One row per extra round; a grant cannot be reversed, as every row counts.
+Once it is on main the job's branch **merges main first** (the limit is read from the checked-out tree, and on the row file keep the branch's own row), sets its row to `fix`/`review` as after round 1 or 2 (a fix session appends `## Fix round 3`), and a fresh session writes round 4.
+
 ## Setup
 A **new** Claude Code session in the repo folder (never the one that built the branch): `git fetch`, check out the job branch, `git submodule update --init`
 in a game repo. Follow the repo's `CLAUDE.md`. Read, in this order: `jobs/<id>/brief.md`, `jobs/<id>/report.md`, `jobs/<id>/handback.md` when there is one (the builder

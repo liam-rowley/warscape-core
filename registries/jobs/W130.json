@@ -1,0 +1,14 @@
+{
+  "id": "W130",
+  "description": "**`[audit] auto_apply` must stay empty until this is done**: W45's guard refuses every auto-accept while the list is empty (review round 3, through the real judge), but with a class listed four things fail. (1) **A hand-written record (route 13)**: a `plan/` branch may add an `AUDIT_` record holding any finding, and `record_holds` believes it. Joined to an alias (`doc_cap:docs//T.md`, `./docs/T.md`, a trailing space, a backslash, `DOCS/T.md`) it accepts a row on a tagged finding, and `proposals check` says ok; `answer --auto` does the same. Let a class be listed only if the judge can re-derive its finding from git at the record's sha, and refuse a finding id that is not canonical. (2) **Two branches (route 31)**: each passes alone, so the merge is not stopped: require a branch up to date before merge, or judge the merged tree (W45 report question 5; W45's own conflict and `doc_size` overrun with W9 and W94 were the same skew). (3) **The repair**: `check` reads answered rows only, so closing the accepted row on `plan/` with no evidence clears the red main while its job and decision rows stay; W125 must close this, and W46 must not start such a job. (4) **Nothing enforces the order**: `job/` may change `wsc.toml` too, and no code ties the list to `meta/`. Make `audit_problem` refuse a non-empty list until (1) to (3) land. Also, live with the list empty: a record named `AUDIT_2099-12-31.json` passes `plan/`, `newest_record` then reads it for good, `draft` writes nothing and `close` shuts every open row, tagged ones too, and only `meta/` can remove it: refuse a record whose name is not its `date`, or is after the commit. Depends on W45 merging. From W45 review round 3, 2026-11-06.",
+  "title": "What must hold before `[audit] auto_apply` is filled",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [
+    "W45",
+    "W125"
+  ],
+  "area": "core"
+}

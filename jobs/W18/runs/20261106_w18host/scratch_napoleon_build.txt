@@ -1,0 +1,17 @@
+nap_build.txt:build.sh: /src/build/proxy/napoleon/d3d9.dll build a005f6cccc17-dirty sha256 5a819438ea6121a6cd6c7ec50b74372af056ecbfaa69c2c354804416e6ed967c
+nap_build.txt:build.sh: core test test_config
+nap_build.txt:  FAIL /src/core/proxy/tests/test_config.cpp:81: c.values.count(k) == 1
+nap_build.txt:  FAIL /src/core/proxy/tests/test_config.cpp:81: c.values.count(k) == 1
+nap_build.txt:test_config: 141 passed, 2 failed
+nap_build.txt:build.sh: core test test_config FAILED
+nap_build.txt:build.sh: core test test_guard
+nap_build.txt:  FAIL /src/core/proxy/tests/test_guard.cpp:147: false
+nap_build.txt:  FAIL /src/core/proxy/tests/test_guard.cpp:147: false
+nap_build.txt:test_guard: 95 passed, 2 failed
+nap_build.txt:build.sh: core test test_guard FAILED
+nap_build3.txt:build.sh: /src/build/proxy/napoleon/d3d9.dll build a005f6cccc17-dirty sha256 a588edd7d05ef0f8029e75c39cf471620f66ccef922bc0898598629ecb7081d2
+nap_build3.txt:build.sh: core test test_config
+nap_build3.txt:test_config: 145 passed, 0 failed
+nap_build3.txt:build.sh: core test test_guard
+nap_build3.txt:test_guard: 95 passed, 0 failed
+nap_build3.txt:build.sh: host tests passed (17 core, 0 game)

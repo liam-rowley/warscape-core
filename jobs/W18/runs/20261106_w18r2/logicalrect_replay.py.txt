@@ -1,0 +1,73 @@
+"""W18 review round 2: LogicalRect's Win32 sequence, replayed. A thread in the named context owns a never-shown popup; a per-monitor V2 thread
+then does what headless.cpp LogicalRect does, in its order: GetWindowDpiAwarenessContext(h), AreDpiAwarenessContextsEqual against both per-monitor
+contexts, SetThreadDpiAwarenessContext(ctx) keeping prev, GetMonitorInfoW(hmon), restore. No game, no display setting, nothing shown."""
+import ctypes, threading, sys
+from ctypes import wintypes as w
+
+u = ctypes.WinDLL("user32", use_last_error=True)
+u.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+u.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+u.GetWindowDpiAwarenessContext.restype = ctypes.c_void_p
+u.GetWindowDpiAwarenessContext.argtypes = [w.HWND]
+u.AreDpiAwarenessContextsEqual.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+u.AreDpiAwarenessContextsEqual.restype = w.BOOL
+u.CreateWindowExW.restype = w.HWND
+u.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
+u.DestroyWindow.argtypes = [w.HWND]
+
+
+class MI(ctypes.Structure):
+    _fields_ = [("cb", w.DWORD), ("rc", w.RECT), ("work", w.RECT), ("flags", w.DWORD), ("dev", w.WCHAR * 32)]
+
+
+MONENUM = ctypes.WINFUNCTYPE(w.BOOL, ctypes.c_void_p, w.HDC, ctypes.POINTER(w.RECT), w.LPARAM)
+u.EnumDisplayMonitors.argtypes = [w.HDC, ctypes.c_void_p, MONENUM, w.LPARAM]
+u.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(MI)]
+PMV1, PMV2 = -3, -4
+
+
+def info(hm):
+    m = MI()
+    m.cb = ctypes.sizeof(MI)
+    assert u.GetMonitorInfoW(hm, ctypes.byref(m))
+    return m.dev, (m.rc.left, m.rc.top, m.rc.right, m.rc.bottom)
+
+
+def run(name, want):
+    hold, ready, done = {}, threading.Event(), threading.Event()
+
+    def owner():
+        u.SetThreadDpiAwarenessContext(want)
+        hold["h"] = u.CreateWindowExW(0, "Static", "w18r2", 0x80000000, 100, 100, 640, 480, None, None, None, None)
+        ready.set()
+        done.wait()
+        u.DestroyWindow(hold["h"])
+
+    t = threading.Thread(target=owner, daemon=True)
+    t.start()
+    ready.wait()
+    u.SetThreadDpiAwarenessContext(PMV2)
+    hs = []
+
+    def cb(hm, dc, rc, lp):
+        hs.append(hm)
+        return True
+    cbk = MONENUM(cb)
+    u.EnumDisplayMonitors(None, None, cbk, 0)
+    ctx = u.GetWindowDpiAwarenessContext(hold["h"])
+    aware = bool(u.AreDpiAwarenessContextsEqual(ctx, PMV2)) or bool(u.AreDpiAwarenessContextsEqual(ctx, PMV1))
+    print(f"{name}: ctx {ctx:#x} per-monitor {aware}")
+    for hm in hs:
+        dev, phys = info(hm)
+        prev = u.SetThreadDpiAwarenessContext(ctx)
+        _, log = info(hm)
+        if prev:
+            u.SetThreadDpiAwarenessContext(prev)
+        print(f"  {dev}: prev {'ok' if prev else 'NULL'} physical {phys} logical {log} arms {phys != log and not aware}")
+    done.set()
+    t.join()
+
+
+run("unaware", -1)
+run("system", -2)
+run("pmv2", -4)

@@ -1,6 +1,6 @@
 {
   "id": "W51",
-  "description": "**Show-time window guard**: the headless guard hides a window a DLL opens after start-up within one sweep (about 250 ms; run 20261031_j12pc: 109 ms on a real monitor); a WinEvent hook (EVENT_OBJECT_SHOW, pumped on the guard thread) would cut that to a poll Why: a third-party window can be seen for up to a quarter second (napoleon J12)",
+  "description": "**Show-time window guard**: the headless guard hides a window a DLL opens after start-up within one sweep (about 250 ms; run 20261031_j12pc: 109 ms on a real monitor); a WinEvent hook (EVENT_OBJECT_SHOW, pumped on the guard thread) would cut that to a poll Why: a third-party window can be seen for up to a quarter second (napoleon J12) Delivered by W18 (merged 2026-11-06, #156): nothing left to do; this row stays `later` because a `done` row needs its own job folder.",
   "title": "Show-time window guard",
   "phase": 1,
   "status": "later",

@@ -1,0 +1,8 @@
+{
+  "id": "C261106-8586",
+  "date": "2026-11-06",
+  "who": "Liam",
+  "decision": "**W45 gets one more review round.** Its round 3 could not say merge only because the reviewer had to fix two merge conflicts itself (one test count, one doc word); Liam chose this over a bypass on 2026-11-06. A fresh round reviews those two commits.",
+  "reversible": "no",
+  "grants_round": "W45"
+}
