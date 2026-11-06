@@ -69,7 +69,7 @@ S = Settings()
 
 def read_grants(folder):
     """{job id: number of decision rows naming it in `grants_round`} of a decisions folder (W132). The rows are append only and `policy`
-    admits one only from a branch the owner merges, so the folder of the checked-out tree is as good as the base's."""
+    admits one only from a `meta/` branch, so the folder of the checked-out tree is as good as the base's once it has merged main (`grant_hint`)."""
     out = {}
     for f in sorted(Path(folder).glob('*.json')) if folder else ():
         try:
@@ -88,6 +88,10 @@ def max_rounds(jid, grants=None):
 
 def blocked_by_rounds(jid, grants=None):
     return f'{max_rounds(jid, grants)} review rounds without merge'
+
+
+def grant_hint():
+    return f'the owner can grant one more, {S.text.get("review_doc", "docs/REVIEW.md")} "Rounds", and a grant on main counts here only once this branch has merged main'
 
 
 def configure_from(cfg, root=None, reg_dir='registries', decisions=''):
@@ -151,7 +155,6 @@ DATED = re.compile(r'\b20\d\d-\d\d-\d\d\b')
 ROUND = re.compile(r'^## Round\b.*$', re.M)
 ROUND_HEAD = re.compile(r'^## Round ([1-9]\d*) \(20\d\d-\d\d-\d\d, branch `?job/[A-Z]\d+`? at `?[0-9a-f]{7,40}`?\)\s*$')
 MAX_ROUNDS = 3
-BLOCKED_BY_ROUNDS = f'{MAX_ROUNDS} review rounds without merge'
 def num(jid):
     return int(jid[1:]) if re.fullmatch(r'[A-Z]\d+', jid or '') else 10 ** 9
 
@@ -519,8 +522,7 @@ def round_problems(text, jid=None):
             errs.append(f'"{head.strip()}" has {len(verdict_lines(body))} verdict lines, not exactly one')
     limit = max_rounds(jid)
     if len(rounds) > limit:
-        errs.append(f'review.md has {len(rounds)} rounds: at most {limit} (after round {limit} without merge the job is blocked; the owner can grant one more, '
-                    f'{S.text.get("review_doc", "docs/REVIEW.md")} "Rounds")')
+        errs.append(f'review.md has {len(rounds)} rounds: at most {limit} (after round {limit} without merge the job is blocked; {grant_hint()})')
     if nums != list(range(len(nums), 0, -1)):
         errs.append(f'rounds are {", ".join(map(str, nums))}: they must count up from 1 with no gap, newest first '
                     f'(want {", ".join(map(str, range(len(nums), 0, -1)))})')
@@ -531,7 +533,7 @@ def round_problems(text, jid=None):
 
 def round_status_problems(row, review, report):
     """The row must agree with the newest round's verdict: merge -> done; a non-merge in round N < 3 -> fix, or review once
-    report.md has "## Fix round N"; a non-merge in round 3 -> blocked with BLOCKED_BY_ROUNDS."""
+    report.md has "## Fix round N"; a non-merge in the last round (`max_rounds`) -> blocked with `blocked_by_rounds`."""
     st, n, v = row.get('status'), round_count(review), verdict(review)
     if v not in ('merge', 'merge after fixes', 'do not merge') or not n:
         return []   # reported by the verdict and round rules
@@ -541,7 +543,7 @@ def round_status_problems(row, review, report):
     if n >= max_rounds(row.get('id')):
         if st == 'blocked' and row.get('blocked_by') == want_by:
             return []
-        return [f'round {n} says "{v}": the row must be blocked with blocked_by="{want_by}", not {st}']
+        return [f'round {n} says "{v}": the row must be blocked with blocked_by="{want_by}", not {st} ({grant_hint()})']
     fixed = bool(re.search(rf'^## Fix round {n}\b', report or '', re.M))
     if st == 'fix' and not fixed:
         return []
