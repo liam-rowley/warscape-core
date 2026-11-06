@@ -2,7 +2,7 @@
 
 W45 adds the half of C41 between a finding and a change: a proposals registry, `wsc proposals draft|check|ask|answer|close`, a `decide/` branch kind only the owner merges, and a guard on every branch kind so that nothing but `decide/` can write an answer. `wsc audit` now reads the rows, suppressing declined findings and re-measuring applied ones, and `doc_caps` leaves out the job folders. The dry run went end to end: the answers pass `policy` on `decide/`, and the same diff is refused on `plan/`. Branch `job/W45`, session 8c158f7a.
 
-Usage: 205 tool calls; models: opus; 3 sessions, counted by hand, about, brief 30, build 75, fix 25 and fix round 2 75, 2026-11-06
+Usage: 240 tool calls; models: opus; 4 sessions, counted by hand, about, brief 30, build 75, fix 25, fix round 2 75 and fix round 3 35, 2026-11-06
 
 ## What was built
 - `schemas/proposals.schema.json`, declared in `wsc.toml` with one file per row. The registry stays empty here: W47's session raises the first real rows.
@@ -179,3 +179,24 @@ Controls, all ok through the judge: add, fill, add a tag, close a tagged row as 
 - `python3 wsc.py policy --branch job/W45 --base origin/main`, judged at origin/main `0ac0bf6`: refused on only the two expected lines, the missing merge verdict and the row not `done`.
 - **Budget, for the reviewer to accept or refuse.** 205 calls is over 1.25 x the brief's 150, so the `jobs` gate refused the push. `docs/USAGE.md` gives this to the reviewer; this session added the lift, 150 to 200, as W44's fix round did, rather than understate the line or leave CI red. The count is by hand and about.
 - The alias test (route 11) came after that gates run: `tests/test_proposals_judge.py` alone passed with it, 35 tests. Merging `0ac0bf6` added only `registries/jobs/W127.json`.
+
+## Fix round 3
+
+Round 3 of the review (verdict: merge after fixes) left no finding open on the branch. Liam granted one more round (C261106-8586, on main), so this round merges main, as `docs/REVIEW.md` "One more round" orders, and hands the branch to a fresh round 4. That round has to review the reviewer's own two commits, `0bfc589` and `0ae0a89`, which no fresh round has read, and this round's merge.
+
+### Round 3's findings
+- **Blocker, the schema count (`0bfc589`):** left as the reviewer made it. `tests/test_schema.py` still says 13 after this merge, and 13 schemas ship.
+- **Blocker, `doc_size` (`0ae0a89`):** left as the reviewer made it. `docs/CONSUMING.md` is 30645 bytes on this merged tree, against the cap of 30720.
+- **Should-fix, the missing trailer on `0bfc589`:** not changed. Rewriting it needs a force-push, and the review says it stays.
+- **Later, W130:** stays filed, nothing built. The row is on main now, as #160 merged after the review was written, so its note "W130 is not on main" is out of date. `[audit] auto_apply` stays empty.
+
+### What changed
+- **`cfcfddf`, merge of origin/main at `9a86f0b`.** Two conflicts. `registries/jobs/W45.json`: the branch's own row kept. `warscape/policy.py`: W45's proposal guard and W132's grant guard landed in the same two places and neither replaces the other, so both stay: the blocks one after the other, each with its own `return errs`, and in `check` both calls, `proposal_problems` then `grant_problems`. Nothing inside either was edited. This hunk is the one to read in this merge.
+- **`445d5e6`, the row to `fix`, `blocked_by` removed,** as the grant asks, pushed so that `python3 wsc.py jobs fix --id W45` could name it. Before this, `tests/test_grant_round.py` failed one test on the real tree, `jobs check` saying the row should be `fix`, not `blocked`: that was the grant working, and it passes now.
+- **`4047691`, a new finding from the merge, no behaviour change.** W132 wrote `GRANT_KINDS` before `decide/` existed, with a comment that the kind is refused until a base knows it. On the merged tree `decide/` is known and `decide_problems` lets it change no job row, while `grant_problems` wants the row blocked. So a first grant on `decide/` is refused (`adds job rows only`), and a grant passes there only for a row already blocked on the base. `meta/` stays the route `docs/REVIEW.md` names. The comment now says this, and `test_on_decide_a_grant_needs_the_row_already_blocked_on_the_base` pins both halves through the real judge. Neither parent could show this: it exists only on the merge.
+
+### Evidence
+- **`python3 wsc.py gates`** on this Windows PC at `4047691`, 2026-11-06: 14 ok, 2 warn, 0 failed, 1563 host tests passed, 5 skipped, 897.5 s, under `[tests] timeout_s` of 1080. The warns are this clone's hook path and the known skips. Other sessions may have shared this PC; the time is the same as fix round 2's 897.6 s.
+- **Rerun alone on the merge:** `test_policy*.py` 134 tests, `test_proposals*.py` 158, `test_schema.py` 8, all passed at `cfcfddf`; `test_grant_round.py` 19 passed at `4047691`.
+- **CI** on `4047691` was still running when this was written: run 42295783364. The next round reads its result. Run 42295381780 at `445d5e6` was cancelled by the next push, so it is no evidence.
+- **Not done:** the routes through a throwaway judge and the mutation check were not repeated, as this round changed no guard. No game, PC or `job.sh` work.
