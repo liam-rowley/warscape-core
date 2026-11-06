@@ -2,6 +2,7 @@
 and the `decide/` kind and the guard in warscape/policy.py, one test per forgery. Pure logic and a plain folder: no test here reads this repo's history."""
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from warscape import audit as A  # noqa: E402
+from warscape import gates, jobq  # noqa: E402
 from warscape import policy as pp  # noqa: E402
 from warscape import proposals as P  # noqa: E402
 from warscape.repo import DEFAULTS, ConfigError, Ctx, audit_problem  # noqa: E402
@@ -102,7 +104,18 @@ class Forgeries(unittest.TestCase):
         self.refused(judge('plan/x', {path(): text(row())}, {path(): text(r), 'wsc.toml': '[audit]\nauto_apply = ["doc_cap"]\n'}), 'decide/')
 
     def test_auto_apply_cannot_claim_the_owner(self):
-        self.refused(judge('plan/x', {path(): text(row())}, {path(): text(answered())}, cfg=AUTO), 'decide/')
+        r = answered(record=row()['baseline']['record'])   # every other field as auto_apply writes it
+        self.refused(judge('plan/x', {path(): text(row())}, {path(): text(r)}, cfg=AUTO), 'decide/')
+
+    def test_auto_apply_must_name_the_baselines_record(self):
+        self.refused(judge('plan/x', {path(): text(row())}, {path(): text(answered(by='auto_apply'))}, cfg=AUTO), 'decide/')
+
+    def test_auto_apply_must_set_the_options_status(self):
+        r = answered(by='auto_apply', record=row()['baseline']['record'], status='declined')
+        self.refused(judge('plan/x', {path(): text(row())}, {path(): text(r)}, cfg=AUTO), 'decide/')
+
+    def test_a_status_alone_counts_as_an_answer(self):
+        self.refused(judge('plan/x', {path(): text(row())}, {path(): text(row(status='accepted'))}), 'decide/')
 
     def test_auto_apply_cannot_change_the_row_it_accepts(self):
         r = answered(by='auto_apply', record=row()['baseline']['record'], question='Another question?')
@@ -121,6 +134,10 @@ class Forgeries(unittest.TestCase):
     def test_an_answered_row_keeps_its_answer_and_its_content(self):
         for change in ({'recommended': 'no'}, {'question': 'Other?'}, {'answer': {**answered()['answer'], 'option': 'no'}}, {'decision': 'C261106-dddd'}, {'job': 'W201'}):
             self.refused(judge('plan/x', {path(): text(answered())}, {path(): text({**answered(), **change})}), 'answered')
+
+    def test_closing_a_row_cannot_rewrite_it(self):
+        r = answered(status='closed', outcome='moved', recommended='no')
+        self.refused(judge('plan/x', {path(): text(answered())}, {path(): text(r)}), 'keeps its content')
 
     def test_an_answered_status_only_goes_to_closed(self):
         self.refused(judge('plan/x', {path(): text(answered())}, {path(): text(answered(status='declined'))}), 'answered')
@@ -206,7 +223,7 @@ class Forgeries(unittest.TestCase):
 
     def test_decide_fails_closed_without_an_owner(self):
         cfg = {**CFG, 'text': {**CFG['text'], 'owner': ''}}
-        self.refused(judge('decide/2026-11-06', {path(): text(row())}, decide_head(), head_rows={'W200': job()}, cfg=cfg), 'owner')
+        self.refused(judge('decide/2026-11-06', {path(): text(row())}, decide_head(), head_rows={'W200': job()}, cfg=cfg), '[jobs.text] owner')
 
 
 class Allowed(unittest.TestCase):
@@ -293,6 +310,7 @@ class Overlay(unittest.TestCase):
     def test_on_a_baseline_of_zero_any_worsening_counts(self):
         self.assertTrue(P.worse(0.1, 0, 'above', 0.25))
         self.assertFalse(P.worse(0, 0, 'above', 0.25))
+        self.assertFalse(P.better(0, 0, 'above', 0.25))   # the same is no better
 
     def test_only_the_newest_row_on_a_finding_suppresses(self):
         old = answered(ID, option='no', status='declined')
@@ -432,7 +450,7 @@ class Folder(unittest.TestCase):
 
     def test_check_refuses_a_skeleton_and_a_bad_recommendation(self):
         self.put({**row(options=[]), 'recommended': 'split'})
-        self.assertTrue(any('options' in e for e in P.check(self.ctx)))
+        self.assertTrue(any('fill the skeleton' in e for e in P.check(self.ctx)))
         self.put(row(ID2, finding='doc_cap:docs/Z.md', recommended='nope'))
         self.assertTrue(any('recommended' in e for e in P.check(self.ctx)))
 
@@ -578,6 +596,31 @@ class Folder(unittest.TestCase):
         got = P.view_html(self.ctx)
         self.assertIn('Waiting on Liam', got)
         self.assertIn('a &lt;b&gt; question', got)
+
+
+    def test_jobs_view_carries_the_lane(self):
+        self.put(row(question='a question for the page'))
+        jobq.configure(self.ctx)
+        page = jobq.render_view([], lambda p: None, set(), 'now', ctx=self.ctx, owner_html=P.view_html(self.ctx))
+        self.assertIn('a question for the page', page)
+
+    def test_both_callers_of_the_page_pass_the_lane(self):
+        """`jobs view` and `--serve` each build the page: a caller that drops the argument shows nothing and fails nothing."""
+        self.assertIn('owner_html=proposals.view_html(ctx)', (ROOT / 'warscape/verbs/jobs.py').read_text(encoding='utf-8'))
+        self.assertIn('proposals.view_html(self.ctx)', (ROOT / 'warscape/jobq.py').read_text(encoding='utf-8'))
+
+    def test_the_jobs_gate_runs_the_check(self):
+        self.put(row(options=[]))
+        got = gates.gate_jobs(self.ctx)
+        self.assertEqual(got.level, 'error')
+        self.assertTrue(any('fill the skeleton' in d for d in got.details), got.details)
+
+    def test_reg_add_mints_a_proposal_id(self):
+        r = row()
+        del r['id'], r['date']
+        p = subprocess.run([sys.executable, str(ROOT / 'wsc.py'), '--root', str(self.root), 'reg', 'add', 'proposals', '--mint', '--json', json.dumps(r)], capture_output=True, text=True, encoding='utf-8')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertRegex(self.regs()['proposals'].rows[0]['id'], r'^P\d{6}-[0-9a-f]{4}$')
 
 
 class NoRegistry(unittest.TestCase):

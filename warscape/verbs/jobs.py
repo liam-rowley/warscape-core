@@ -212,7 +212,8 @@ def run(args, ctx):
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         on_branch = J.branch_rows(ctx.root, branches, args.offline, reg_dir, done=done_ids(rows))
         J.print_claims(ctx.root, args.offline, branches)
-        out.write_text(J.render_view(rows, read, branches, stamp, on_branch, root=ctx.root, ctx=ctx, main_html=J.main_html(mstate)), encoding='utf-8')
+        from .. import proposals
+        out.write_text(J.render_view(rows, read, branches, stamp, on_branch, root=ctx.root, ctx=ctx, main_html=J.main_html(mstate), owner_html=proposals.view_html(ctx)), encoding='utf-8')
         print(f'jobs view: {len(rows)} jobs -> {out}')
         if not args.no_open:
             webbrowser.open(out.resolve().as_uri())

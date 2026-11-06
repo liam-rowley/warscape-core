@@ -1257,12 +1257,12 @@ def card_lines(results):
     return out
 
 
-def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None, main_html=''):
+def render_view(rows, read, branches, generated, on_branch=None, token=None, root=None, auto=None, ctx=None, main_html='', owner_html=''):
     """The queue as one HTML page. `read(path)`: file text or None; `branches`: remote branch names; `generated`: timestamp text;
     `on_branch`: see branch_rows (review and fix buttons need it). Brief, report and review are embedded as escaped Markdown and rendered by
     marked.js when it loads (plain text otherwise). A card gets a button for each action not_ready() allows: with `token` (served by
     `--serve`) it posts (id, action) to /launch; without, it copies the command line (run in `root`). `auto`: the autopilot's state
-    ({'interval', 'last', 'dry_run'}) when `--auto` runs. `main_html`: main's CI line(s) for the page head (`main_html(state)`, W22)."""
+    ({'interval', 'last', 'dry_run'}) when `--auto` runs. `main_html`: main's CI line(s) for the page head (`main_html(state)`, W22). `owner_html`: what waits on the owner, above the lanes (`proposals.view_html`, W45)."""
     e = html.escape
     by = {r['id']: r for r in rows}
     order = sorted(rows, key=lambda r: num(r['id']))
@@ -1313,8 +1313,7 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
     lanes = ''.join(f'<section class="lane" id="lane-{k}"><h2>{e(h)} <span class="muted">({len(placed[k])})</span></h2>'
                     f'<p class="muted">{e(why)}</p>' + ''.join(card(r, n) for r, n in placed[k]) + '</section>'
                     for k, h, why in LANES if placed[k])
-    from . import proposals
-    lanes = proposals.view_html(ctx) + lanes
+    lanes = owner_html + lanes
     refresh = ('Served by <code>wsc jobs view --serve</code>: reload to refresh; the buttons start background sessions.' if token else
                'Rerun it to refresh; the buttons copy the command (<code>wsc jobs view --serve</code> makes them start it).')
     if auto:
@@ -1554,7 +1553,8 @@ class JobServer(ThreadingHTTPServer):
     def page(self):
         rows, read, branches, on_branch = self.snapshot()
         stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-        return render_view(rows, read, branches, stamp, on_branch, self.token, self.root, self.auto, self.ctx, self.main_html_cached())
+        from . import proposals
+        return render_view(rows, read, branches, stamp, on_branch, self.token, self.root, self.auto, self.ctx, self.main_html_cached(), proposals.view_html(self.ctx))
 
     def main_html_cached(self):
         if not self.main_line:
