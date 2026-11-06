@@ -17,7 +17,7 @@ No blocker and no should-fix. The cap rule Liam chose holds against the real ses
 - `python3 wsc.py policy --branch job/W41 --base origin/main` before this round: only the two refusals a review clears (no review yet, row not done); judged with main's rules, and the branch changes `warscape/jobq.py`, `repo.py` and `verbs/jobs.py`, so its rules are proven by the host tests.
 - `python3 -m unittest tests.test_jobs` at 2c63ab4: 174 tests, OK. Red first, checked: the branch's test file on main's code (adf9b1a) gives 37 failed or errored, 36 of them in the six new classes, which is the report's number; the 37th is `BranchRows`, because that copy had no `.git`.
 - No old assertion changed: the test diff removes no line (the kill criterion).
-- CI: run 42182495196, cited by the report, is `gates` success at b836059. At the head, run 42184071869: `changes` and `gates (ubuntu-latest)` pass; windows, `proxy` and `harness-windows` are skipped on the draft and run on the ready head before auto-merge.
+- CI: run 42182495196, cited by the report, is `gates` success at b836059. At the head, run 42184071869: `changes` and `gates (ubuntu-latest)` pass; `gates (windows-latest)`, `proxy` and `harness-windows` are skipped, which is right: the report has windows and `harness-windows` passing at b836059 and `proxy` with nothing to run, and everything changed since is under `docs/`, `jobs/` and `registries/jobs/`, outside their `[ci.inputs]`. The local Windows gates below ran the same code.
 - `python3 wsc.py gates` at 2c63ab4 on this Windows PC, 2026-11-06: 14 ok, 2 warn, 0 failed; 1319 host tests passed, 5 skipped. The warnings are the hook path in this worktree and the skipped tests (no POSIX sh, no capstone).
 
 ### Against main
