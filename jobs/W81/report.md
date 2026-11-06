@@ -2,6 +2,8 @@
 
 W81 makes `job.sh lock --wait S` wait at least S seconds: the deadline and the clock are now in milliseconds (`now_ms()`, `date +%s%N`), and the last sleep is only the time left (at most 2 s), so `--wait 3` ends at about 3.0 s instead of the second 2 s poll.
 
+Usage: 30 tool calls; models: sonnet; 1 session, call count estimated by the session, no transcript tool
+
 ## What was built
 - `harness/job.sh`: `now_ms()`; `lock` uses `end_ms`, computes `left_ms` each pass, exits 124 (text unchanged) when none is left, polls every 2 s while more than 2 s remain, else sleeps the remainder. Exit codes, the 100 s cap and the `--wait 0` refusal (2) are unchanged.
 - `tests/test_job_sh.py`: the 124 half of the named test now asserts `>= 3.0` and `< 6.0`; new `test_lock_wait_never_ends_early_whenever_in_the_second_it_starts` (6 runs of `--wait 1` at different sub-second offsets, each 124 and >= 1.0 s).
