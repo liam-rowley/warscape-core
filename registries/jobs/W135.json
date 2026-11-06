@@ -1,0 +1,11 @@
+{
+  "id": "W135",
+  "description": "**A retried start-up death leaves no trace in the pass file when it is the first launch of a pass.** `start()` in harness/acceptance.py:269 drops the return value, so napoleon's pass_14.json has no `retried_after` and `evidence.launches` lists survivors only (120 of 122). Anyone counting crashes from pass files undercounts, napoleon J101 included. Record every launch attempt in the pass file, with a host test. Raised: J78 review round 1, 2026-11-06.",
+  "title": "acceptance.py loses a retry on a pass's first launch",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}

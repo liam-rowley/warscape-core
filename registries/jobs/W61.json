@@ -1,6 +1,6 @@
 {
   "id": "W61",
-  "description": "**Re-stamp the provenance strings** written into results (`generator: discovery/core/<tool>.py`, the READMEs' \"written by `discovery/core/...`\", one `lua_api` evidence cell) to the tool's real path, in one deliberate regeneration commit on the game repo's first PC sitting Why: W4 kept the old text so no committed byte moved (J64 proof); the paths no longer exist Raised: napoleon J64 / core W4, 2026-11-03",
+  "description": "**Re-stamp the provenance strings** written into results (`generator: discovery/core/<tool>.py`, the READMEs' \"written by `discovery/core/...`\", one `lua_api` evidence cell) to the tool's real path, in one deliberate regeneration commit on the game repo's first PC sitting Why: W4 kept the old text so no committed byte moved (J64 proof); the paths no longer exist Raised: napoleon J64 / core W4, 2026-11-03. Also: napoleon J78 put `discovery/core/**` in `[docs] path_ignore` because `wsc discovery render` still writes the old names; remove it once this lands (J78 review, 2026-11-06)",
   "title": "Re-stamp the provenance strings",
   "phase": 1,
   "status": "later",

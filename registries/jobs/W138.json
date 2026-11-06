@@ -1,0 +1,11 @@
+{
+  "id": "W138",
+  "description": "**A launch using proxy.file_rules gets no kit check.** harness/ctl.py:381 checks only `dev.file_rules` against the kit. Since 0.34.0 shipped rules live in proxy.file_rules, so that route has no guard. Check both keys, with a host test. Also: `value_problems` does not hold `proxy.dxvk_wndproc_fix` to its release value when a component sets it (J78 review finding 8; no component does today). Raised: J78 review round 1, 2026-11-06.",
+  "title": "ctl.py guards only dev.file_rules against the kit",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}

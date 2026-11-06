@@ -1,0 +1,11 @@
+{
+  "id": "W137",
+  "description": "**docs/CONSUMING_OPTIONS.md gives a two-step decisions move that `policy` refuses.** A pull request is judged with its base's rules, and a consumer's `meta` globs do not match `registries/decisions/*` until they are merged, so the first step must add only the glob: three steps. Napoleon J105 follows the corrected order. Raised: J78 review round 1, 2026-11-06.",
+  "title": "CONSUMING_OPTIONS: the decisions move needs a glob-only first pull request",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [],
+  "area": "core"
+}
