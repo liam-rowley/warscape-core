@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "warscape-core/schemas/proposals.schema.json",
+  "title": "Proposals",
+  "description": "One row per question put to the owner, one file per row (C41, W45; docs/PROPOSALS.md): a finding of `wsc audit` with its baseline, options that each carry an apply recipe, and a recommendation. An id is minted because a finding id holds `:` and `/`, which no file name may. Only a `decide/` branch writes an answer (`wsc policy`); `applied` is computed, never stored.",
+  "type": "object",
+  "required": ["id", "date", "kind", "class", "question", "options", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^P[0-9]{6}-[0-9a-f]{4}$"},
+    "date": {"type": "string", "format": "date"},
+    "kind": {"enum": ["finding", "question"], "description": "`wsc proposals draft` writes `finding`; `question` is W32's and needs no `finding` or `baseline`"},
+    "finding": {"type": "string", "minLength": 1, "description": "the audit finding id, `<rule>:<subject>`"},
+    "metric": {"type": "string", "minLength": 1},
+    "class": {"type": "string", "minLength": 1, "description": "the finding's rule: `[audit] auto_apply` names classes"},
+    "question": {"type": "string", "minLength": 1, "description": "one sentence"},
+    "baseline": {
+      "type": "object",
+      "required": ["record", "value", "threshold", "direction", "severity", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "record": {"type": "string", "minLength": 1},
+        "value": {"type": "number"},
+        "threshold": {"type": "number"},
+        "direction": {"enum": ["above", "below"]},
+        "severity": {"enum": ["high", "medium", "low"]},
+        "evidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "options": {
+      "type": "array",
+      "description": "empty only on a skeleton, which `wsc proposals check` refuses until it is filled",
+      "items": {
+        "type": "object",
+        "required": ["key", "kind", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "key": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
+          "kind": {"enum": ["decision", "job", "defer", "none"]},
+          "summary": {"type": "string", "minLength": 1},
+          "recipe": {"type": "object", "description": "decision: {decision, reversible}; job: {title, description, phase, model, needs_pc, semver, depends_on}; defer and none: nothing"}
+        }
+      }
+    },
+    "recommended": {"type": "string", "minLength": 1, "description": "an option key"},
+    "tag": {"enum": ["taste", "risk", "legal"], "description": "a tagged proposal is always asked: never auto-applied, never defaulted"},
+    "status": {"enum": ["open", "accepted", "declined", "deferred", "closed"]},
+    "answer": {
+      "type": "object",
+      "required": ["by", "date", "record", "option"],
+      "additionalProperties": false,
+      "properties": {
+        "by": {"type": "string", "minLength": 1, "description": "`[jobs.text] owner`, or `auto_apply`"},
+        "date": {"type": "string", "format": "date"},
+        "record": {"type": "string", "minLength": 1, "description": "the ANSWERS file, or for auto_apply the baseline's record"},
+        "option": {"type": "string", "minLength": 1}
+      }
+    },
+    "decision": {"type": "string", "x-ref": "decisions", "description": "the decision row the answer made"},
+    "job": {"type": "string", "x-ref": "jobs", "description": "the job row the answer made"},
+    "outcome": {"enum": ["moved", "not_moved", "gone"]},
+    "reraises": {"type": "string", "x-ref": "proposals", "description": "the proposal this one follows"}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "finding"}}}, "then": {"required": ["finding", "metric", "baseline"]}},
+    {"if": {"properties": {"status": {"enum": ["accepted", "declined", "deferred"]}}}, "then": {"required": ["answer"]}},
+    {"if": {"properties": {"status": {"const": "closed"}}}, "then": {"required": ["outcome"]}}
+  ],
+  "x-view": {"title": "Proposals", "columns": ["id", "status", "class", "question", "recommended", "tag", "finding"]}
+}
