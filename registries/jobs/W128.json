@@ -1,0 +1,13 @@
+{
+  "id": "W128",
+  "description": "**`acceptance.pass_problems` does not check that a pass agrees with itself**: a schema-2 doc with `result: pass` and all of `pass_proof_problems`' fields returns no problem with `steps: {}`, with a step `{ok: false}`, with `dll_sha256_logged` differing from `dll_sha256`, with `watcher_sha256` differing from `watcher_kit_sha256`, or with a launch of another build; refuse each (and report a non-object `steps` as a problem, not an AttributeError). Why: `cmd_run` cannot write these, but `check-pass` is the consumer's gate against a hand-edited file. Also in this area: (2) `Ctl.v_reset` passes `say=lambda t: None` to `stage_save`, so a leftover is overwritten and not said (W9 decision 2), and `v_scene` loses its note when `_scene` raises: return `staged_notes` on both; (3) a test that reads `attempt.json` from `keep_attempt_evidence`; (4) once W9 is on main, set W98, W99 and W100 to `done` with W9 as evidence (W65 stays with W127). Raised: W9 review round 2 (Later), 2026-11-06",
+  "title": "check-pass: a pass must agree with itself; staged leftover note on reset; close W98 to W100",
+  "phase": 1,
+  "status": "later",
+  "model": "sonnet",
+  "needs_pc": false,
+  "depends_on": [
+    "W9"
+  ],
+  "area": "harness"
+}
