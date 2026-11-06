@@ -5,6 +5,7 @@ Every gate returns a Result. Level `error` fails the run; `warn` never does. `--
 A game's own gates (`[gates] dirs`, warscape/gatemods.py) run after the core gates, each as its own line.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -374,6 +375,9 @@ def gate_ci_render(ctx):
 
 SKIPPED = re.compile(r"^(.*?) \.\.\. skipped '(.*)'$")
 TEST_ID = re.compile(r'^(\S+) \(([\w.]+?)(?:\.\1)?\)$')   # `test_x (mod.Class.test_x)` (3.11+) or `test_x (mod.Class)`
+DURATIONS_HEAD = 'Slowest test durations'                 # `unittest --durations 0` (3.12+)
+DURATION = re.compile(r'(\d+\.\d+)s\s+\S+ \((.+)\)$')     # `1.250s     test_x (mod.Class.test_x)`
+SLOWEST_SHOWN = 10
 
 
 def unittest_skips(lines):
@@ -389,30 +393,54 @@ def unittest_skips(lines):
     return out
 
 
+def split_durations(lines):
+    """`lines` without the block `unittest --durations 0` prints, and `{module: seconds}` summed from it. What is left is what a run without the flag
+    prints, so a failure's tail stays the traceback. The seconds are test time: an import or a `setUpClass` is not in them."""
+    if DURATIONS_HEAD not in lines:
+        return lines, {}
+    head = len(lines) - 1 - lines[::-1].index(DURATIONS_HEAD)     # the last one: a traceback may quote the words
+    end = next((i for i in range(head + 2, len(lines)) if not lines[i].strip()), len(lines))
+    secs = {}
+    for m in filter(None, map(DURATION.match, lines[head + 2:end])):
+        mod = m.group(2).rsplit('.', 2)[0]
+        secs[mod] = secs.get(mod, 0) + float(m.group(1))
+    return lines[:head] + lines[end + 1:], secs
+
+
+def _slowest(d, secs):
+    """One log line per folder: where the time went, so a slow run needs no guessing (W139)."""
+    top = sorted(secs.items(), key=lambda kv: (-kv[1], kv[0]))[:SLOWEST_SHOWN]
+    return f'{d}: slowest {len(top)} of {len(secs)} modules: ' + ', '.join(f'{m} {s:.1f} s' for m, s in top)
+
+
 def gate_tests(ctx):
     tc = ctx.config['tests']
     dirs = [d for d in tc['dirs'] if (ctx.root / d).is_dir()]
     if not dirs:
         return Result('tests', 'ok', 'no test folders')
     det, skips, total = [], [], 0
+    timing = [f'timing: workers 1, cpu_count {os.cpu_count()}']
     for d in dirs:
         try:
-            p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d, '-p', 'test_*.py'],
+            p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d, '-p', 'test_*.py', '--durations', '0'],
                                cwd=ctx.root, capture_output=True, text=True, timeout=tc['timeout_s'])
         except subprocess.TimeoutExpired:
             det.append(f'{d}: timed out after {tc["timeout_s"]} s')
+            timing.append(f'{d}: no timings, unittest prints them at the end of a run')
             continue
-        out = (p.stdout + p.stderr).strip().splitlines()
+        err, secs = split_durations(p.stderr.splitlines())
+        timing.append(_slowest(d, secs))
+        out = (p.stdout + '\n'.join(err)).strip().splitlines()
         ran = next((l for l in out if l.startswith('Ran ')), 'Ran ? tests')
         total += int(ran.split()[1]) if ran.split()[1].isdigit() else 0
         skips += [f'{d}: skipped {s}' for s in unittest_skips(out)]
         if p.returncode:
             det += [f'{d}: {ran}, FAILED'] + out[-40:]
     if det:
-        return Result('tests', 'error', 'host tests failed', det + skips)
+        return Result('tests', 'error', 'host tests failed', timing + det + skips)
     msg = f'{total} host tests passed ({", ".join(dirs)})'
     # a skip is a warn, never an error: the run still passes, but what did not run is on screen with its reason
-    return Result('tests', 'warn', f'{msg}; {len(skips)} skipped', skips) if skips else Result('tests', 'ok', msg)
+    return Result('tests', 'warn', f'{msg}; {len(skips)} skipped', timing + skips) if skips else Result('tests', 'ok', msg, timing)
 
 
 GATES = [
