@@ -23,7 +23,7 @@ Usage: 50 tool calls; models: opus; 1 session, counted by hand, about; the probe
 ## Evidence
 Tests: `python3 -m unittest tests.test_jobs`, 2026-11-07. Red at b737acc: 235 tests, 61 failed or errored, all in the 13 new classes (AutoClaim 3, AutoDefaults 3, AutoFreshRows 6, AutoHold 4, AutoKeys 4, AutoModels 1, AutoNeverStarted 2, AutoOrder 7, AutoPc 6, AutoRedMain 5, AutoRestart 4, AutoStop 9, AutoTagged 7). Green after the build: 236 tests, OK (235 plus `AutoWiring`). No existing assertion changed; `Autopilot.make` gained `**seams` and a list of argvs.
 
-Gates: GATES_LINE. CI: CI_LINE.
+Gates: `python3 wsc.py gates` on 2026-11-07 before the last merge of main, 15 ok, 1 warn, 0 failed; the warn is the 5 known skips (no POSIX sh for one hook test, no capstone for four). An earlier full run failed only `test_the_queue_passes_jobs_check`, as this report was on disk before its row was set. `wsc policy` refuses until a review exists, as expected before review. CI: CI_LINE.
 
 **The probe (W123),** 2026-11-07, Claude Code 2.1.319, session `w46-probe` (id a9383abd, haiku), one `sleep 180` as a background task, read by hand with `claude agents --json --all`. Keys in the row: `pid`, `id`, `cwd`, `kind`, `startedAt`, `sessionId`, `name`, `status`, `state`, the shapes W41 recorded, so the first kill criterion did not fire.
 
@@ -39,7 +39,7 @@ Gates: GATES_LINE. CI: CI_LINE.
 | 01:16:22 | done | idle | 25980 | last reading before the stop |
 | 01:16:24 | done | none | none | after `claude stop a9383abd`: the row stays, `pid` and `status` are gone, `tasklist` has no 25980 |
 
-**The dry run,** this PC, 2026-11-07, `python3 wsc.py jobs view --serve --auto --dry-run --no-open --interval 30`, keys set by hand in the worktree's `wsc.toml` and restored with `git checkout` (never committed). Each server was ended by `timeout`; `netstat` showed none of the three ports listening afterwards. `git ls-remote` showed no branch for W32 or W47: nothing was claimed or pushed, and no session started.
+**The dry run,** this PC, 2026-11-07, `python3 wsc.py jobs view --serve --auto --dry-run --no-open --interval 30`, keys set by hand in the worktree's `wsc.toml` and restored with `git checkout` (never committed). Each server was ended by `timeout`; `netstat` showed none of the three ports listening afterwards. `git ls-remote` showed no branch for W32 or W47: nothing was claimed or pushed, and no session started. `job/W141` exists now, made by session 9371181e, not by this job (see open question 6).
 
 Run 1, `max_sessions = 4`, all four actions, `auto_hold_phases = [7]`, `auto_phase_order = [1]`, `auto_stop_finished = true`, three ticks. W141 is a row my checkout did not have yet, read from origin/main; W32's brief has a real `tag: risk` question:
 
@@ -87,6 +87,7 @@ All four of the brief's questions took their recommended answers, as Liam's pick
 3. **Who opts in:** napoleon at its pin bump; the core stays on review and fix through a `meta/` change. `wsc.toml` untouched here. Default after: 2026-11-13.
 4. **`auto_stop_finished` on in napoleon:** recommended on. New limit for that choice: the probe read one kind of wait, a background shell, on one session. A session waiting on something else (a scheduled wake-up, a subagent) was not read, and `done` might mean something else there. recommended: on, as queue sessions run to an end and D59 says finished sessions are stopped; if a session that sleeps between turns becomes normal, read that state first; default after: 2026-11-13.
 5. **New: a stop acts on a list a few seconds old.** A person who attaches to a `done` session in that window could lose it. recommended: accept it, the same window `--stop-finished` has; default after: 2026-11-20.
+6. **New, seen in the dry run: a job taken by a session of another name is invisible to the tick until its branch is on origin.** Run 1 would have started W141-build at 01:05:18. Session 9371181e (`J95-build`) was already working on W141: `job/W141` has its commit dated 01:02, and that branch was not on origin when the tick read the branch list. The live-session check goes by name, so it could not see this. A real start would have run a second session on the job until its claim or push failed. recommended: keep the rule, and sessions that pick up a job claim first, which `jobs next` does; a session that takes a job by hand under another name is the gap, so say so in the opt-in note if it happens again; default after: 2026-11-20.
 
 ## What napoleon must do at its pin bump
 Set in `[jobs]`: `max_sessions = 4` (if W41's bump has not), `auto_actions = ["fix", "review", "build", "brief"]`, and `auto_stop_finished = true` if question 4 stands. `auto_hold_phases` and `auto_phase_order` as Liam wants. No DLL or harness input changes, so no acceptance run for this job (rule 79). `docs/UPGRADING.md` "The autopilot can start builds and briefs (W46)" has the rest.
