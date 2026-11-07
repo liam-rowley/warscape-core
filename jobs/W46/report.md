@@ -39,7 +39,7 @@ Gates: GATES_LINE. CI: CI_LINE.
 | 01:16:22 | done | idle | 25980 | last reading before the stop |
 | 01:16:24 | done | none | none | after `claude stop a9383abd`: the row stays, `pid` and `status` are gone, `tasklist` has no 25980 |
 
-**The dry run,** this PC, 2026-11-07, `python3 wsc.py jobs view --serve --auto --dry-run --no-open --interval 30`, keys set by hand in the worktree's `wsc.toml` and restored with `git checkout` (never committed). Each server was ended by `timeout`; `netstat` showed none of the three ports listening afterwards. `git ls-remote` showed no `job/W32` or `brief/W47`: nothing was claimed or pushed, and no session started.
+**The dry run,** this PC, 2026-11-07, `python3 wsc.py jobs view --serve --auto --dry-run --no-open --interval 30`, keys set by hand in the worktree's `wsc.toml` and restored with `git checkout` (never committed). Each server was ended by `timeout`; `netstat` showed none of the three ports listening afterwards. `git ls-remote` showed no branch for W32 or W47: nothing was claimed or pushed, and no session started.
 
 Run 1, `max_sessions = 4`, all four actions, `auto_hold_phases = [7]`, `auto_phase_order = [1]`, `auto_stop_finished = true`, three ticks. W141 is a row my checkout did not have yet, read from origin/main; W32's brief has a real `tag: risk` question:
 
