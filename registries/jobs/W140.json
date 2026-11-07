@@ -1,0 +1,13 @@
+{
+  "id": "W140",
+  "description": "**Five small gaps in the `tests` gate, from W139 review round 1 (`jobs/W139/review.md`), best done together in `warscape/gates.py`.** (1) Do this before any game sets `[tests] workers` above 1: `test_modules` compares names case-sensitively but discover's `fnmatch` does not on Windows, so `Test_b.py` beside `test_a.py` gives 2 tests at `workers = 1` and 1 at `workers = 4`, silently; match with `fnmatch.fnmatch(f, 'test_*.py')`. The core's own pin test would go red on such a file; a game has no such guard. (2) `_parallel` takes any stderr line as the module's `Ran` result: a test writing `Ran 99 tests in 0.1s` to stderr then `os._exit(0)` gave `ok, 100 host tests passed`; require unittest's closing `OK` or `FAILED` line. (3) `_serial` keeps two faults that main has too: on Windows a timeout waits as long as a grandchild holds the pipe (`timeout_s = 2` and a 12 s grandchild returned at 12.2 s; W139 open question 1), and `os._exit(0)` in a test gives `ok, 0 host tests passed`. Moving it onto `_run_module` should close both, with host tests, as it changes the default path every game uses. (4) Widen the load-sensitive limits if one ever flakes: `tests/test_job_sh.py` 6 s and 5 s, and the `timeout_s = 4` deadline tests in `tests/test_gate_tests.py`. (5) A Ctrl+C can leave one child: a worker between `popleft` and `live[mod] = p` starts it after the kill loop (read, not run). Raised: W139 review round 1, 2026-11-07.",
+  "title": "The `tests` gate: close what W139's review left open",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [
+    "W139"
+  ],
+  "area": "core"
+}
