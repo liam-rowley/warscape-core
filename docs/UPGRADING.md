@@ -3,6 +3,12 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## The autopilot can start builds and briefs (W46)
+
+Nothing is required at the bump: `[jobs] auto_actions` defaults to `["review", "fix"]`, today's behaviour. The one change a repo sees by default is the order inside a tick: fixes, then reviews, each by
+(phase, number), where it was by job number. To opt in, set `max_sessions` (the loader refuses `build` or `brief` without it), then `auto_actions = ["fix", "review", "build", "brief"]`; the other keys and every rule
+a start obeys are in [CONSUMING_OPTIONS.md](CONSUMING_OPTIONS.md) "What `--auto` starts". This is no DLL or harness input, so a pin bump to it needs no acceptance run for it.
+
 ## The `tests` gate: timings, workers, headroom (W139)
 
 Nothing is required at the bump, and `workers` stays 1: one process per folder and the same result lines. Three things show up without a change: the log now has a `timing:` line and each folder's

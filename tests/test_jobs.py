@@ -2533,6 +2533,21 @@ class AutoStop(Opted):
         self.assertNotIn('J90-x', srv.page())
 
 
+class AutoWiring(VerbCase):
+    def test_the_verb_gives_the_server_every_seam_a_build_needs(self):
+        from unittest import mock
+        with mock.patch.object(jv, 'JobServer') as server:
+            server.return_value.serve_forever.side_effect = KeyboardInterrupt
+            server.return_value.url = 'http://x/'
+            self.assertEqual(self.verb('view', serve=True, port=0, dry_run=True, no_open=True)[0], 0)
+        kw = server.call_args.kwargs
+        with mock.patch.multiple(jv, main_head=lambda root, offline: ('head', root, offline), main_state=lambda cfg, root, offline: {'state': 'red'},
+                                 read_at=lambda root, sha, path: (root, sha, path)):
+            self.assertEqual(kw['main_head'](), ('head', ROOT, False))
+            self.assertEqual(kw['main_ci'](), 'red')
+            self.assertEqual(kw['read_at']('s', 'p'), (ROOT, 's', 'p'))
+
+
 class AutoKeys(unittest.TestCase):
     def load(self, text):
         from warscape import repo
