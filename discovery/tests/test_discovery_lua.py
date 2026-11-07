@@ -105,7 +105,8 @@ class LuaApi(unittest.TestCase):
         rows, detail = lua_api.build(reference, {'ui' + chr(92) + 'a.luac': str(p)}, ['events.lua'], {}, {})
         out = tmp_path / 'lua_api.json'
         diffout.write(str(out), 'lua_api', rows, detail)
-        assert diffout.problems(json.load(open(out))) == []
+        with open(out) as fh:
+            assert diffout.problems(json.load(fh)) == []
         by = {r['item']: r for r in rows}
         assert by['engine globals']['verdict'] == 'new'
         assert by['component methods']['verdict'] == 'new'

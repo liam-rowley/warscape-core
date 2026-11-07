@@ -1212,7 +1212,56 @@ def problems(out_dir, rows_path):
     for r in rows:
         if r.get('status') == 'atlas' and r['id'] in s['units'] and r.get('screen') != s['units'][r['id']]['screen']:
             bad.append(f"{rows_path}: {r['id']}: screen differs from the atlas")
+    assets_path = os.path.join(os.path.dirname(rows_path), 'assets.jsonl')
+    if os.path.exists(assets_path):
+        bad += used_by_problems(out_dir, s, set(ids), assets_path)
     return bad
+
+
+def committed_art_users(out_dir, s):
+    """art_users from the committed atlas alone: what write_used_by would set. Units come from summary.json, a piece's components by the rule of build_units."""
+    surfaces = {}
+    for f in ATLAS_FILES:
+        if f not in ('scripts.json.gz', 'units.json.gz') and os.path.exists(os.path.join(out_dir, f)):
+            with gzip.open(os.path.join(out_dir, f)) as fh:
+                surfaces.update(json.load(fh).get('surfaces', {}))
+    recs = {}
+    for uid, u in s['units'].items():
+        if u.get('surface') and u.get('piece') is None:
+            recs[uid] = dict(comps=surfaces.get(u['surface'].replace('\\', '/'), {}).get('components', []))
+    by_prefix = {(u['surface'], u['piece']): uid for uid, u in s['units'].items() if u.get('piece') is not None}
+    for rel, pieces in PIECES.items():
+        taken = set()
+        for _, prefix in pieces:
+            cs = [c for c in surfaces.get(rel.replace('\\', '/'), {}).get('components', [])
+                  if (c['path'] == prefix or c['path'].startswith(prefix + '/')) and c['path'] not in taken]
+            taken |= {c['path'] for c in cs}
+            if (rel, prefix) in by_prefix:
+                recs[by_prefix[rel, prefix]] = dict(comps=cs)
+    extra = collections.defaultdict(set)
+    keys_path = os.path.join(out_dir, 'art_keys.json')
+    if os.path.exists(keys_path):
+        with open(keys_path, encoding='utf-8') as fh:
+            for role in json.load(fh)['roles'].values():
+                for aid in role.get('asset_ids', []):
+                    extra[aid] |= set(role['units'])
+    return art_users(recs, extra)
+
+
+def used_by_problems(out_dir, s, ids, assets_path, limit=10):
+    """used_by on the assets rows: every id is a ui_elements row, and each row says what write_used_by would set now."""
+    users = committed_art_users(out_dir, s)
+    with open(assets_path, encoding='utf-8') as fh:
+        assets = [json.loads(x) for x in fh]
+    bad = []
+    for r in assets:
+        have = r.get('used_by')
+        dangling = sorted(set(have or []) - ids)
+        if dangling:
+            bad.append(f"{assets_path}: {r['id']}: used_by names no ui_elements row: {', '.join(dangling)}")
+        elif have != users.get(r['id']):
+            bad.append(f"{assets_path}: {r['id']}: used_by differs from the atlas; run `wsc discovery ui`")
+    return bad[:limit] + ([f'{assets_path}: {len(bad) - limit} more used_by problems'] if len(bad) > limit else [])
 
 
 def readme(s):
@@ -1292,13 +1341,28 @@ def write_used_by(users):
     return n
 
 
+def extract_problem(games, step):
+    """Why this step cannot run, or None: without the extract every step reads nothing and would write empty results without an error."""
+    root = os.path.join(ROOT, games['extract'], paths.TARGET)
+    if not [d for d in (os.listdir(root) if os.path.isdir(root) else []) if d != 'db']:
+        return f'{root} is absent or empty: build it with `python3 core/proxy/tools/pack_list.py --extract`'
+    if step in ('art', 'all') and not (os.path.isdir(DB_ROWS) and os.listdir(DB_ROWS)):
+        return f'{DB_ROWS} is absent or empty: build it with `python3 core/wsc.py discovery db`'
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('step', nargs='?', default='all', choices=('atlas', 'rows', 'live', 'art', 'all'))
     ap.add_argument('--games')
     ap.add_argument('--run', help='live: the run folder whose raw/*_proxy.log hold the j10tree lines (writes discovery/ui/reach.json)')
     a = ap.parse_args(argv)
-    at = Atlas(load_games(a.games))
+    games = load_games(a.games)
+    missing = extract_problem(games, a.step)
+    if missing:
+        print(f'ui_atlas: {missing}; nothing written', file=sys.stderr)
+        return 1
+    at = Atlas(games)
     units, surfaces = build_units(at)
     reach_path = os.path.join(OUT, 'reach.json')
     if a.step == 'all' and not a.run and os.path.exists(reach_path):

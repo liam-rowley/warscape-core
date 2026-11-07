@@ -160,6 +160,26 @@ class Db(unittest.TestCase):
         body = b''.join(struct.pack('<H', len(k)) + k.encode('utf-16-le') + struct.pack('<iB', n, on) for k, n, on in rows)
         return head + b'\x01' + struct.pack('<I', len(rows)) + body
 
+    def test_header_with_another_mark_byte_fails(self):
+        b = bytearray(self.table([('a', 1, 1)]))
+        b[0] = 0
+        with self.assertRaisesRegex(ValueError, 'mark byte 0'):
+            db.parse_header(bytes(b))
+
+    def test_readme_splits_out_the_empty_tables(self):
+        def t(name, rows, decoded=True, **kw):
+            return dict(name=name, version=1, rows=rows, decoded=decoded, **kw)
+        doc = {'schema_source': {'url': 'u', 'commit': 'c' * 12, 'file_sha256': 'f' * 16, 'licence': 'l'},
+               'tables': [t('full', 3, schema_version=1), t('empty_known', 0, schema_version=1), t('empty_unknown', 0, reason='0 rows'),
+                          t('broken', 3, False, reason='failed')]}
+        text = db.readme(doc)
+        self.assertIn('| Empty tables |', text)
+        self.assertIn('| 2 (1 with a schema, 1 without) |', text)
+        section = text.split('## Empty tables')[1].split('## ')[0]
+        self.assertIn('With a schema: empty_known', section)
+        self.assertIn('Without a schema: empty_unknown', section)
+        self.assertNotIn('empty_', text.split('## Not decoded')[1].split('## ')[0])
+
     def test_byte_exact_rule(self):
         b = self.table([('a', 1, 1), ('bb', -2, 0)], version=2)
         self.assertEqual(db.parse_header(b)[1], 2)

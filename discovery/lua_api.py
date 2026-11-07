@@ -34,7 +34,8 @@ def inventory(files):
     """Run Inventory over {entry path: file}; returns (Inventory.to_json() dict, {script: counts}, [failed])."""
     inv, per_file, failed = Inventory(), {}, []
     for path, fp in files.items():
-        data = open(fp, 'rb').read()
+        with open(fp, 'rb') as fh:
+            data = fh.read()
         rel = path.replace(BACKSLASH, '/')
         try:
             main = luachunk.parse(data).main
@@ -110,7 +111,10 @@ def read_loose(root):
     d = os.path.join(root, 'data')
     for n in ('all_scripted.lua', 'battle_scripted.lua'):
         p = os.path.join(d, n)
-        out[n] = lua_entry_points(open(p, encoding='latin1').read()) if os.path.isfile(p) else None
+        out[n] = None
+        if os.path.isfile(p):
+            with open(p, encoding='latin1') as fh:
+                out[n] = lua_entry_points(fh.read())
     return out
 
 
@@ -166,7 +170,8 @@ def main(argv=None):
     ap.add_argument('--out', default=paths.result_dir('diff', 'lua_api.json'))
     a = ap.parse_args(argv)
     games = load_games(a.games)
-    ej = json.load(open(os.path.join(games[paths.REFERENCE]['repo'], *ENGINE_API.split('/')), encoding='utf-8'))
+    with open(os.path.join(games[paths.REFERENCE]['repo'], *ENGINE_API.split('/')), encoding='utf-8') as fh:
+        ej = json.load(fh)
     nap_files = effective(games, paths.TARGET, exts={'.luac'}, under='ui' + BACKSLASH)
     nap_lua = sorted(p for p in effective(games, paths.TARGET, exts={'.lua'}) if BACKSLASH not in p)
     rows, detail = build(ej, nap_files, nap_lua, read_loose(games[paths.TARGET]['root']), read_loose(games[paths.REFERENCE]['root']))

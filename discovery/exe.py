@@ -31,6 +31,7 @@ VA = f'{paths.REFERENCE}_va'
 RVA = f'{paths.TARGET}_rva'
 WINDOW = 16
 MAX_HITS = 8
+MIN_FIXED_BYTES = 6   # a pattern with fewer fixed bytes than this matches by chance in a code section, so a hit on it says nothing: not found
 STRINGS = re.compile(rb'[\x20-\x7e]{6,}')
 GUARD = re.compile(r'\{\s*"([^"]+)",\s*"([^"]+)",\s*0x([0-9a-fA-F]+),\s*(\d+),\s*\{([^}]*)\},\s*0x([0-9a-fA-F]+),\s*(\d+)\s*\}')
 
@@ -48,21 +49,27 @@ def pe_facts(b):
 
 
 def mask_for(window, image_base, size_of_image):
-    """True = byte must match. Masks rel32 after E8/E9/0F 8x and dwords that look like addresses inside the image."""
+    """True = byte must match. Masks rel32 after E8/E9/0F 8x (the bytes present, when the window ends inside the operand) and dwords that
+    look like addresses inside the image, at positions that start inside no such operand: a dword read across an operand's end is no address."""
     m = [True] * len(window)
+    operand = set()
     i = 0
     while i < len(window):
         op = window[i]
-        if op in (0xE8, 0xE9) and i + 5 <= len(window):
-            m[i + 1:i + 5] = [False] * 4
-            i += 5
+        if op in (0xE8, 0xE9):
+            start = i + 1
+        elif op == 0x0F and i + 1 < len(window) and 0x80 <= window[i + 1] <= 0x8F:
+            start = i + 2
+        else:
+            i += 1
             continue
-        if op == 0x0F and i + 6 <= len(window) and 0x80 <= window[i + 1] <= 0x8F:
-            m[i + 2:i + 6] = [False] * 4
-            i += 6
-            continue
-        i += 1
+        operand.update(range(start, min(start + 4, len(window))))
+        i = start + 4
+    for j in operand:
+        m[j] = False
     for j in range(len(window) - 3):
+        if j in operand:
+            continue
         v = struct.unpack_from('<I', window, j)[0]
         if image_base <= v < image_base + size_of_image:
             m[j:j + 4] = [False] * 4
@@ -84,6 +91,8 @@ def search(hay, pat, mask, limit=MAX_HITS):
     a0, alen = best
     if alen < 4:
         return None   # too little fixed content to search
+    if sum(mask) < MIN_FIXED_BYTES:
+        return []
     anchor = pat[a0:a0 + alen]
     hits, pos = [], hay.find(anchor)
     while pos != -1 and len(hits) <= limit:

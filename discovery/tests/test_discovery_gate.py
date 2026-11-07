@@ -318,6 +318,15 @@ class FoundPaths(unittest.TestCase):
         self.assertEqual(bp.registry_gaps(good)[0], [{'path': 'fx/new.fx', 'owner': 'J77', 'reason': 'no row yet'}])
         self.assertTrue(check('Use `fx/other.fx`.\n\n## Registry gaps\n- path: fx/new.fx; owner: liam; reason: r\n'))
 
+    def test_registry_gaps_exempt_only_the_bullets_own_path(self):
+        clean = '- path: fx/new.fx; owner: J77; reason: no row yet\n'
+        got = check('## Registry gaps\n' + clean + 'Also `fx/other.fx` here.\n')
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(got[0].startswith('line 3: `fx/other.fx`'), got)
+        got = check('## Registry gaps\n- path: fx/new.fx; owner: J77; reason: see `fx/other.fx`\n')
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(got[0].startswith('line 2: `fx/other.fx`'), got)
+
     def test_errors_name_line_token_and_what_to_cite(self):
         got = check('ok\n\nUse `ui/flags/missing.tga` here.')
         self.assertTrue(got[0].startswith('line 3: `ui/flags/missing.tga`'))
