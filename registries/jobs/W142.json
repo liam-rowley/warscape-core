@@ -1,0 +1,13 @@
+{
+  "id": "W142",
+  "description": "**Three small gaps in the discovery tools, from W141 review round 1 (`jobs/W141/review.md`).** (1) `discovery/exe.py` `method` reads the same before and after W141's mask change, so nothing in `exe.json` says which mask rule or floor made it and no gate notices a file left on the old rule after a pin bump: record `min_fixed_bytes` and a mask rule number in `method`, and bring the file's header up to date (it describes the old mask and omits the floor). (2) `mask_for` walks bytes, not instructions, so `8b e8` (mov ebp,eax) reads as a call: 5 `cond_*` signatures fell to `none` that way and 182 function signatures have an in-image dword no longer fully masked; an instruction-length walk would remove it. These are candidates, not engine sites. (3) `discovery/shader_catalog.py` `listed_paths` reads `utf-8`, so a list PowerShell wrote with a BOM fails on its first path: use `utf-8-sig`. Raised: W141 review, 2026-11-07",
+  "title": "Discovery tools: what W141's review left open in exe.py and shader_catalog.py",
+  "phase": 1,
+  "status": "later",
+  "model": "opus",
+  "needs_pc": false,
+  "depends_on": [
+    "W141"
+  ],
+  "area": "core"
+}
