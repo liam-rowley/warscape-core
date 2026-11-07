@@ -5,6 +5,7 @@ Moved from napoleon-remastered tests/test_jobs.py (napoleon J62); the game-only 
 import html
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -848,13 +849,14 @@ class Steps(unittest.TestCase):
 class Autopilot(unittest.TestCase):
     """`view --serve --auto` (D36): the loop with fake snapshot, agents and launch seams."""
 
-    def make(self, on_branch, agents=lambda: [], snapshot=None, dry_run=False, ci=lambda sha: ('green', []), prune=lambda: (0, None)):
-        self.launched, self.state = [], {'on': dict(on_branch)}
+    def make(self, on_branch, agents=lambda: [], snapshot=None, dry_run=False, ci=lambda sha: ('green', []), prune=lambda: (0, None), **seams):
+        self.launched, self.state, self.argvs = [], {'on': dict(on_branch)}, []
         def launch(a):
             self.launched.append(a[3])   # the session name
+            self.argvs.append(a)
             return 'abcd1234'
         srv = jv.JobServer(snapshot or (lambda: (LROWS, files(), set(LBRANCHES) | {f'job/{j}' for j in self.state['on']},
-                                                 self.state['on'])), agents, launch, which=lambda n: n, dry_run=dry_run, ci=ci, prune=prune)
+                                                 self.state['on'])), agents, launch, which=lambda n: n, dry_run=dry_run, ci=ci, prune=prune, **seams)
         srv.log = False
         self.addCleanup(srv.server_close)
         self.lines = []
@@ -2000,6 +2002,575 @@ class MaxSessionsKey(unittest.TestCase):
         self.addCleanup(setattr, jv.S, 'max_sessions', old)
         jv.configure_from(dict(DEFAULTS['jobs'], max_sessions=3))
         self.assertEqual(jv.S.max_sessions, 3)
+
+
+class Opted(Capped):
+    """W46: a repo that opted in. Every `[jobs]` key is set for one test and put back; the seams are stubs, so no session, no git and no gh."""
+    ALL = ('fix', 'review', 'build', 'brief')
+
+    def opt(self, actions=ALL, hold=(), order=(), stop=False, cap=9):
+        self.cap(cap)
+        for k, v in (('auto_actions', list(actions)), ('auto_hold_phases', list(hold)), ('auto_phase_order', list(order)), ('auto_stop_finished', stop)):
+            self.addCleanup(setattr, jv.S, k, getattr(jv.S, k))
+            setattr(jv.S, k, v)
+
+    def server(self, main, on=None, tree=None, branches=(), agents=(), main_ci='green', brief='# brief\n', **kw):
+        """A server over `main` (the rows of origin/main). `tree`: the working tree's rows, `main` when not given; `on`: {id: Branch}, and a job there
+        with no row gets one in the tree. `self.head`: what main_head answers, so a test can move it; an exception there is raised."""
+        on = dict(on or {})
+        tree = list(main if tree is None else tree)
+        tree += [row(j, status='queued') for j in on if j not in {r['id'] for r in tree}]
+        self.head, self.ci_reads, self.briefs_read, self.claims = ('m1', list(main)), [], [], []
+        def head():
+            if isinstance(self.head, Exception):
+                raise self.head
+            return self.head
+        def ci_state():
+            self.ci_reads.append(1)
+            return main_ci
+        def read_at(sha, path):
+            self.briefs_read.append((sha, path))
+            return brief
+        kw.setdefault('claim', lambda *a: (self.claims.append(a), (True, None))[1])
+        snap = lambda: (tree, files(), set(branches) | {f'job/{j}' for j in on}, on)
+        return self.make(on, agents=lambda: list(agents), snapshot=snap, main_head=head, main_ci=ci_state, read_at=read_at, **kw)
+
+    def rev(self, jid, **kw):
+        return jv.Branch(row(jid, status='review', model='sonnet', **kw), 0, f'{jid.lower()}head')
+
+    def fix(self, jid, **kw):
+        return jv.Branch(row(jid, status='fix', model='sonnet', **kw), 1, f'{jid.lower()}head')
+
+
+class AutoDefaults(Opted):
+    def test_no_key_set_starts_no_build_and_no_brief_and_reads_neither_seam(self):
+        from warscape.repo import DEFAULTS
+        self.assertEqual(jv.S.auto_actions, ['review', 'fix'])
+        self.assertEqual(DEFAULTS['jobs']['auto_actions'], ['review', 'fix'])
+        srv = self.server([row('J7', status='queued'), row('J8')])
+        self.head = AssertionError('main_head must not be read')
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+        self.assertEqual(self.ci_reads, [])
+        self.assertEqual(self.lines, ['tick: nothing ready for review or fix (0 job branches)'])
+
+    def test_a_list_of_review_only_starts_no_fix(self):
+        self.opt(actions=['review'])
+        srv = self.server([], on={'J4': self.rev('J4'), 'J5': self.fix('J5')})
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J4-review'])
+
+    def test_the_idle_line_and_the_page_say_what_this_repo_starts(self):
+        self.opt(hold=[3, 4])
+        srv = self.server([])
+        srv.auto = {'interval': 300, 'last': None, 'dry_run': False}
+        srv.auto_tick()
+        self.assertEqual(self.lines[-1], 'tick: nothing ready for fix, review, build or brief (0 job branches)')
+        self.assertIn('starts ready fixes, reviews, builds and briefs every', srv.page())
+        self.assertIn('holds phases 3, 4', srv.page())
+
+
+class AutoOrder(Opted):
+    def cand(self, action, jid, **kw):
+        return jv.Candidate(action, row(jid, **kw))
+
+    def names(self, cands):
+        return [f'{c.row["id"]}-{c.action}' for c in cands]
+
+    def test_fix_review_build_brief_whatever_the_phase_or_number(self):
+        got = jv.auto_order([self.cand('brief', 'J1', phase=1), self.cand('build', 'J2', phase=2), self.cand('review', 'J3', phase=3), self.cand('fix', 'J4', phase=4)])
+        self.assertEqual(self.names(got), ['J4-fix', 'J3-review', 'J2-build', 'J1-brief'])
+
+    def test_inside_an_action_the_plain_order_key(self):
+        got = jv.auto_order([self.cand('build', 'J9', phase=1), self.cand('build', 'J2', phase=3), self.cand('build', 'J8', phase=1), self.cand('build', 'J1', phase='x')])
+        self.assertEqual(self.names(got), ['J8-build', 'J9-build', 'J2-build', 'J1-build'])
+
+    def test_named_phases_first_in_the_named_order_then_the_rest(self):
+        c = [self.cand('build', 'J1', phase=1), self.cand('build', 'J2', phase=2), self.cand('build', 'J3', phase=3), self.cand('build', 'J4', phase=4), self.cand('review', 'J5', phase=1)]
+        self.assertEqual(self.names(jv.auto_order(c, [3, 2])), ['J5-review', 'J3-build', 'J2-build', 'J1-build', 'J4-build'])
+
+    def test_a_phase_of_true_is_not_phase_1(self):
+        c = [self.cand('build', 'J1', phase=True), self.cand('build', 'J2', phase=1)]
+        self.assertEqual(self.names(jv.auto_order(c, [1])), ['J2-build', 'J1-build'])
+
+    def test_a_tick_starts_in_that_order_and_the_cap_goes_to_the_first(self):
+        self.opt(cap=2)
+        srv = self.server([row('J7', status='queued'), row('J8'), row('J3', status='queued')], on={'J4': self.rev('J4'), 'J5': self.fix('J5')})
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J5-fix', 'J4-review'])
+        self.assertEqual(len([l for l in self.lines if l.startswith('deferred, ')]), 1, self.lines)
+
+    def test_the_whole_order_with_room(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued'), row('J8'), row('J3', status='queued', phase=5)], on={'J4': self.rev('J4'), 'J5': self.fix('J5')})
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J5-fix', 'J4-review', 'J7-build', 'J3-build', 'J8-brief'])
+
+    def test_auto_phase_order_reaches_the_tick(self):
+        self.opt(order=[5])
+        srv = self.server([row('J7', status='queued'), row('J3', status='queued', phase=5)])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J3-build', 'J7-build'])
+
+
+class AutoHold(Opted):
+    def test_a_held_phase_starts_in_no_action_with_one_line_per_id_and_reason(self):
+        self.opt(hold=[2])
+        main = [row('J5', status='fix', phase=2), row('J4', status='review', phase=2), row('J7', status='queued', phase=2), row('J8', phase=2), row('J9', status='queued', phase=1)]
+        srv = self.server(main, on={'J4': self.rev('J4'), 'J5': self.fix('J5')})
+        for _ in range(3):
+            srv.auto_tick()
+        self.assertEqual(self.launched, ['J9-build'])
+        self.assertEqual(sorted(l for l in self.lines if 'held' in l), [f'{j}: held, phase 2 is in [jobs] auto_hold_phases' for j in ('J4', 'J5', 'J7', 'J8')])
+
+    def test_the_phase_is_the_main_row_not_the_branch_row(self):
+        self.opt(hold=[2])
+        srv = self.server([row('J4', status='review', phase=2)], on={'J4': self.rev('J4', phase=1)})
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+
+    def test_a_button_ignores_the_hold(self):
+        self.opt(hold=[1])
+        srv = self.server([row('J7', status='queued')])
+        rows, _, branches, on = srv.snapshot()
+        self.assertEqual(srv.start('J7', 'build', {r['id']: r for r in rows}, branches, on)[0], 200)
+        self.assertEqual(self.launched, ['J7-build'])
+
+    def test_a_held_row_takes_no_cap_line_and_reads_no_ci(self):
+        self.opt(hold=[1], cap=1)
+        srv = self.server([row('J7', status='queued')], agents=[bg('J90-build')])
+        srv.auto_tick()
+        self.assertEqual(self.ci_reads, [])
+        self.assertFalse([l for l in self.lines if l.startswith('deferred, ')], self.lines)
+
+
+class AutoClaim(Opted):
+    def test_a_tick_pushes_no_claim_and_next_still_claims(self):
+        self.opt()
+        main = [row('J7', status='queued'), row('J8')]
+        srv = self.server(main)
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J7-build', 'J8-brief'])
+        self.assertEqual(self.claims, [])
+        pushed = []
+        run = lambda *a, **k: subprocess.CompletedProcess(a, 0, 'x\n', '')
+        code, text = jv.next_claim('.', main, lambda: {}, jid='J7', claim_fn=lambda root, b, r: (pushed.append(b), jv.Claim('claimed', 'abc'))[1], run=run)
+        self.assertEqual((code, pushed), (0, ['job/J7']), text)
+
+    def test_a_claimed_branch_is_not_started_again(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued'), row('J8')], branches={'job/J7', 'brief/J8'})
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+
+    def test_a_live_session_of_the_job_blocks_the_start(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')], agents=[bg('J7-brief')])
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+        self.assertIn('J7-brief is still running', self.lines[-1])
+
+
+class AutoRestart(Opted):
+    def ticked(self, srv, n=1):
+        for _ in range(n):
+            srv.auto_tick()
+        return len(self.launched)
+
+    def test_same_row_and_main_starts_once_with_one_line(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')])
+        self.assertEqual(self.ticked(srv, 3), 1)
+        self.assertEqual([l for l in self.lines if 'waiting' in l], ['J7-build: started, waiting for the row or main to move'])
+
+    def test_main_moved_starts_again(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')])
+        self.ticked(srv)
+        self.head = ('m2', self.head[1])
+        self.assertEqual(self.ticked(srv), 2)
+
+    def test_the_row_moved_starts_again(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')])
+        self.ticked(srv)
+        self.head = ('m1', [row('J7', status='queued', title='new')])
+        self.assertEqual(self.ticked(srv), 2)
+
+    def test_the_key_order_of_a_row_is_no_move(self):
+        self.opt()
+        r = row('J7', status='queued')
+        srv = self.server([r])
+        self.ticked(srv)
+        self.head = ('m1', [dict(reversed(list(r.items())))])
+        self.assertEqual(self.ticked(srv), 1)
+
+
+class AutoFreshRows(Opted):
+    def test_origin_main_beats_the_working_tree(self):
+        self.opt()
+        srv = self.server([row('J7', status='done'), row('J8', status='queued')], tree=[row('J7', status='queued'), row('J8')])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J8-build'])
+
+    def test_a_row_only_on_origin_main_starts_with_its_own_model(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued', model='fable')], tree=[])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J7-build'])
+        self.assertEqual(self.argvs[0][5], 'fable')
+
+    def test_main_head_raising_starts_no_build_or_brief_and_still_a_review(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued'), row('J8')], on={'J4': self.rev('J4')})
+        self.head = ValueError('no network')
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J4-review'])
+        self.assertEqual([l for l in self.lines if 'origin/main' in l], ['no build or brief this tick: cannot read origin/main (no network)'])
+
+    def test_main_head_is_read_once_a_tick_only_when_opted_in(self):
+        reads = []
+        srv = self.server([])
+        srv.main_head = lambda: reads.append(1) or ('m1', [])
+        srv.auto_tick()
+        self.assertEqual(reads, [])
+        self.opt()
+        srv.auto_tick()
+        self.assertEqual(reads, [1])
+
+    def test_the_real_reader_reads_the_ref_not_the_checkout(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, up = Path(d) / 'w', Path(d) / 'up.git'
+            git = lambda *a, cwd=root: subprocess.run(['git', *a], cwd=cwd, check=True, capture_output=True)
+            git('init', '-q', '--bare', '-b', 'main', str(up), cwd=d)
+            git('clone', '-q', str(up), str(root), cwd=d)
+            git('config', 'user.email', 't@t')
+            git('config', 'user.name', 't')
+            (root / 'registries' / 'jobs').mkdir(parents=True)
+            f = root / 'registries' / 'jobs' / 'J7.json'
+            f.write_text(json.dumps(row('J7', status='done')), encoding='utf-8')
+            git('add', '.')
+            git('commit', '-qm', 'x')
+            git('push', '-q', 'origin', 'HEAD:main')
+            f.write_text(json.dumps(row('J7', status='queued')), encoding='utf-8')   # a working tree that says otherwise
+            sha, rows = jv.main_head(root)
+            self.assertEqual([r['status'] for r in rows], ['done'])
+            self.assertEqual(len(sha), 40)
+            self.assertIsNone(jv.read_at(root, sha, 'registries/jobs/nope.json'))
+            self.assertIn('done', jv.read_at(root, sha, 'registries/jobs/J7.json'))
+
+    def test_the_real_reader_refuses_where_there_is_no_main(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                jv.main_head(d)
+
+
+class AutoRedMain(Opted):
+    def test_red_and_unknown_hold_builds_and_briefs_not_reviews_or_fixes(self):
+        for state in ('red', 'unknown'):
+            self.opt()
+            srv = self.server([row('J7', status='queued'), row('J8')], on={'J4': self.rev('J4'), 'J5': self.fix('J5')}, main_ci=state)
+            srv.auto_tick()
+            srv.auto_tick()
+            self.assertEqual(self.launched, ['J5-fix', 'J4-review'], state)
+            self.assertEqual([l for l in self.lines if 'main is' in l], [f'builds and briefs wait: main is {state}'], state)
+            self.assertEqual(len(self.ci_reads), 2, state)   # once a tick, not once a candidate
+
+    def test_off_and_green_hold_nothing(self):
+        for state in ('off', 'green'):
+            self.opt()
+            srv = self.server([row('J7', status='queued'), row('J8')], main_ci=state)
+            srv.auto_tick()
+            self.assertEqual(self.launched, ['J7-build', 'J8-brief'], state)
+
+    def test_a_seam_that_raises_is_unknown(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')])
+        srv.main_ci = lambda: 1 / 0
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+
+    def test_not_read_when_nothing_reached_that_step(self):
+        self.opt(hold=[1])
+        srv = self.server([row('J7', status='queued')])
+        srv.auto_tick()
+        self.assertEqual(self.ci_reads, [])
+        self.opt(cap=1)
+        srv = self.server([row('J7', status='queued')], agents=[bg('J90-build')])
+        srv.auto_tick()
+        self.assertEqual(self.ci_reads, [])
+        self.opt()
+        srv = self.server([], on={'J4': self.rev('J4')})
+        srv.auto_tick()
+        self.assertEqual(self.ci_reads, [])
+
+    def test_red_then_green_then_red_says_so_again(self):
+        self.opt()
+        states = iter(['red', 'green', 'red'])
+        srv = self.server([row('J7', status='queued')])
+        srv.main_ci = lambda: next(states)
+        srv.auto_tick()
+        srv.auto_tick()
+        self.head = ('m2', self.head[1])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J7-build'])
+        self.assertEqual(len([l for l in self.lines if 'main is red' in l]), 2, self.lines)
+
+
+class AutoPc(Opted):
+    MAIN = [row('J7', status='queued', needs_pc=True), row('J8', needs_pc=True)]
+
+    def pc_env(self, value):
+        old = os.environ.get('WSC_PC_STATE')
+        os.environ['WSC_PC_STATE'] = value
+        self.addCleanup(lambda: os.environ.pop('WSC_PC_STATE') if old is None else os.environ.__setitem__('WSC_PC_STATE', old))
+
+    def test_another_holder_holds_the_build_not_the_brief(self):
+        self.opt()
+        srv = self.server(self.MAIN + [row('J6', status='fix', needs_pc=True)], agents=[bg('J6-build')])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J8-brief'])
+        self.assertIn('J7-build: deferred, J6 holds the PC', self.lines)
+
+    def test_the_acceptance_lock_holds_the_build_not_the_brief(self):
+        self.opt()
+        srv = self.server(self.MAIN, pc_lock=lambda: {'owner': 'j9', 'purpose': 'acceptance pass', 'stale': False})
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J8-brief'])
+        self.assertTrue([l for l in self.lines if l.startswith('J7-build: deferred, an acceptance run')], self.lines)
+
+    def test_pc_absent_holds_the_build_with_a_line_not_the_brief(self):
+        self.opt()
+        self.pc_env('')
+        srv = self.server(self.MAIN)
+        srv.auto_tick()
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J8-brief'])
+        self.assertEqual([l for l in self.lines if 'deferred' in l], ['J7-build: deferred, J7 needs the PC (WSC_PC_STATE is empty: no PC here)'])
+
+    def test_a_brief_session_is_no_holder(self):
+        self.opt()
+        srv = self.server(self.MAIN + [row('J6', needs_pc=True)], branches={'brief/J6'}, agents=[bg('J6-brief')])
+        srv.auto_tick()
+        self.assertIn('J7-build', self.launched)
+
+    def test_a_brief_started_this_tick_is_no_holder_and_a_build_is(self):
+        self.opt()
+        srv = self.server([row('J6', needs_pc=True), row('J7', status='queued', needs_pc=True), row('J9', status='queued', needs_pc=True)])
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J7-build', 'J6-brief'])
+        self.assertIn('J9-build: deferred, J7 holds the PC', self.lines)
+
+    def test_a_review_still_counts_as_a_holder(self):
+        self.opt()
+        srv = self.server(self.MAIN + [row('J6', status='fix', needs_pc=True)], agents=[bg('J6-review')])
+        srv.auto_tick()
+        self.assertNotIn('J7-build', self.launched)
+
+
+class AutoNeverStarted(Opted):
+    def test_later_blocked_done_review_on_main_and_an_open_dependency(self):
+        self.opt()
+        srv = self.server([row('J1', status='later'), row('J2', status='blocked'), row('J3', status='done'), row('J4', status='review'),
+                           row('J5', status='queued', depends_on=['J1']), row('J6', depends_on=['J2'])])
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+
+    def test_a_done_dependency_is_read_from_origin_main(self):
+        self.opt()
+        dep = row('J5', status='queued', depends_on=['J1'])
+        srv = self.server([row('J1', status='done'), dep], tree=[row('J1', status='queued'), dep], branches={'job/J1'})
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J5-build'])
+
+
+class AutoTagged(Opted):
+    TAGGED = '# J7\n\n## Start\nA question tagged tag: legal would hold.\n\n## Open questions\n1. **Which?** recommended: yes; tag: risk.\n\n## Finish\nDone.\n'
+    ELSEWHERE = '# J7\n\n## Start\nA question tagged tag: risk would hold.\n\n## Open questions\n1. **Which?** recommended: yes; default after: 2026-12-01.\n\n## Finish\ntag: legal\n'
+
+    def test_each_tag_defers_with_a_line_naming_the_row(self):
+        for tag in ('risk', 'taste', 'legal', 'Taste'):
+            self.opt()
+            srv = self.server([row('J7', status='queued')], brief=f'## Open questions\n- x. recommended: y. Tag: {tag}\n')
+            srv.auto_tick()
+            srv.auto_tick()
+            self.assertEqual(self.launched, [], tag)
+            self.assertEqual([l for l in self.lines if 'deferred' in l], [f'J7-build: deferred, its brief has an open question tagged {tag.lower()}'])
+
+    def test_the_section_is_what_counts(self):
+        self.assertEqual(jv.brief_tags(self.TAGGED), ['risk'])
+        self.assertEqual(jv.brief_tags(self.ELSEWHERE), [])
+        self.assertEqual(jv.brief_tags('## Open questions\n```\ntag: risk\n```\nNone.\n'), [])
+        self.assertEqual(jv.brief_tags('## Open questions\n1. Is this a tag: riskier one?\n'), [])
+
+    def test_the_same_words_elsewhere_do_not_defer(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')], brief=self.ELSEWHERE)
+        srv.auto_tick()
+        self.assertEqual(self.launched, ['J7-build'])
+
+    def test_the_brief_is_read_at_the_sha_of_the_tick(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')])
+        srv.auto_tick()
+        self.assertEqual(self.briefs_read, [('m1', 'jobs/J7/brief.md')])
+
+    def test_a_brief_session_reads_no_brief(self):
+        self.opt()
+        srv = self.server([row('J8')], brief=self.TAGGED)
+        srv.auto_tick()
+        self.assertEqual((self.launched, self.briefs_read), (['J8-brief'], []))
+
+    def test_an_unreadable_brief_defers(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')], brief=None)
+        srv.auto_tick()
+        self.assertEqual(self.launched, [])
+        self.assertIn('J7-build: deferred, no brief at m1', self.lines)
+
+    def test_a_button_starts_it(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued')], brief=self.TAGGED)
+        rows, _, branches, on = srv.snapshot()
+        self.assertEqual(srv.start('J7', 'build', {r['id']: r for r in rows}, branches, on)[0], 200)
+
+
+class AutoModels(Opted):
+    def test_a_brief_carries_the_first_model_a_build_the_rows(self):
+        self.opt()
+        srv = self.server([row('J7', status='queued', model='fable'), row('J8', model='fable')])
+        srv.auto_tick()
+        self.assertEqual({a[3]: a[5] for a in self.argvs}, {'J7-build': 'fable', 'J8-brief': jv.S.models[0]})
+
+
+class AutoStop(Opted):
+    """Deliverable 2, built because the probe read `working` for a session waiting on a background task (jobs/W46/report.md)."""
+
+    def stopper(self, fail=()):
+        self.stopped = []
+        def stop(sid):
+            if sid in fail:
+                raise ValueError('claude stop exited 1')
+            self.stopped.append(sid)
+        return stop
+
+    def test_off_by_default(self):
+        self.assertIs(jv.S.auto_stop_finished, False)
+        self.opt(cap=1)
+        srv = self.server([row('J7', status='queued')], agents=[bg('J90-review', 'done')], stop=self.stopper())
+        srv.auto_tick()
+        self.assertEqual((self.stopped, self.launched), ([], []))
+
+    def test_a_full_cap_with_a_candidate_stops_the_done_rows_once_and_starts(self):
+        self.opt(stop=True, cap=2)
+        srv = self.server([row('J7', status='queued'), row('J8')], agents=[bg('J90-review', 'done', sid='s90'), bg('J91-build')], stop=self.stopper())
+        srv.auto_tick()
+        self.assertEqual(self.stopped, ['s90'])
+        self.assertEqual(self.launched, ['J7-build'])   # the cap is full again for J8, and there is nothing left to stop
+        self.assertIn('stopped J90-review (s90): finished, still holding a process', self.lines)
+
+    def test_only_a_done_row_with_a_pid(self):
+        self.opt(stop=True, cap=4)
+        agents = [bg('J90-a', 'working'), bg('J91-b', 'blocked'), bg('J92-c', 'failed'), bg('J93-d', 'stopped'), bg('J94-e', 'done', pid=None)]
+        srv = self.server([row('J7', status='queued')], agents=agents, stop=self.stopper())
+        srv.auto_tick()
+        self.assertEqual((self.stopped, self.launched), ([], []))
+
+    def test_not_below_the_cap(self):
+        self.opt(stop=True, cap=3)
+        srv = self.server([row('J7', status='queued')], agents=[bg('J90-review', 'done')], stop=self.stopper())
+        srv.auto_tick()
+        self.assertEqual((self.stopped, self.launched), ([], ['J7-build']))
+
+    def test_not_without_a_candidate_a_held_one_is_none(self):
+        self.opt(stop=True, cap=1, hold=[1])
+        agents = [bg('J90-review', 'done')]
+        srv = self.server([row('J7', status='queued')], agents=agents, stop=self.stopper())
+        srv.auto_tick()
+        self.assertEqual(self.stopped, [])
+        self.opt(stop=True, cap=1)
+        srv = self.server([], agents=agents, stop=self.stopper())
+        srv.auto_tick()
+        self.assertEqual(self.stopped, [])
+
+    def test_a_dry_run_stops_nothing_and_says_what_it_would(self):
+        self.opt(stop=True, cap=1)
+        srv = self.server([row('J7', status='queued')], agents=[bg('J90-review', 'done', sid='s90')], stop=self.stopper(), dry_run=True)
+        srv.auto_tick()
+        self.assertEqual(self.stopped, [])
+        self.assertIn('would stop J90-review (s90): finished, still holding a process', self.lines)
+        self.assertEqual(len([l for l in self.lines if l.startswith('deferred, ')]), 1, self.lines)
+
+    def test_a_failed_stop_does_not_end_the_tick(self):
+        self.opt(stop=True, cap=2)
+        srv = self.server([row('J7', status='queued')], agents=[bg('J90-a', 'done', sid='s90'), bg('J91-b', 'done', sid='s91')], stop=self.stopper(fail={'s90'}))
+        srv.auto_tick()
+        self.assertEqual((self.stopped, self.launched), (['s91'], ['J7-build']))
+        self.assertIn('cannot stop J90-a (s90): claude stop exited 1', self.lines)
+
+    def test_a_failed_or_stopped_row_with_a_pid_is_named_on_the_line_and_the_page(self):
+        for stop in (False, True):
+            self.opt(stop=stop, cap=2)
+            agents = [bg('J90-x', 'failed'), bg('J91-y', 'stopped')]
+            srv = self.server([row('J7', status='queued')], agents=agents, stop=self.stopper())
+            srv.auto = {'interval': 300, 'last': None, 'dry_run': False}
+            srv.auto_tick()
+            line = next(l for l in self.lines if l.startswith('deferred, '))
+            self.assertTrue(line.endswith('; failed or stopped, still holding a process: J90-x, J91-y'), line)
+            self.assertIn('failed or stopped, still holding a process: J90-x, J91-y', srv.page())
+            self.assertEqual(self.stopped, [])
+
+    def test_the_page_drops_the_line_when_the_cap_clears(self):
+        self.opt(cap=1)
+        agents = [bg('J90-x', 'failed')]
+        srv = self.server([row('J7', status='queued')], stop=self.stopper())
+        srv.agents = lambda: list(agents)
+        srv.auto = {'interval': 300, 'last': None, 'dry_run': False}
+        srv.auto_tick()
+        self.assertIn('J90-x', srv.page())
+        agents.clear()
+        srv.auto_tick()
+        self.assertNotIn('J90-x', srv.page())
+
+
+class AutoKeys(unittest.TestCase):
+    def load(self, text):
+        from warscape import repo
+        with tempfile.TemporaryDirectory() as t:
+            Path(t, 'wsc.toml').write_text(text, encoding='utf-8')
+            return repo.load_config(Path(t))['jobs']
+
+    def refused(self, text, words):
+        from warscape.repo import ConfigError
+        with self.assertRaises(ConfigError, msg=text) as c:
+            self.load(text)
+        self.assertIn(words, str(c.exception))
+
+    def test_defaults(self):
+        j = self.load('[jobs]\n')
+        self.assertEqual((j['auto_actions'], j['auto_hold_phases'], j['auto_phase_order'], j['auto_stop_finished']), (['review', 'fix'], [], [], False))
+
+    def test_each_refusal(self):
+        for bad in ('["merge"]', '"review"', '[1]'):
+            self.refused(f'[jobs]\nauto_actions = {bad}\n', 'jobs.auto_actions')
+        for key in ('auto_hold_phases', 'auto_phase_order'):
+            for bad in ('["1"]', '[1.5]', '[true]', '[-1]', '2'):
+                self.refused(f'[jobs]\n{key} = {bad}\n', f'jobs.{key}')
+        for action in ('build', 'brief'):
+            self.refused(f'[jobs]\nauto_actions = ["{action}"]\n', 'max_sessions')
+        self.refused('[jobs]\nauto_stop_finished = "yes"\n', 'jobs.auto_stop_finished')
+
+    def test_what_it_takes(self):
+        j = self.load('[jobs]\nmax_sessions = 4\nauto_actions = ["fix", "review", "build", "brief"]\nauto_hold_phases = [3]\nauto_phase_order = [2, 1]\nauto_stop_finished = true\n')
+        self.assertEqual((j['auto_hold_phases'], j['auto_phase_order'], j['auto_stop_finished']), ([3], [2, 1], True))
+        self.assertEqual(self.load('[jobs]\nauto_actions = []\n')['auto_actions'], [])
+
+    def test_configure_from_carries_them(self):
+        from warscape.repo import DEFAULTS
+        for k in ('auto_actions', 'auto_hold_phases', 'auto_phase_order', 'auto_stop_finished', 'max_sessions'):
+            self.addCleanup(setattr, jv.S, k, getattr(jv.S, k))
+        jv.configure_from(dict(DEFAULTS['jobs'], max_sessions=4, auto_actions=['build'], auto_hold_phases=[3], auto_phase_order=[2], auto_stop_finished=True))
+        self.assertEqual((jv.S.auto_actions, jv.S.auto_hold_phases, jv.S.auto_phase_order, jv.S.auto_stop_finished), (['build'], [3], [2], True))
 
 
 class ThisRepo(unittest.TestCase):
