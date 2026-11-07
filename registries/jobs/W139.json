@@ -3,11 +3,13 @@
   "description": "**The Windows host tests have lost their headroom under `[tests] timeout_s`.** One tree, `eeee6cf`, timed out at 1080 s on a first attempt (run 42297959568, job 128168139132) and passed in 812.7 s on the second (job 128177416061): the spread is the runner alone. Main without W45 already reached 971.9 s (run 42259250732), and W45 adds about 160 tests, `tests/test_proposals_judge.py` 119.8 s of them on the PC. `timeout_s` cannot simply rise, as the job's own cap is 20 minutes. Until this is done, a job that changes a Windows input can go red on a slow runner with nothing wrong; a rerun clears it. Cut the time at its cause (the real-judge fixtures clone a repo per class or test: share one) or split the suite across two jobs, and report the Windows time before and after. Raised: W45 review round 4, 2026-11-06.",
   "title": "Windows host tests are close to the 1080 s limit",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "semver": "minor",
   "depends_on": [],
   "brief": "jobs/W139/brief.md",
+  "report": "jobs/W139/report.md",
+  "review": "jobs/W139/review.md",
   "area": "core"
 }

@@ -60,3 +60,23 @@ plan = [..., "registries/decisions/*"]       # and in meta, or a plan/ branch ca
 - **Ids:** old rows keep their numbers. A new id is `<decision_prefix><yymmdd>-<4 hex>` from `wsc reg add decisions --mint who=... decision=... reversible=yes|no`; `policy` refuses a new number. A reversal is a new row whose `replaces` names the old one.
 - **Moving takes two pull requests,** because a pull request is judged with its base's rules, and those refuse a head without the Markdown rows. First, after the pin bump: `wsc reg migrate decisions --from-md docs/DECISIONS.md`, `--check` the same way, the keys above, every row line of the file left as it is (its prose may change). While `decisions_retired` is set and the file exists, `policy` refuses a head that changes the file's table, on every branch and with the base's rules, so a branch cut before the key cannot land a row; the `registries` gate also fails on a row the row files lack. Second: a `meta/` branch deletes the file and the key.
 - **`later` rows:** a job status for work recorded but not started. `jobs next`, `jobs review` and the autopilot ignore it, `jobs view` shows it, and status `needs_brief` promotes it. Pick them up batched by `area`, not one job each. `wsc jobs later --from-md FILE [--area NAME] [--check]` moves a `| # | Change | Why | Raised |` table into such rows, the old number in `backlog_id`, which `wsc find` resolves.
+
+## The `tests` gate (core W139)
+
+`[tests]` in `wsc.toml`. `wsc gates` and CI read the same keys, so a local run behaves as CI does.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `dirs` | `["tests"]` | The test folders, one after the other. |
+| `timeout_s` | `600` | One deadline per folder, across all workers. Keep it under the CI job's own limit. |
+| `workers` | `1` | Modules run at once. `1` is one process for the folder. Above 1, a queue of modules, each in its own `python -m unittest discover -p <module>.py`. |
+| `first` | `[]` | Module names to start first, the long ones; the rest follow by name. A stale name is ignored. Read only above 1 worker. |
+| `warn_at` | `0.75` | The gate warns when a folder took more than this share of `timeout_s`, never fails. `0` is off. |
+
+Every run logs `timing: workers <n>, cpu_count <n>` and each folder's ten slowest modules. At `workers = 1` those seconds are summed test time, without imports or `setUpClass`; above 1 they are each process's wall time, so the two are not comparable.
+
+Above 1 worker:
+- The total is the sum of each module's own `Ran N tests` line. A module with no such line is an error, even at exit 0, and so is a module with no tests in it, which one process would pass over.
+- At the deadline every running module is killed with its process tree, and the gate names what had not finished and what never started.
+- Modules share the machine, so tests may not share anything fixed: a fixed path in the temp folder (`tests/test_acceptance.py` has one) is safe only while one module owns it, and a port or lock file the same.
+- To opt in, read the timings of a green run, put its slowest modules in `first`, keep `workers` at or under the runner's `cpu_count`, and run the suite a few times: a collision shows up as a flake.

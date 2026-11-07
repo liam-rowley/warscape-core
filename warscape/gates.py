@@ -5,10 +5,15 @@ Every gate returns a Result. Level `error` fails the run; `warn` never does. `--
 A game's own gates (`[gates] dirs`, warscape/gatemods.py) run after the core gates, each as its own line.
 """
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -374,6 +379,10 @@ def gate_ci_render(ctx):
 
 SKIPPED = re.compile(r"^(.*?) \.\.\. skipped '(.*)'$")
 TEST_ID = re.compile(r'^(\S+) \(([\w.]+?)(?:\.\1)?\)$')   # `test_x (mod.Class.test_x)` (3.11+) or `test_x (mod.Class)`
+DURATIONS_HEAD = 'Slowest test durations'                 # `unittest --durations 0` (3.12+)
+DURATION = re.compile(r'(\d+\.\d+)s\s+\S+ \((.+)\)$')     # `1.250s     test_x (mod.Class.test_x)`
+SLOWEST_SHOWN = 10
+RAN = re.compile(r'Ran (\d+) tests? in ')
 
 
 def unittest_skips(lines):
@@ -389,30 +398,178 @@ def unittest_skips(lines):
     return out
 
 
+def split_durations(lines):
+    """`lines` without the block `unittest --durations 0` prints, and `{module: seconds}` summed from it. What is left is what a run without the flag
+    prints, so a failure's tail stays the traceback. The seconds are test time: an import or a `setUpClass` is not in them."""
+    if DURATIONS_HEAD not in lines:
+        return lines, {}
+    head = len(lines) - 1 - lines[::-1].index(DURATIONS_HEAD)     # the last one: a traceback may quote the words
+    end = next((i for i in range(head + 2, len(lines)) if not lines[i].strip()), len(lines))
+    secs = {}
+    for m in filter(None, map(DURATION.match, lines[head + 2:end])):
+        mod = m.group(2).rsplit('.', 2)[0]
+        secs[mod] = secs.get(mod, 0) + float(m.group(1))
+    return lines[:head] + lines[end + 1:], secs
+
+
+def _slowest(d, secs):
+    """One log line per folder: where the time went, so a slow run needs no guessing (W139)."""
+    top = sorted(secs.items(), key=lambda kv: (-kv[1], kv[0]))[:SLOWEST_SHOWN]
+    return f'{d}: slowest {len(top)} of {len(secs)} modules: ' + ', '.join(f'{m} {s:.1f} s' for m, s in top)
+
+
+def kill_tree(p):
+    """Kill the child `p` and what it started. Windows has no group to signal, so `taskkill /T` walks the parent links; on POSIX `p` leads its own session
+    (`start_new_session`). Bounded: a kill that cannot finish must not hang the caller."""
+    try:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(p.pid)], capture_output=True, timeout=15)
+        else:
+            os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    p.kill()
+    try:
+        p.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def test_modules(folder):
+    """The module names one `discover -p test_*.py` loads from `folder`: the folder itself and the packages below it, never a plain subfolder."""
+    out = set()
+    for base, subs, files in os.walk(folder):
+        subs[:] = [s for s in subs if os.path.isfile(os.path.join(base, s, '__init__.py'))]
+        out |= {f[:-3] for f in files if f.startswith('test_') and f.endswith('.py') and f[:-3].isidentifier()}
+    return sorted(out)
+
+
+test_modules.__test__ = False
+
+
+def module_order(mods, first):
+    """The queue: `[tests] first` in its order, then the rest by name. A name in `first` that no longer exists is ignored."""
+    head = [m for m in first if m in mods]
+    return head + [m for m in mods if m not in head]
+
+
+def _join(threads):
+    """Wait with a timeout: a bare join on Windows cannot be interrupted by Ctrl+C."""
+    while any(t.is_alive() for t in threads):
+        next(t for t in threads if t.is_alive()).join(0.2)
+
+
+def _run_module(root, d, mod, logs, deadline, live):
+    """One module in its own process, its output in files: on Windows a grandchild can hold a pipe open after the kill, and a read would wait forever."""
+    out, err = logs / f'{mod}.out', logs / f'{mod}.err'
+    t0 = time.monotonic()
+    with open(out, 'wb') as o, open(err, 'wb') as e:
+        p = subprocess.Popen([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d, '-p', f'{mod}.py'],
+                             cwd=root, stdout=o, stderr=e, start_new_session=os.name != 'nt')
+    live[mod] = p
+    killed = False
+    try:
+        p.wait(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        kill_tree(p)
+        killed = True
+    live.pop(mod, None)
+    return {'rc': p.returncode, 'killed': killed, 'seconds': time.monotonic() - t0,
+            'out': out.read_text(encoding='utf-8', errors='replace'), 'err': err.read_text(encoding='utf-8', errors='replace')}
+
+
+def _pool(root, d, order, workers, deadline, logs):
+    """`workers` threads pulling modules from one queue until it is empty or the deadline passes: `{module: result}`. A module missing from it never started."""
+    todo, done, live, stop = deque(order), {}, {}, threading.Event()
+
+    def work():
+        while todo and not stop.is_set() and time.monotonic() < deadline:
+            try:
+                mod = todo.popleft()
+            except IndexError:
+                return
+            try:
+                done[mod] = _run_module(root, d, mod, logs, deadline, live)
+            except Exception as e:   # a child that cannot start is a failed module, never a missing one
+                done[mod] = {'rc': None, 'killed': False, 'seconds': 0.0, 'out': '', 'err': f'{type(e).__name__}: {e}'}
+
+    threads = [threading.Thread(target=work) for _ in range(min(workers, len(order)))]
+    for t in threads:
+        t.start()
+    try:
+        _join(threads)
+    finally:      # Ctrl+C reaches the main thread only, and a POSIX child in its own session not at all
+        stop.set()
+        for p in list(live.values()):
+            kill_tree(p)
+    return done
+
+
+def _serial(ctx, d, tc):
+    """One process for the folder (`workers = 1`): (error lines, skips, total, timing line, failed modules)."""
+    try:
+        p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d, '-p', 'test_*.py', '--durations', '0'],
+                           cwd=ctx.root, capture_output=True, text=True, timeout=tc['timeout_s'])
+    except subprocess.TimeoutExpired:
+        return [f'{d}: timed out after {tc["timeout_s"]} s'], [], 0, f'{d}: no timings, unittest prints them at the end of a run', []
+    err, secs = split_durations(p.stderr.splitlines())
+    out = (p.stdout + '\n'.join(err)).strip().splitlines()
+    ran = next((l for l in out if l.startswith('Ran ')), 'Ran ? tests')
+    total = int(ran.split()[1]) if ran.split()[1].isdigit() else 0
+    det = [f'{d}: {ran}, FAILED'] + out[-40:] if p.returncode else []
+    return det, [f'{d}: skipped {s}' for s in unittest_skips(out)], total, _slowest(d, secs), []
+
+
+def _parallel(ctx, d, tc):
+    """A queue of modules (`workers` above 1), one deadline for the folder, the same five values as `_serial`. The total is the sum of the modules' own
+    `Ran` lines, read from stderr where unittest writes them, so a test's print is no result and a module without one is an error, never a zero."""
+    mods = test_modules(ctx.root / d)
+    if not mods:
+        return [f'{d}: no test modules'], [], 0, f'{d}: no modules', []
+    order = module_order(mods, tc['first'])
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as logs:    # a surviving grandchild may still hold a file
+        done = _pool(ctx.root, d, order, tc['workers'], time.monotonic() + tc['timeout_s'], Path(logs))
+    killed, never = [m for m in order if m in done and done[m]['killed']], [m for m in order if m not in done]
+    head = [f'{d}: timed out after {tc["timeout_s"]} s'] if killed or never else []
+    head += [f'{d}: not finished: {", ".join(killed)}'] if killed else []
+    head += [f'{d}: never started: {", ".join(never)}'] if never else []
+    bad, skips, total = {}, [], 0
+    for m in sorted(set(done) - set(killed)):
+        r = done[m]
+        out = (r['out'] + r['err']).strip().splitlines()
+        rans = [x for x in r['err'].splitlines() if RAN.match(x)]
+        skips += [f'{d}: skipped {s}' for s in unittest_skips(out)]
+        if not rans:
+            bad[m] = (f'{d}: {m}: no test result, exit {r["rc"]}', out)
+            continue
+        total += int(RAN.match(rans[-1]).group(1))
+        if r['rc']:
+            bad[m] = (f'{d}: {m}: {rans[-1]}, FAILED', out)
+    keep = max(8, 40 // max(len(bad), 1))     # the verb prints 60 detail lines: share them, so one module's tail cannot hide the next
+    det = head + [x for m in sorted(bad) for x in [bad[m][0], *bad[m][1][-keep:]]]
+    return det, skips, total, _slowest(d, {m: r['seconds'] for m, r in done.items()}), sorted({*bad, *killed, *never})
+
+
 def gate_tests(ctx):
     tc = ctx.config['tests']
     dirs = [d for d in tc['dirs'] if (ctx.root / d).is_dir()]
     if not dirs:
         return Result('tests', 'ok', 'no test folders')
-    det, skips, total = [], [], 0
+    det, skips, total, failed, near = [], [], 0, [], []
+    timing = [f'timing: workers {tc["workers"]}, cpu_count {os.cpu_count()}']
     for d in dirs:
-        try:
-            p = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-v', '-s', d, '-t', d, '-p', 'test_*.py'],
-                               cwd=ctx.root, capture_output=True, text=True, timeout=tc['timeout_s'])
-        except subprocess.TimeoutExpired:
-            det.append(f'{d}: timed out after {tc["timeout_s"]} s')
-            continue
-        out = (p.stdout + p.stderr).strip().splitlines()
-        ran = next((l for l in out if l.startswith('Ran ')), 'Ran ? tests')
-        total += int(ran.split()[1]) if ran.split()[1].isdigit() else 0
-        skips += [f'{d}: skipped {s}' for s in unittest_skips(out)]
-        if p.returncode:
-            det += [f'{d}: {ran}, FAILED'] + out[-40:]
+        t0 = time.monotonic()
+        fdet, fskips, ftotal, line, ffailed = (_serial if tc['workers'] == 1 else _parallel)(ctx, d, tc)
+        took = time.monotonic() - t0
+        det, skips, total, failed = det + fdet, skips + fskips, total + ftotal, failed + ffailed
+        timing.append(line)
+        if tc['warn_at'] and took > tc['warn_at'] * tc['timeout_s']:
+            near.append(f'{d}: took {took:.0f} s, over {tc["warn_at"]:.0%} of timeout_s {tc["timeout_s"]}: see the slowest modules')
     if det:
-        return Result('tests', 'error', 'host tests failed', det + skips)
-    msg = f'{total} host tests passed ({", ".join(dirs)})'
-    # a skip is a warn, never an error: the run still passes, but what did not run is on screen with its reason
-    return Result('tests', 'warn', f'{msg}; {len(skips)} skipped', skips) if skips else Result('tests', 'ok', msg)
+        return Result('tests', 'error', 'host tests failed' + (f': {", ".join(failed)}' if failed else ''), timing + near + det + skips)
+    # a skip is a warn, never an error: the run still passes, but what did not run is on screen with its reason. So is a folder near its limit (W139).
+    notes = ([f'{len(skips)} skipped'] if skips else []) + (['near the time limit'] if near else [])
+    return Result('tests', 'warn' if notes else 'ok', '; '.join([f'{total} host tests passed ({", ".join(dirs)})', *notes]), timing + near + skips)
 
 
 GATES = [

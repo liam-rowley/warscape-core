@@ -40,7 +40,9 @@ path_ignore = ["plan/", "brief/", "meta/", "decide/", "job/", "release/",   # br
 
 [tests]
 dirs = ["tests", "discovery/tests"]
-timeout_s = 1080     # under the Windows job's 20 minutes (W42): the default 600 s killed the host tests there, at about 9.5 minutes before W43
+timeout_s = 1080     # one deadline per folder, across all workers; under the Windows job's 20 minutes (W42), so it does not rise: the time came down with workers (W139)
+workers = 4          # W139: modules at once, each in its own process; the gate logs cpu_count and the slowest modules
+first = ["test_policy_base", "test_proposals_judge", "test_audit", "test_grant_round", "test_job_sh", "test_jobs", "test_fixture_game", "test_pc_deploy", "test_moved_tools"]   # the long modules start first, from the W139 before table
 
 # The core runs its own job queue (napoleon J62): rows in registries/jobs/<id>.json, folders in jobs/<id>/, ids W<n>, the same pipeline a game uses.
 [storage]
