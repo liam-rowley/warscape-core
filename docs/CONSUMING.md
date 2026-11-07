@@ -146,7 +146,8 @@ ledgers = "jobs/*/rules.md"        # optional: audit ledgers whose `CL` rows nam
 pc_state = "$LOCALAPPDATA/game_state"  # optional (W26): a needs_pc build is not ready where this folder is absent; WSC_PC_STATE overrides ("" = no PC here)
 failed_results = "raw/**/*.json"   # optional, off when empty: a glob inside each run folder a report cites (any `runs/<name>` path in its text); a JSON with top-level status "failed" must be named (path or file name) in that report's `## Deviations`
 claim_hours = 4                    # W27: a review claim (refs/claims/<id>/round-<n> on origin) older than this is taken over
-max_sessions = 4                   # W41: no launch at this many background sessions with a pid, any state; 0 = no cap
+max_sessions = 4                   # W41: no launch at this many background sessions with a pid; 0 = no cap
+auto_actions = ["review", "fix"]   # W46: what --auto starts (CONSUMING_OPTIONS.md)
 [jobs.text]                        # every repo-specific string in the step texts: commands ({wsc}), doc paths, decision references
 [policy]
 decisions = "docs/DECISIONS.md"    # append-only table, or "registry:<name>" (CONSUMING_OPTIONS.md)
@@ -167,7 +168,7 @@ required_checks = ["gates", "policy"]  # what main must require (`wsc ci check-s
 - **Committed views and the job queue do not mix (C19).** A `brief/<id>` branch may change only its brief and row, but a committed
   jobs view (`[views] commit = true`) changes with every `reg set` (`policy` refuses) and a stale one fails the `registries` gate: no brief can pass both. A repo with a jobs registry sets `[views] commit = false` and does not list a view in `[policy]
   plan`/`meta`. `wsc jobs check` and the `jobs` gate refuse the combination and say what to change.
-- **The `jobs view` page** pins marked by its integrity hash, shows raw HTML as text and carries a Content-Security-Policy (W28; `jobq.py` owns it).
+- **The `jobs view` page** pins marked by its integrity hash, shows raw HTML as text and carries a Content-Security-Policy (W28).
 - **Claim and autopilot (core W26, C32).** `wsc jobs next` claims before it prints: a create-only push of `origin/main` to `job/<id>`
   (`brief/<id>`); a lost race moves on, any other failure exits 1. `--peek` and `--offline` claim nothing. Order is (phase, number). An empty claim
   older than 24 h is listed with its release command. `--auto` starts a review only on a green head, a fix once CI has finished, one `needs_pc` row

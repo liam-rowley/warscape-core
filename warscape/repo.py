@@ -75,6 +75,10 @@ DEFAULTS = {
         'usage_cmd': '',                   # W31: argv template ({id}; no shell) of the game's usage reader for `wsc jobs usage`: prints {"calls", "models", "sessions", "note"}
         'claim_hours': 4,                  # a review claim (refs/claims/<id>/round-<n>, core W27) older than this may be taken over
         'max_sessions': 0,                 # W41: no launch at this many background sessions with a process (`claude agents --json --all`); 0 = no cap
+        'auto_actions': ['review', 'fix'], # W46: what `--auto` starts, any of AUTO_ACTIONS; `build` and `brief` need max_sessions
+        'auto_hold_phases': [],            # W46: phases `--auto` never starts, in any action (a button and `jobs next` ignore this)
+        'auto_phase_order': [],            # W46: inside one action, these phases first in this order, then the rest by (phase, number)
+        'auto_stop_finished': False,       # W46: at a full cap with a job waiting, the tick stops `done` sessions that still hold a process
         'text': {                          # every repo-specific string in the step texts and messages
             'wsc': 'python3 core/wsc.py',  # the command prefix ('python3 wsc.py' inside the core itself)
             'policy': '{wsc} policy',      # the policy command, before ` --branch B --base REF`
@@ -273,6 +277,7 @@ def load_config(root):
     ms = cfg['jobs']['max_sessions']
     if isinstance(ms, bool) or not isinstance(ms, int) or ms < 0:
         raise ConfigError(f'{CONFIG_NAME}: jobs.max_sessions must be a whole number of at least 0')
+    auto_problem(cfg['jobs'])
     tw, tf, ta = cfg['tests']['workers'], cfg['tests']['first'], cfg['tests']['warn_at']
     if isinstance(tw, bool) or not isinstance(tw, int) or tw < 1:
         raise ConfigError(f'{CONFIG_NAME}: tests.workers must be a whole number of at least 1')
@@ -284,6 +289,24 @@ def load_config(root):
         raise ConfigError(f'{CONFIG_NAME}: views.commit must be true or false and views.dir a repo-relative folder')
     audit_problem(cfg['audit'])
     return cfg
+
+
+AUTO_ACTIONS = ('fix', 'review', 'build', 'brief')   # what `--auto` can start, in the order a tick starts them (W46, jobq.auto_order)
+
+
+def auto_problem(j):
+    """Raises on a bad `[jobs]` autopilot key. `build` and `brief` need a cap: C41 lets the tick start them only under one."""
+    acts = j['auto_actions']
+    if not isinstance(acts, list) or any(a not in AUTO_ACTIONS for a in acts if isinstance(a, str)) or not all(isinstance(a, str) for a in acts):
+        raise ConfigError(f'{CONFIG_NAME}: jobs.auto_actions must be a list of {", ".join(AUTO_ACTIONS)}')
+    for k in ('auto_hold_phases', 'auto_phase_order'):
+        v = j[k]
+        if not isinstance(v, list) or not all(isinstance(p, int) and not isinstance(p, bool) and p >= 0 for p in v):
+            raise ConfigError(f'{CONFIG_NAME}: jobs.{k} must be a list of whole numbers')
+    if not isinstance(j['auto_stop_finished'], bool):
+        raise ConfigError(f'{CONFIG_NAME}: jobs.auto_stop_finished must be true or false')
+    if not j['max_sessions'] and {'build', 'brief'} & set(acts):
+        raise ConfigError(f'{CONFIG_NAME}: jobs.auto_actions has build or brief, which start only under a cap: set jobs.max_sessions (C41)')
 
 
 def audit_problem(au):

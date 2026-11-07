@@ -1,6 +1,6 @@
 """The job queue as a verb: check the queue, pick up the next job, find the next job to review or to fix, show the queue as a page.
 
-purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts every ready review and fix; `sessions` lists the background sessions and stops the finished ones that still hold a process.
+purpose: Check the jobs registry against jobs/ (status invariants, file links, brief shape, review rounds, the repo's `jobs`-stage gate modules), pick the next job to build, review or fix, and show the queue as a readable page; --serve starts a job's session from its button and --auto starts what `[jobs] auto_actions` names (ready reviews and fixes by default, builds and briefs under a session cap); `sessions` lists the background sessions and stops the finished ones that still hold a process.
 usage: wsc jobs check | jobs later --from-md <file> [--area <name>] [--check] | jobs next [--id <id>] [--peek] [--offline] | jobs review [--id <id>] [--all] [--offline] | jobs fix [--id <id>] [--all] [--offline] | jobs view [--all] [--offline] [--out PATH] [--no-open] | jobs view --serve [--port N] [--dry-run] [--no-open] [--auto [--interval SECONDS]] | jobs worktrees [--prune] | jobs usage <id> [--write] [--from-json FILE] | jobs sessions [--stop-finished] [--json]
 when: `next` for "pick up the next job" (`--id` for a named job: what a session launched from the view runs); `review` for "review the next job"; `fix` for a job whose review asked for changes; `check` in the tests gate and before pushing a brief or a job row change; `view` to read the queue in a browser, `view --serve` to start a session from a button; `worktrees` for stale worktree registrations and a `.git` above the repo; `usage` to fill a report's `Usage:` line before status=review; `sessions` when the session cap is full or the PC is short of memory.
 verb: jobs
@@ -30,6 +30,8 @@ W41: `[jobs] max_sessions` caps the background sessions with a process (any stat
 defers, `next` says wait (`next --id` goes on: a launched session runs it and is already counted). `sessions` lists every background session;
 `--stop-finished` runs `claude stop` on the `done` rows that still have a pid, reports the rest as already exited, and never runs `claude rm`. While an
 acceptance run holds the game lock (`job.sh status`) `--auto` starts no needs_pc session; a button still can.
+W46: `[jobs] auto_actions` opts a repo in to `--auto` starting builds and briefs, under the cap, on origin/main's rows, while main is not red; a session claims its
+own branch. `auto_hold_phases` freezes phases, `auto_phase_order` orders them, `auto_stop_finished` lets a full cap stop `done` sessions. A button ignores all of it.
 The repo's own rules and texts: `wsc.toml` [jobs] and its game gate modules (`[gates] dirs`, stages `jobs` and `view`).
 """
 import json
@@ -57,7 +59,7 @@ def add_arguments(p):
     p.add_argument('--serve', action='store_true', help='view: serve the page on 127.0.0.1 so its buttons start background Claude Code sessions (until Ctrl+C)')
     p.add_argument('--port', type=int, default=0, help='view --serve: the port (default 0: the OS picks one)')
     p.add_argument('--dry-run', action='store_true', help='view --serve: make every check, but answer with the command instead of running it (with --auto: log what it would start)')
-    p.add_argument('--auto', action='store_true', help='view --serve: also start every ready review and fix by itself, each --interval (never a brief or a build)')
+    p.add_argument('--auto', action='store_true', help='view --serve: also start what [jobs] auto_actions names by itself, each --interval (default: ready reviews and fixes; builds and briefs when a repo opts in under a cap)')
     p.add_argument('--peek', action='store_true', help='next: print what would be picked and the push that would claim it; claim nothing')
     p.add_argument('--prune', action='store_true', help='worktrees: run git worktree prune (registrations whose folder is gone) and say how many it removed')
     p.add_argument('--interval', type=int, default=300, help='view --serve --auto: seconds between autopilot ticks (default %(default)s)')
@@ -214,7 +216,9 @@ def run(args, ctx):
                           main_line=lambda: J.main_html(J.main_state(ctx.config['ci'], ctx.root, args.offline)),
                           ci=lambda sha: J.branch_ci(ctx.root, sha, args.offline), prune=lambda: W.prune(ctx.root),
                           claim=None if args.offline else lambda jid, n, head, who: J.take_claim(ctx.root, jid, n, head, who, hours),
-                          pc_lock=J.read_pc_lock)
+                          pc_lock=J.read_pc_lock, main_head=lambda: J.main_head(ctx.root, args.offline),
+                          main_ci=lambda: J.main_state(ctx.config['ci'], ctx.root, args.offline)['state'],
+                          read_at=lambda sha, path: J.read_at(ctx.root, sha, path))
         print(f'jobs view: serving {srv.url}{" (dry run: nothing is started)" if args.dry_run else ""}; Ctrl+C stops it', flush=True)
         stop = threading.Event()
         if args.auto:

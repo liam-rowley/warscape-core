@@ -8,7 +8,8 @@ generic ones). Tests that want a different configuration call `configure_from(cf
 
 Rules in short (details in docs/REVIEW.md of the repo that uses them): rows are checked against `jobs/<id>/` files; a job is built on branch
 `job/<id>`, briefed on `brief/<id>`; review.md holds `## Round N (YYYY-MM-DD, branch job/<id> at <sha>)` sections, newest first, at most 3, one
-verdict each; the reviewer sets the row (merge -> done, otherwise fix, or blocked after round 3); `--serve --auto` starts ready reviews and fixes.
+verdict each; the reviewer sets the row (merge -> done, otherwise fix, or blocked after round 3); `--serve --auto` starts what `[jobs] auto_actions` names:
+ready reviews and fixes by default, builds and briefs too once a repo opts in under a session cap (W46; a session it starts claims its own branch).
 Review claims (core W27): `jobs review` and the autopilot claim round n with the remote ref refs/claims/<id>/round-<n> (warscape/claims.py)
 before a reviewer starts; a refused claim names its holder. A job may carry jobs/<id>/handback.md (the builder subagent's own words); its
 report.md then has a "## Orchestrator additions" section.
@@ -16,6 +17,8 @@ report.md then has a "## Orchestrator additions" section.
 `kind` "background", `id`, `state` "working", "blocked" (waiting for input), "done", "stopped" or "failed", and `pid` while it has a process, which a
 session can lose in any state and keep after it is done; an interactive row has a `pid` but no `id` or `state`. Live (the same-name and PC holder checks)
 = working or blocked. The session cap (`[jobs] max_sessions`, W41) counts something else: a background row with a pid, because the cap is for memory (napoleon D59).
+A session waiting on a background task reads `working`, status `busy`, and turns `done` when the task has ended and it has answered (W46's probe, 2026-11-07), so
+`done` means finished, and the tick may stop such a row (`[jobs] auto_stop_finished`).
 """
 import base64
 import hashlib
@@ -39,8 +42,8 @@ from typing import NamedTuple, Optional
 from . import ci, gatemods
 from .checks import strict_loads
 from .gitbash import git_bash
-from .policy import verdict
-from .repo import DEFAULTS, decisions_registry, git_env
+from .policy import rows_at, verdict
+from .repo import AUTO_ACTIONS, DEFAULTS, decisions_registry, git_env
 
 
 
@@ -61,6 +64,10 @@ class Settings:
     legacy_briefs = frozenset()
     pc_state = ''   # [jobs] pc_state: the PC state folder a needs_pc build needs ('' = no gating; WSC_PC_STATE overrides it, W26)
     max_sessions = 0   # [jobs] max_sessions: background sessions with a process that a launch may not reach (0 = no cap, W41)
+    auto_actions = list(DEFAULTS['jobs']['auto_actions'])   # the rest of these: what --auto starts, and how (W46; repo.py has each key)
+    auto_hold_phases = []
+    auto_phase_order = []
+    auto_stop_finished = False
     text = dict(DEFAULTS['jobs']['text'])
 
 
@@ -103,6 +110,9 @@ def configure_from(cfg, root=None, reg_dir='registries', decisions=''):
     S.text = dict(cfg['text'])
     S.pc_state = cfg.get('pc_state', '')
     S.max_sessions = cfg.get('max_sessions', 0)
+    S.auto_actions = list(cfg.get('auto_actions', DEFAULTS['jobs']['auto_actions']))
+    S.auto_hold_phases, S.auto_phase_order = list(cfg.get('auto_hold_phases', [])), list(cfg.get('auto_phase_order', []))
+    S.auto_stop_finished = cfg.get('auto_stop_finished', False)
     S.legacy_rounds = S.legacy_briefs = frozenset()
     S.grants = read_grants(Path(root) / reg_dir / decisions) if root is not None and decisions else {}
     if root is not None:
@@ -622,7 +632,7 @@ def problems(rows, read, folders=()):
 
 # ------------------------------------------------------------------ next and review
 ACTIONS = {'brief': ('needs_brief', 'brief'), 'build': ('queued', 'job')}   # action: (status it needs, branch prefix that claims it)
-BRANCH_ACTIONS = ('review', 'fix')   # ready from the job branch's own row (the status names the action); the only ones --auto starts
+BRANCH_ACTIONS = ('review', 'fix')   # ready from the job branch's own row (the status names the action); ACTIONS are ready from main's row
 
 
 class Branch(NamedTuple):
@@ -672,8 +682,8 @@ def not_ready(action, jid, by, branches, on_branch=None):
         return f'{jid} ({st}): waits for {", ".join(late)}'
     if f'{prefix}/{jid}' in branches:
         return f'{jid} ({st}): in progress on {prefix}/{jid}'
-    if action == 'build' and r.get('needs_pc') and (pc := pc_absent()):
-        return f'{jid} needs the PC {pc}'
+    if action == 'build' and r.get('needs_pc') and (pc := absent_line(jid)):
+        return pc
     return None
 
 
@@ -690,10 +700,16 @@ def pc_absent():
     return None if Path(path).is_dir() else f'({path} is absent here)'
 
 
+def row_phase(r):
+    """A row's phase, or None when it has no whole-number phase."""
+    ph = r.get('phase')
+    return ph if isinstance(ph, int) and not isinstance(ph, bool) else None
+
+
 def order_key(r):
     """pick_next's order (W26): phase, then number; a row without an int phase sorts as phase 99."""
-    ph = r.get('phase')
-    return (ph if isinstance(ph, int) and not isinstance(ph, bool) else 99, num(r['id']))
+    ph = row_phase(r)
+    return (99 if ph is None else ph, num(r['id']))
 
 
 def pick_next(rows, branches):
@@ -712,6 +728,65 @@ def pick_next(rows, branches):
     waiting += [f'{r["id"]}: {r["status"]}' + (f' ({r.get("blocked_by")})' if r.get('blocked_by') else '')
                 for r in order if r.get('status') in ('review', 'blocked')]
     return None, None, sorted(set(waiting), key=lambda w: num(w.split()[0].rstrip(':')))
+
+
+class Candidate(NamedTuple):
+    """One thing a tick could start: `action` and the main row it would start from. A new kind of start adds its action to AUTO_ACTIONS."""
+    action: str
+    row: dict
+
+
+def auto_order(candidates, phase_order=()):
+    """W46 decision 2, the order a tick starts in: AUTO_ACTIONS (a finished job never waits behind a new one), and inside one action the phases of
+    `phase_order` first, in that order, then the rest by order_key."""
+    rank = {p: i for i, p in enumerate(phase_order)}
+    return sorted(candidates, key=lambda c: (AUTO_ACTIONS.index(c.action), rank.get(row_phase(c.row), len(rank)), order_key(c.row)))
+
+
+def branch_candidates(by, branches, on_branch):
+    """The reviews and fixes `[jobs] auto_actions` allows that are ready now. `by`: the rows the view reads."""
+    return [Candidate(a, by[j]) for j in on_branch or {} for a in BRANCH_ACTIONS
+            if a in S.auto_actions and j in by and not_ready(a, j, by, branches, on_branch) is None]
+
+
+def main_candidates(by, branches):
+    """The builds and briefs `[jobs] auto_actions` allows that are ready now. `by`: the rows of origin/main. A build held only by pc_absent stays a
+    candidate, so the tick can say why it did not start."""
+    out = []
+    for r in by.values():
+        for a, (status, _) in ACTIONS.items():
+            if a in S.auto_actions and r.get('status') == status:
+                why = not_ready(a, r['id'], by, branches)
+                if why is None or why == absent_line(r['id']):
+                    out.append(Candidate(a, r))
+    return out
+
+
+def absent_line(jid):
+    """not_ready's words for a needs_pc build on a machine with no PC state, or None when the PC is here."""
+    pc = pc_absent()
+    return f'{jid} needs the PC {pc}' if pc else None
+
+
+OPEN_QUESTIONS = re.compile(r'##\s+Open questions\s*\Z', re.I)
+HOLDING_TAG = re.compile(r'\btag:\s*`?(taste|risk|legal)\b', re.I)
+
+
+def brief_tags(text):
+    """The tags under a brief's `## Open questions`, lower case, outside code fences: a question so tagged never defaults (W46 decision 9)."""
+    tags, inside = [], False
+    for _, line in unfenced(text.splitlines()):
+        if line.startswith('## '):
+            inside = bool(OPEN_QUESTIONS.match(line.rstrip()))
+        elif inside:
+            tags += [t.lower() for t in HOLDING_TAG.findall(line)]
+    return tags
+
+
+def and_list(words, last):
+    """'a, b and c'."""
+    words = list(words)
+    return f' {last} '.join(filter(None, [', '.join(words[:-1]), ''.join(words[-1:])]))
 
 
 def pick_branch(action, on_branch):
@@ -1111,6 +1186,27 @@ def branch_row_spec(ref, jid, reg_dir):
             (f'{ref}:{reg_dir}/jobs.jsonl', lambda text: next((x for x in load_rows(text) if x.get('id') == jid), None))]
 
 
+def main_head(root, offline=False, run=subprocess.run):
+    """(sha, rows) of origin/main, fetched first (`offline`: as last fetched): what a build or a brief is decided on, as a checkout that is behind
+    would start a job already done (W46 decision 6). ValueError or a git error when it cannot be read; an empty registry is one."""
+    err = None if offline else fetch_main(root, run)
+    if err:
+        raise ValueError(err)
+    sha = (_git(root, 'rev-parse', '--verify', '-q', 'refs/remotes/origin/main^{commit}') or '').strip()
+    if not sha:
+        raise ValueError('origin/main is unknown in this clone')
+    rows = rows_at(sha, {'reg_jobs': f'{S.reg_dir}/jobs', 'reg_jsonl': f'{S.reg_dir}/jobs.jsonl'}, root)
+    if not rows:
+        raise ValueError(f'no job rows at origin/main {sha[:7]}')
+    return sha, list(rows.values())
+
+
+def read_at(root, sha, path):
+    """The text of `path` at `sha`, or None."""
+    spec = f'{sha}:{path}'
+    return _blobs(root, [spec]).get(spec)
+
+
 def main_rows(ctx):
     """The jobs registry's rows in the working tree, through the core's loader (either storage)."""
     from warscape.registry import load_all
@@ -1354,8 +1450,12 @@ def render_view(rows, read, branches, generated, on_branch=None, token=None, roo
     refresh = ('Served by <code>wsc jobs view --serve</code>: reload to refresh; the buttons start background sessions.' if token else
                'Rerun it to refresh; the buttons copy the command (<code>wsc jobs view --serve</code> makes them start it).')
     if auto:
-        refresh += (f' <b>Autopilot on</b>{" (dry run)" if auto.get("dry_run") else ""}: starts ready reviews and fixes every '
-                    f'{int(auto["interval"])} s; last ran {e(auto.get("last") or "not yet")} (log: <code>_scratch/jobs_auto.log</code>).')
+        starts = and_list([{'fix': 'fixes'}.get(a, a + 's') for a in S.auto_actions], 'and') or 'nothing'
+        holds = f'; holds phases {", ".join(map(str, S.auto_hold_phases))}' if S.auto_hold_phases else ''
+        refresh += (f' <b>Autopilot on</b>{" (dry run)" if auto.get("dry_run") else ""}: starts ready {e(starts)} every '
+                    f'{int(auto["interval"])} s{holds}; last ran {e(auto.get("last") or "not yet")} (log: <code>_scratch/jobs_auto.log</code>).')
+        if auto.get('stall'):
+            refresh += f' <b>Cap full:</b> {e(auto["stall"])}.'
     page = VIEW_PAGE.format(reg_jobs=e(S.reg_dir + '/jobs/'), jobs_dir=e(S.jobs_dir), generated=e(generated), head=head, counts=counts, lanes=lanes, total=len(rows), refresh=refresh,
                             serve=json.dumps({'token': token} if token else None), marked_url=MARKED_URL, marked_sri=MARKED_SRI, csp=CSP_SLOT)
     return page.replace(CSP_SLOT, e(view_csp(page)))
@@ -1565,6 +1665,12 @@ def stop_finished(rows, stop):
     return stops, sum(1 for r in rows if r['state'] == 'done' and not r['pid'])
 
 
+def stalled_rows(agents):
+    """What a full cap holds that no tick may stop: failed or stopped rows that still have a process. One clause for the cap-full line, or ''."""
+    names = [str(a.get('name') or a.get('id') or '?') for a in capped_sessions(agents) if a.get('state') in ('failed', 'stopped')]
+    return f'failed or stopped, still holding a process: {", ".join(names)}' if names else ''
+
+
 def _job_sh(argv):
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     p = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=flags)
@@ -1652,18 +1758,22 @@ class JobServer(ThreadingHTTPServer):
     """`wsc jobs view --serve` on 127.0.0.1: GET / renders the queue fresh, POST /launch starts one session after the checks of
     launch_request; with --auto, run_auto() ticks in a thread. Seams (the tests pass fakes): snapshot() -> (rows, read, branches,
     on_branch), read fresh each time; agents() -> the `claude agents --json --all` list; launch(argv) -> session id; which(name) -> path or
-    None; log_path: the autopilot's log file (None: stderr only); pc_lock() -> read_pc_lock's answer (None = no lock is read)."""
+    None; log_path: the autopilot's log file (None: stderr only); pc_lock() -> read_pc_lock's answer (None = no lock is read). W46, read only with
+    `build` or `brief` in `auto_actions`: main_head() -> (sha, rows) of origin/main; main_ci() -> main_state's state; read_at(sha, path) -> text or None;
+    each fails closed, so a server without them starts no build. stop(id): claude stop."""
     daemon_threads = True
     log = True   # one stderr line per request
 
     def __init__(self, snapshot, agents, launch, which=shutil.which, port=0, dry_run=False, root=None, log_path=None, ctx=None,
-                 main_line=None, clock=time.monotonic, ci=None, prune=None, claim=None, pc_lock=None):
+                 main_line=None, clock=time.monotonic, ci=None, prune=None, claim=None, pc_lock=None, main_head=None, main_ci=None, read_at=None,
+                 stop=stop_session):
         super().__init__(('127.0.0.1', port), _Handler)
         self.snapshot, self.agents, self.launch, self.which, self.dry_run, self.root = snapshot, agents, launch, which, dry_run, root
         # W26 seams: ci(sha) -> (state, lines) (branch_ci; None = read it with gh in `root`); prune() -> (removed, error) (None = no prune)
         self.ci = ci if ci is not None else (lambda sha: branch_ci(root or '.', sha, False))
         self.prune, self.pc_lock = prune, pc_lock
-        self.deferred = {}   # (id, action) -> the (head, reason) last logged as a deferral: one line per head and reason
+        self.main_head, self.main_ci, self.read_at, self.stop = main_head, main_ci, read_at, stop
+        self.deferred = {}   # (id, action) -> the (mark, reason) last logged as a deferral: one line per mark and reason
         self.log_path = log_path
         self.ctx = ctx
         self.main_line, self.clock, self._main = main_line, clock, None   # main's CI line: `main_line()` -> html, memoised for 60 s (W22)
@@ -1673,7 +1783,7 @@ class JobServer(ThreadingHTTPServer):
         self.url = f'http://{self.host}/'
         self.lock = threading.Lock()
         self.auto = None   # {'interval', 'last', 'dry_run'} while the autopilot runs
-        self.started = {}  # (id, action) -> the job branch head the autopilot started it at (J52 review 1)
+        self.started = {}  # (id, action) -> where the autopilot started it: the job branch head (J52 review 1), or for a build or brief (main's sha, the row)
 
     def page(self):
         rows, read, branches, on_branch = self.snapshot()
@@ -1744,18 +1854,21 @@ class JobServer(ThreadingHTTPServer):
         sys.stderr.flush()
 
     def auto_tick(self):
-        """One autopilot pass: a fresh snapshot and agent list, then every job branch ready for review or fix is started through
-        start(..., family=True). Never a brief or a build. A snapshot or agent-list error skips the whole tick. Each (id, action) is
-        started at most once per branch head (J52 review 1): a session that ends without pushing leaves the row as it was, and must
+        """One autopilot pass: a fresh snapshot and agent list, then every candidate `[jobs] auto_actions` allows, in auto_order, is started through
+        start(..., family=True). By default that is the job branches ready for review or fix. A snapshot or agent-list error skips the whole tick.
+        Each (id, action) is started at most once per branch head (J52 review 1): a session that ends without pushing leaves the row as it was, and must
         not be started again every tick until someone looks; a push moves the head and allows the next start. The memory is this
         process's: a restarted server may start such a job once more. Returns the (id, action, code, message) of every attempt.
         W26: the tick first prunes dead worktree registrations (decision 13); a review starts only on a green head and a fix waits while CI
         runs or has not reported (decision 11: one check-runs read per candidate head); a needs_pc row waits while another needs_pc row
         has a live session or was started this tick (decision 12). A deferral is logged once per head and reason, and is not a start.
         W41: a start counts against the session cap at once, in this tick's copy of the list; a full cap is one line per tick, not one per
-        job; while an acceptance run holds the PC lock no needs_pc session starts (its window would land on the virtual display)."""
+        job; while an acceptance run holds the PC lock no needs_pc session starts (its window would land on the virtual display).
+        W46: builds and briefs come from origin/main's rows, wait while main is red or unknown, and are remembered by (main's sha, the row), not a head;
+        the session claims its own branch with its first command, so the tick pushes nothing. A row in `auto_hold_phases` is never started."""
         if self.auto is not None:
             self.auto['last'] = utc_now()
+            self.auto.pop('stall', None)
         try:
             rows, _, branches, on_branch = self.snapshot()
         except Exception as x:
@@ -1767,46 +1880,117 @@ class JobServer(ThreadingHTTPServer):
         except Exception as x:
             self.auto_log(f'tick skipped: cannot list the running sessions ({x})')
             return []
-        busy, capped = self.pc_busy(), False
+        busy = self.pc_busy()
+        sha, fresh = self.fresh_main()
         by = {r['id']: r for r in rows}
-        pc_holders = [m for m in (_session_job(a, by) for a in agents if isinstance(a, dict) and a.get('state') in LIVE_STATES)
-                      if m and by[m].get('needs_pc')]
+        pc_rows = {**by, **fresh}
+        pc_holders = [m for m in (_session_job(a, pc_rows) for a in agents if isinstance(a, dict) and a.get('state') in LIVE_STATES
+                                  and not str(a.get('name') or '').lower().endswith('-brief'))
+                      if m and pc_rows[m].get('needs_pc')]
+        tick = {'capped': False, 'stopped': False, 'main': None}
         done, waiting = [], 0
-        for jid in sorted(on_branch or {}, key=num):
-            for action in BRANCH_ACTIONS:
-                if jid not in by or not_ready(action, jid, by, branches, on_branch) is not None:
-                    continue
-                head = branch_state(on_branch[jid]).head
-                if (jid, action) in self.started and self.started[(jid, action)] == head:
+        for c in auto_order(branch_candidates(by, branches, on_branch) + main_candidates(fresh, branches), S.auto_phase_order):
+            jid, action, new = c.row['id'], c.action, c.action in ACTIONS
+            src = fresh if new else by
+            head = sha if new else branch_state(on_branch[jid]).head
+            mark = (sha, json.dumps(c.row, sort_keys=True)) if new else head
+            if row_phase(c.row) in S.auto_hold_phases:
+                self.defer_once((jid, 'held'), None, f'{jid}: held, phase {row_phase(c.row)} is in [jobs] auto_hold_phases')
+                waiting += 1
+                continue
+            if self.started.get((jid, action), self) == mark:
+                if new:
+                    self.defer_once((jid, action), mark, f'{jid}-{action}: started, waiting for the row or main to move')
+                else:
                     self.auto_log(f'{jid}-{action}: started at {(head or "unknown head")[:12]}, waiting for a push to job/{jid}')
-                    waiting += 1
-                    continue
-                full = cap_line(agents)
-                if full:
-                    if not capped:
-                        capped = True
-                        self.auto_log(f'deferred, {full}')
-                    waiting += 1
-                    continue
-                why = self.defer_reason(jid, action, head, by, pc_holders, busy)
-                if why:
-                    if self.deferred.get((jid, action)) != (head, why):
-                        self.deferred[(jid, action)] = (head, why)
-                        self.auto_log(f'{jid}-{action}: deferred, {why}')
-                    waiting += 1
-                    continue
-                code, msg, _ = self.start(jid, action, by, branches, on_branch, family=True, agents=agents)
-                if code == 200:
-                    self.started[(jid, action)] = head
-                    self.deferred.pop((jid, action), None)
-                    agents.append({'name': f'{jid}-{action}', 'kind': 'background', 'state': 'working', 'pid': 'started this tick'})
-                    if by[jid].get('needs_pc'):
-                        pc_holders.append(jid)
-                self.auto_log(f'{jid}-{action}: {msg}')
-                done.append((jid, action, code, msg))
+                waiting += 1
+                continue
+            full = self.cap_full(agents, by, tick)
+            if full:
+                waiting += 1
+                continue
+            if new and self.main_waits(tick):
+                waiting += 1
+                continue
+            why = self.defer_reason(jid, action, head, src, pc_holders, busy)
+            if why:
+                self.defer_once((jid, action), None if new else head, f'{jid}-{action}: deferred, {why}')
+                waiting += 1
+                continue
+            code, msg, _ = self.start(jid, action, src, branches, on_branch, family=True, agents=agents)
+            if code == 200:
+                self.started[(jid, action)] = mark
+                self.deferred.pop((jid, action), None)
+                agents.append({'name': f'{jid}-{action}', 'kind': 'background', 'state': 'working', 'pid': 'started this tick'})
+                if src[jid].get('needs_pc') and action != 'brief':
+                    pc_holders.append(jid)
+            self.auto_log(f'{jid}-{action}: {msg}')
+            done.append((jid, action, code, msg))
         if not done and not waiting:
-            self.auto_log(f'tick: nothing ready for review or fix ({len(on_branch or {})} job branches)')
+            self.auto_log(f'tick: nothing ready for {and_list(S.auto_actions, "or") or "nothing"} ({len(on_branch or {})} job branches)')
         return done
+
+    def defer_once(self, key, mark, line):
+        """Log `line` unless it is what `key` last logged at `mark`."""
+        if self.deferred.get(key) != (mark, line):
+            self.deferred[key] = (mark, line)
+            self.auto_log(line)
+
+    def fresh_main(self):
+        """(sha, {id: row}) of origin/main for this tick; (None, {}) when the repo does not start builds or briefs, or it cannot be read."""
+        if not {'build', 'brief'} & set(S.auto_actions):
+            return None, {}
+        try:
+            sha, rows = self.main_head()
+            return sha, {r['id']: r for r in rows}
+        except Exception as x:
+            self.auto_log(f'no build or brief this tick: cannot read origin/main ({x})')
+            return None, {}
+
+    def cap_full(self, agents, by, tick):
+        """Whether the cap holds the candidate in hand. The first time it does, with `auto_stop_finished`, stop the finished sessions in `agents`, so this
+        tick can use the slots; a full cap after that is one line per tick, naming what no tick may stop."""
+        if cap_line(agents) and S.auto_stop_finished and not tick['stopped']:
+            tick['stopped'] = True
+            self.stop_done(agents, by)
+        full = cap_line(agents)
+        if full and not tick['capped']:
+            tick['capped'] = True
+            stall = stalled_rows(agents)
+            self.auto_log(f'deferred, {full}' + (f'; {stall}' if stall else ''))
+            if stall and self.auto is not None:
+                self.auto['stall'] = stall
+        return bool(full)
+
+    def stop_done(self, agents, by):
+        """stop_finished over this tick's list, each stop a line, and the pids of those stopped cleared in `agents`. A dry run only says what it would stop."""
+        finish = 'finished, still holding a process'
+        rows = session_rows(agents, by)
+        if self.dry_run:
+            for r in rows:
+                if r['state'] == 'done' and r['pid']:
+                    self.auto_log(f'would stop {r["name"]} ({r["id"]}): {finish}')
+            return
+        stops, _ = stop_finished(rows, self.stop)
+        for r in stops:
+            self.auto_log(f'stopped {r["name"]} ({r["id"]}): {finish}' if r['stopped'] else f'cannot stop {r["name"]} ({r["id"]}): {r["error"]}')
+        gone = {r['id'] for r in stops if r['stopped']}
+        agents[:] = [dict(a, pid=None) if isinstance(a, dict) and a.get('id') in gone else a for a in agents]
+
+    def main_waits(self, tick):
+        """Whether main's CI holds builds and briefs: red or unknown (W45 could not claim on a red main, and every branch taken then inherits the fault).
+        Read once a tick, only when a candidate gets here; one line each time the answer changes."""
+        if tick['main'] is None:
+            try:
+                tick['main'] = self.main_ci()
+            except Exception:
+                tick['main'] = 'unknown'
+        wait = tick['main'] in ('red', 'unknown')
+        if wait:
+            self.defer_once(('main', 'ci'), None, f'builds and briefs wait: main is {tick["main"]}')
+        else:
+            self.deferred.pop(('main', 'ci'), None)
+        return wait
 
     def pc_busy(self):
         """Why this tick starts no needs_pc session, or None: an acceptance run holds the game lock (J64 run 20261104_j64pc4 lost a pass to a
@@ -1822,17 +2006,36 @@ class JobServer(ThreadingHTTPServer):
         return None
 
     def defer_reason(self, jid, action, head, by, pc_holders, busy=None):
-        """Why the autopilot holds `jid`'s `action` this tick, or None. The PC rules first (no network), then the head's CI."""
+        """Why the autopilot holds `jid`'s `action` this tick, or None. The PC rules first (no network), then the head's CI, or for a build its brief
+        (`head`: main's sha). A brief needs no PC and has neither: writing about a needs_pc row holds nothing."""
+        if action == 'brief':
+            return None
         if by[jid].get('needs_pc'):
             other = [m for m in pc_holders if m != jid]
             if other:
                 return f'{other[0]} holds the PC'
             if busy:
                 return busy
+            if action == 'build' and (absent := absent_line(jid)):
+                return absent
+        if action == 'build':
+            return self.brief_hold(jid, head)
         state, _ = self.ci(head)
         if (state != 'green') if action == 'review' else (state in ('running', 'none')):
             return f'CI {state} at {(head or "unknown")[:7]}'
         return None
+
+    def brief_hold(self, jid, sha):
+        """Why a build waits on its brief at `sha`, or None: an open question tagged taste, risk or legal never defaults, and a person read that before
+        saying "pick up the next job" (W46 decision 9). The hold ends when the tag leaves the brief; a button still starts it."""
+        try:
+            text = self.read_at(sha, f'{S.jobs_dir}/{jid}/brief.md')
+        except Exception as x:
+            return f'cannot read its brief ({x})'
+        if text is None:
+            return f'no brief at {sha[:7]}'
+        tags = brief_tags(text)
+        return f'its brief has an open question tagged {and_list(sorted(set(tags)), "and")}' if tags else None
 
     def prune_tick(self):
         """Decision 13: `git worktree prune` once per tick, one line only when it removed something or failed; a dry run only says so."""

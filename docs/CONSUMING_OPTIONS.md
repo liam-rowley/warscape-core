@@ -80,3 +80,25 @@ Above 1 worker:
 - At the deadline every running module is killed with its process tree, and the gate names what had not finished and what never started.
 - Modules share the machine, so tests may not share anything fixed: a fixed path in the temp folder (`tests/test_acceptance.py` has one) is safe only while one module owns it, and a port or lock file the same.
 - To opt in, read the timings of a green run, put its slowest modules in `first`, keep `workers` at or under the runner's `cpu_count`, and run the suite a few times: a collision shows up as a flake.
+
+## What `--auto` starts (W46)
+
+`wsc jobs view --serve --auto` starts reviews and fixes. A repo opts in to builds and briefs in `[jobs]`; a button and `jobs next` read none of these keys, as a person is looking.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `auto_actions` | `["review", "fix"]` | What a tick starts, any of `fix`, `review`, `build`, `brief`. `build` and `brief` need `max_sessions` (C41): the loader refuses them without it. |
+| `auto_hold_phases` | `[]` | Phases never started, in any action. The phase is the main row's. One log line per id and reason. |
+| `auto_phase_order` | `[]` | Inside one action, these phases first in this order, then the rest by (phase, number). |
+| `auto_stop_finished` | `false` | At a full cap with a job waiting, the tick stops `done` rows that still hold a process, once, and uses the slots. Each stop is a log line; a dry run only logs. |
+
+Each tick goes through fixes, reviews, builds, then briefs, so a finished job never waits behind a new one. The cap goes to the first in that order. A build or a brief:
+- is read from `origin/main`, fetched each tick, never from the working tree; if that fails the tick starts neither, and goes on with fixes and reviews.
+- waits while main's CI is red or unknown, which fixes and reviews do not: the fix for a red main may be one of them.
+- is started once per pair of main's sha and the row's content. A session that ended without claiming is started again only when one of them moves, or by a restarted server.
+- claims nothing from the tick: the session's first command, `jobs next --id`, claims its branch, and a person who takes the job first wins the push.
+
+A build also obeys the `needs_pc` rules (one holder, `pc_state`, the acceptance lock), and waits while its brief has a question tagged `taste`, `risk` or `legal` under `## Open questions`, until the tag goes or a button starts it.
+A brief obeys neither: writing about a `needs_pc` row needs no PC, so a `<id>-brief` session does not hold it. A `later`, `blocked` or `done` row is never started.
+
+A `failed` or `stopped` row with a process counts against the cap and nothing stops it: a full cap names those rows in its log line and on the page. Stop them by hand with `claude stop <id>`.
