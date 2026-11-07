@@ -122,6 +122,22 @@ class ExeSignatures(unittest.TestCase):
         self.assertEqual(m[13:17], [False] * 4)     # jcc rel32
         self.assertTrue(m[-1])
 
+    def test_rel32_cut_by_the_window_edge_masks_the_bytes_present(self):
+        self.assertEqual(exe.mask_for(bytes([0x55, 0xE8, 1, 2]), 0x400000, 0x100000), [True, True, False, False])
+        self.assertEqual(exe.mask_for(bytes([0x55, 0x0F, 0x84, 1]), 0x400000, 0x100000), [True, True, True, False])
+        self.assertEqual(exe.mask_for(bytes([0x55, 0xE8]), 0x400000, 0x100000), [True, True])
+
+    def test_address_like_dword_across_an_operand_end_stays_fixed(self):
+        w = bytes([0xE8, 0xAA, 0xBB, 0xCC, 0x00, 0x00, 0x41, 0x00, 0x90])   # the dword at 4 reads 0x00410000: it starts inside the rel32
+        m = exe.mask_for(w, 0x400000, 0x100000)
+        self.assertEqual(m, [True, False, False, False, False, True, True, True, True])
+
+    def test_pattern_below_the_fixed_byte_floor_is_not_found(self):
+        pat = bytes([0x55, 0x8B, 0xEC, 0x83, 0xE8, 0, 0, 0, 0])
+        hay = b'\x90' * 3 + pat + b'\x90' * 3
+        self.assertEqual(exe.search(hay, pat, [True] * 5 + [False] * 4), [])
+        self.assertEqual(exe.search(hay, pat, [True] * exe.MIN_FIXED_BYTES + [False] * 3), [3])
+
     def test_search_masked(self):
         pat = bytes([0x55, 0x8B, 0xEC, 0x83, 0xE8, 0, 0, 0, 0, 0x5D])
         mask = [True] * 5 + [False] * 4 + [True]
@@ -132,10 +148,10 @@ class ExeSignatures(unittest.TestCase):
 
     def test_two_signatures_on_one_address_are_shared_not_unique(self):
         pe = {'sections': [{'raw_off': 0, 'raw_size': 64, 'rva': 0x1000}]}
-        hay = b'\x90' * 7 + bytes([0x55, 0x8B, 0xEC, 0x83, 0xE8, 1, 2, 3, 4, 0x5D]) + b'\xCC' * 8 + bytes([0x56, 0x57, 0x58, 0x59, 0x5A])
+        hay = b'\x90' * 7 + bytes([0x55, 0x8B, 0xEC, 0x83, 0xE8, 1, 2, 3, 4, 0x5D]) + b'\xCC' * 8 + bytes([0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C])
         sig = lambda name, va, pat: {'source': 'function', 'name': name, 'ref_va': va, 'pat': pat, 'mask': [True] * len(pat)}
         got = {h['name']: h['class'] for h in exe.run_search(
-            [sig('a', '0x10', hay[7:12]), sig('b', '0x20', hay[7:11]), sig('c', '0x30', hay[25:30]), sig('c guard', '0x30', hay[25:29])],
+            [sig('a', '0x10', hay[7:14]), sig('b', '0x20', hay[7:13]), sig('c', '0x30', hay[25:32]), sig('c guard', '0x30', hay[25:31])],
             hay, pe, hay, pe)}
         # a and b are different reference code on one address; c and its guard-site twin are one reference function
         self.assertEqual(got, {'a': 'shared', 'b': 'shared', 'c': 'unique', 'c guard': 'unique'})

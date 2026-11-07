@@ -184,6 +184,12 @@ def token_problem(t, known, gap_paths=(), evidence=False):
     return f'a path under the game folder "{first}" that is not a registry id; cite the id ({_cite(known, n)}) or list it under "## Registry gaps"'
 
 
+def _without_gap_path(line):
+    """A line under `## Registry gaps` as the found-path rule reads it: a bullet loses only its own `path:` field (what registry_gaps parses)."""
+    m = re.match(r'\s*[-*]\s+(.*)$', line)
+    return '; '.join(p for p in m.group(1).split(';') if p.split(':', 1)[0].strip().lower() != 'path') if m else line
+
+
 def found_path_problems(text, known):
     """Errors for one brief text: ['line N: `token` ...']. Empty when the brief cites only registry ids, repo paths and quoted text."""
     gaps, bad = registry_gaps(text)
@@ -195,9 +201,9 @@ def found_path_problems(text, known):
     for i, ln in enumerate(lines):
         if ln.startswith('#'):
             in_gaps = ln.strip().lower() == '## registry gaps'
-        if in_gaps or zones[i] == 'quoted':
+        if zones[i] == 'quoted':
             continue
-        for group in _tokens(ln):
+        for group in _tokens(_without_gap_path(ln) if in_gaps else ln):
             for t in group:
                 why = token_problem(t, known, gap_paths, zones[i] == 'evidence')
                 if why:

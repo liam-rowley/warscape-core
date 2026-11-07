@@ -88,6 +88,8 @@ def parse_header(b):
     if b[o:o + 4] == VERSION_MARKER:
         version = struct.unpack_from('<I', b, o + 4)[0]
         o += 8
+    if b[o] != 1:
+        raise ValueError(f'mark byte {b[o]} at {o}, want 1')
     return guid, version, b[o], struct.unpack_from('<I', b, o + 1)[0], o + 5
 
 
@@ -223,9 +225,17 @@ def readme(doc):
         out += ['Schema: **none committed yet**, so this is the index only (names, versions, row counts, hashes). '
                 f'Decode: `{SCHEMA_REL}` from `discovery/core/ron2json.py`, then `wsc discovery db`.', '']
     vers = collections.Counter(t['version'] for t in ts)
-    out += ['| Table files | Decoded byte-exact | Not decoded | Versions |', '|---|---|---|---|',
+    empty = [t for t in ts if t['rows'] == 0 and t['decoded'] is not False]
+    with_schema = [t['name'] for t in empty if t.get('schema_version') is not None]
+    without = [t['name'] for t in empty if t.get('schema_version') is None]
+    out += ['| Table files | Decoded byte-exact | Not decoded | Empty tables | Versions |', '|---|---|---|---|---|',
             f"| {len(ts)} | {len(ok) if src else '-'} | {len(bad) if src else '-'} | "
+            f"{len(empty)} ({len(with_schema)} with a schema, {len(without)} without) | "
             + ', '.join(f'v{v}: {n}' for v, n in sorted(vers.items(), key=lambda x: (x[0] is None, x[0] or 0))) + ' |', '']
+    if empty:
+        out += ['## Empty tables', '', 'Declared rows 0: nothing to decode, so a table here counts as decoded with or without a schema.', '']
+        out += [f"- {label}: {', '.join(sorted(names))}" for label, names in (('With a schema', with_schema), ('Without a schema', without)) if names]
+        out.append('')
     if bad:
         out += ['## Not decoded', '', '| Table | Version | Rows | Reason |', '|---|---|---|---|']
         out += [f"| {t['name']} | {t['version']} | {t['rows']} | {t['reason'][:110].replace('|', '/')} |" for t in bad]

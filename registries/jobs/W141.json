@@ -3,11 +3,13 @@
   "description": "Napoleon J95 (later sweep, audit R4; napoleon D56: one core PR, then a pin bump) found seven small faults in the discovery tools, core files since napoleon J64: exe.py mask_for and a fixed-byte floor in search; unclosed files in lua_api.py; db.py mark byte and empty tables in the README; discovery check reads used_by; briefpaths.py Registry gaps exempts only bullets' own path field; shader_catalog.py import skips a missing capture and density reads paths from a file; discovery ui fails loudly without the extract. Raised: napoleon J95, 2026-11-07",
   "title": "Discovery tools: seven small fixes for napoleon J95",
   "phase": 1,
-  "status": "queued",
+  "status": "done",
   "model": "opus",
   "needs_pc": false,
   "semver": "patch",
   "depends_on": [],
   "brief": "jobs/W141/brief.md",
+  "report": "jobs/W141/report.md",
+  "review": "jobs/W141/review.md",
   "area": "core"
 }

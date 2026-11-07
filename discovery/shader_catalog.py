@@ -391,13 +391,22 @@ def cmd_import(a):
     outdir = RUNS / a.run / 'captures'
     outdir.mkdir(parents=True, exist_ok=True)
     names = a.name or sorted(d.name for d in src.iterdir() if (d / 'frame.txt').exists())
+    missing, imported = [], 0
     for name in names:
         f = src / name / 'frame.txt'
+        if not f.exists():
+            missing.append(name)
+            continue
+        imported += 1
         s = summarize(f, ctabs)
         s['raw'] = {'file': str(f), 'bytes': f.stat().st_size, 'sha256': hashlib.sha256(f.read_bytes()).hexdigest()}
         (outdir / f'{name}.json').write_text(json.dumps(s, indent=1) + '\n', encoding='utf-8', newline='\n')
         print(f'import: {name}: {s["draws"]} draws, {len(s["passes"])} passes, {len(s["shaders"])} shaders')
     print(f'import: {new} new shaders, {len(ctabs)} in {SHADERS.relative_to(ROOT).as_posix()}/bin')
+    if missing:
+        print(f'import: {imported} of {len(names)} captures imported; no frame.txt in: {", ".join(missing)}')
+    if not imported:
+        sys.exit('shader_catalog import: no capture imported')
 
 
 def techniques(text):
@@ -727,6 +736,12 @@ def cmd_build(a):
     print(f'build: {cat["count"]} shaders, {cat["mapped"]} mapped to an fx source; classes {cat["by_class"]}')
 
 
+def listed_paths(name):
+    """The non-blank lines of a list file; `-` reads stdin."""
+    text = sys.stdin.read() if name == '-' else Path(name).read_text(encoding='utf-8')
+    return [x.strip() for x in text.splitlines() if x.strip()]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -734,12 +749,16 @@ def main(argv=None):
     p = sub.add_parser('fxmap'); p.add_argument('--fx', default=str(ROOT / 'extract' / paths.TARGET / 'data' / 'fx')); p.add_argument('--work', default=str(ROOT / '_scratch' / 'j8_fx'))
     p = sub.add_parser('build'); p.add_argument('--check', action='store_true')
     p = sub.add_parser('hash'); p.add_argument('file')
-    p = sub.add_parser('density'); p.add_argument('captures', nargs='+', help='capture summary files (harness/runs/<run>/captures/<name>.json)')
+    p = sub.add_parser('density'); p.add_argument('captures', nargs='*', help='capture summary files (harness/runs/<run>/captures/<name>.json)')
+    p.add_argument('--from-file', metavar='FILE', help='read capture paths from FILE, one per line (- for stdin): a Windows command line breaks past about 40 paths')
     a = ap.parse_args(argv)
     if a.cmd == 'hash':
         h, n = shader_hash(Path(a.file).read_bytes()); print(h, n); return
     if a.cmd == 'density':
-        for f in a.captures:
+        files = a.captures + (listed_paths(a.from_file) if a.from_file else [])
+        if not files:
+            p.error('pass capture files or --from-file FILE')
+        for f in files:
             print(Path(f).stem, json.dumps(shadow_density(json.loads(Path(f).read_text(encoding='utf-8')))))
         return
     {'import': cmd_import, 'fxmap': cmd_fxmap, 'build': cmd_build}[a.cmd](a)

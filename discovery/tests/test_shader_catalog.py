@@ -8,10 +8,14 @@ when: every gates run
 not-a-verb: a host test, which wsc.toml [tools] exempts
 """
 import _env  # noqa: F401  (sys.path and the fixture adapter)
+import contextlib
+import io
 import os
 import tempfile
 import unittest
 import warnings
+from pathlib import Path
+from unittest import mock
 
 import shader_catalog
 
@@ -66,6 +70,54 @@ OLD_SUMMARY = {
     'shaders': {'00000000000000aa': {'draws': 2, 'prims': 3, 'passes': [0], 'pairs': {'00000000000000aa/00000000000000bb': 2}, 'consts': None},
                 '00000000000000bb': {'draws': 2, 'prims': 3, 'passes': [0], 'pairs': {'00000000000000aa/00000000000000bb': 2}, 'consts': None}},
 }
+
+
+class ImportAndDensity(unittest.TestCase):
+    def run_import(self, d, names):
+        src = Path(d) / 'cap'
+        (src / 'shaders').mkdir(parents=True)
+        (src / 'good').mkdir()
+        (src / 'good' / 'frame.txt').write_text(HEAD, encoding='utf-8')
+        (src / 'bad').mkdir()
+        out = io.StringIO()
+        with mock.patch.object(shader_catalog, 'ROOT', Path(d)), mock.patch.object(shader_catalog, 'SHADERS', Path(d) / 'shaders'), \
+                mock.patch.object(shader_catalog, 'RUNS', Path(d) / 'runs'), contextlib.redirect_stdout(out):
+            shader_catalog.main(['import', '--run', 'r', '--captures', str(src), '--name', *names])
+        return out.getvalue()
+
+    def test_import_skips_and_lists_a_missing_capture(self):
+        with tempfile.TemporaryDirectory() as d:
+            text = self.run_import(d, ['good', 'bad'])
+            self.assertIn('1 of 2 captures imported; no frame.txt in: bad', text)
+            self.assertTrue((Path(d) / 'runs' / 'r' / 'captures' / 'good.json').exists())
+
+    def test_import_with_no_capture_exits_non_zero(self):
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(SystemExit) as e:
+            self.run_import(d, ['bad'])
+        self.assertTrue(e.exception.code)
+
+    def density(self, argv):
+        out = io.StringIO()
+        with mock.patch.object(shader_catalog, 'shadow_density', return_value={}), contextlib.redirect_stdout(out):
+            shader_catalog.main(['density', *argv])
+        return out.getvalue().splitlines()
+
+    def test_density_reads_paths_from_a_file_and_stdin(self):
+        with tempfile.TemporaryDirectory() as d:
+            caps = []
+            for i in range(100):
+                caps.append(os.path.join(d, f'c{i}.json'))
+                Path(caps[-1]).write_text('{}', encoding='utf-8')
+            listing = os.path.join(d, 'list.txt')
+            Path(listing).write_text('\n'.join(caps) + '\n\n', encoding='utf-8')
+            self.assertEqual(len(self.density(['--from-file', listing])), 100)
+            with mock.patch('sys.stdin', io.StringIO('\n'.join(caps[:3]))):
+                self.assertEqual(len(self.density(['--from-file', '-'])), 3)
+            self.assertEqual(len(self.density(caps[:2])), 2)
+
+    def test_density_with_no_paths_is_an_error(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            shader_catalog.main(['density'])
 
 
 class Summarize(unittest.TestCase):

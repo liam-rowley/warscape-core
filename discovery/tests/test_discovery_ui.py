@@ -1,11 +1,14 @@
 """Host tests for the J10 UI atlas: the script walk (ui_walk.py) and the atlas helpers (ui_atlas.py) on synthetic fixtures."""
+import contextlib
 import gzip
 import hashlib
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import _env  # noqa: F401,E402  (paths and the fixture adapter)
 ROOT = str(_env.CORE)
@@ -161,6 +164,72 @@ class Check(unittest.TestCase):
             bad = ui_atlas.problems(d, rows)
             self.assertTrue(any('battle.json.gz' in b for b in bad))
             self.assertTrue(any('ids differ' in b for b in bad))
+
+
+class UsedBy(unittest.TestCase):
+    """`wsc discovery check` reads used_by on the committed files: assets.jsonl beside the ui_elements rows."""
+
+    def atlas(self, d, used_by):
+        art = dict(path='root', states=[dict(images=['ui/a.tga', 'editor_path:x'])])
+        shas = {f: ui_atlas.jdump(os.path.join(d, f), dict(surfaces=dict(s={'components': [art]}) if f == 'common.json.gz' else {}), gz=True)
+                for f in ui_atlas.ATLAS_FILES}
+        with open(os.path.join(d, 'summary.json'), 'w', encoding='utf-8') as fh:
+            json.dump(dict(sha256=shas, units={'common.x': dict(screen='common.x', surface='s', piece=None)}), fh)
+        rows = os.path.join(d, 'ui_elements.jsonl')
+        with open(rows, 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps(dict(id='common.x', screen='common.x', status='atlas')) + '\n')
+        with open(os.path.join(d, 'assets.jsonl'), 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps(dict(id='ui/a.tga', **used_by)) + '\n' + json.dumps(dict(id='ui/b.tga')) + '\n')
+        return rows
+
+    def test_matching_pair_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(ui_atlas.problems(d, self.atlas(d, dict(used_by=['common.x']))), [])
+
+    def test_dangling_id_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad = ui_atlas.problems(d, self.atlas(d, dict(used_by=['common.gone'])))
+            self.assertEqual(len(bad), 1, bad)
+            self.assertIn('common.gone', bad[0])
+
+    def test_row_write_used_by_would_change_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad = ui_atlas.problems(d, self.atlas(d, {}))
+            self.assertEqual(len(bad), 1, bad)
+            self.assertIn('differs from the atlas', bad[0])
+
+
+class MissingExtract(unittest.TestCase):
+    def run_step(self, step, make=()):
+        with tempfile.TemporaryDirectory() as d:
+            games = os.path.join(d, 'games.json')
+            with open(games, 'w', encoding='utf-8') as fh:
+                json.dump(dict(extract='extract'), fh)
+            for sub in make:
+                os.makedirs(os.path.join(d, 'extract', ui_atlas.paths.TARGET, sub))
+                with open(os.path.join(d, 'extract', ui_atlas.paths.TARGET, sub, 'f'), 'w', encoding='utf-8') as fh:
+                    fh.write('x')
+            out = os.path.join(d, 'out')
+            err = io.StringIO()
+            db_rows = os.path.join(d, 'extract', ui_atlas.paths.TARGET, 'db')
+            with mock.patch.object(ui_atlas, 'ROOT', d), mock.patch.object(ui_atlas, 'DB_ROWS', db_rows), mock.patch.object(ui_atlas, 'OUT', out), \
+                    mock.patch.object(ui_atlas, 'Atlas', side_effect=AssertionError('read past the check')), contextlib.redirect_stderr(err):
+                rc = ui_atlas.main([step, '--games', games])
+            return rc, err.getvalue(), os.path.exists(out)
+
+    def test_no_extract_exits_non_zero_and_writes_nothing(self):
+        for step in ('art', 'live', 'all'):
+            rc, err, wrote = self.run_step(step)
+            self.assertEqual(rc, 1)
+            self.assertIn(os.path.join('extract', ui_atlas.paths.TARGET), err)
+            self.assertIn('pack_list.py --extract', err)
+            self.assertFalse(wrote)
+
+    def test_art_without_the_db_rows_names_the_db_verb(self):
+        rc, err, wrote = self.run_step('art', make=['data'])
+        self.assertEqual(rc, 1)
+        self.assertIn('discovery db', err)
+        self.assertFalse(wrote)
 
 
 class Live(unittest.TestCase):
