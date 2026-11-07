@@ -3,6 +3,10 @@
 What a game repo changes when its core pin crosses one of these versions. Moved out of [CONSUMING.md](CONSUMING.md) on 2026-11-04 to keep that doc
 under the 30 KB cap; the upgrade steps themselves are in CONSUMING.md "Upgrading and releasing".
 
+## Discovery tools: seven small fixes (W141)
+
+At the bump run `wsc discovery render`, then `wsc discovery check`, and commit what changes: the db README gains the empty tables column and section. `check` now also reads `used_by` on `registries/assets.jsonl`, so a row that differs from the atlas fails until `wsc discovery ui` has run. `exe.py` masks differently: re-running it changes the game's committed `exe.json` result (signature classes move; a game re-reads what it took from a hit that moved), and the render does not re-run it. `discovery ui` now exits 1 without the extract instead of writing empty results. This is no DLL or harness input, so a pin bump to it needs no acceptance run for it.
+
 ## The `tests` gate: timings, workers, headroom (W139)
 
 Nothing is required at the bump, and `workers` stays 1: one process per folder and the same result lines. Three things show up without a change: the log now has a `timing:` line and each folder's
